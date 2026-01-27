@@ -1,9 +1,10 @@
 """Integration tests with real Visium and CosMx datasets."""
 
+import tempfile
+from pathlib import Path
+
 import numpy as np
 import pytest
-from pathlib import Path
-import tempfile
 
 # Skip if dependencies not available
 pytest.importorskip("anndata")
@@ -169,9 +170,10 @@ class TestVisiumDataset:
     @pytest.mark.slow
     def test_nhood_enrichment_visium(self, visium_adata):
         """Test neighborhood enrichment on Visium with clusters."""
-        import spatialgpu as sp
-        import scanpy as sc
         import pandas as pd
+        import scanpy as sc
+
+        import spatialgpu as sp
 
         adata = visium_adata.copy()
 
@@ -374,8 +376,9 @@ class TestPerformance:
     @pytest.mark.slow
     def test_large_scale_knn(self):
         """Test kNN on large dataset (10k+ cells)."""
-        import spatialgpu as sp
         import time
+
+        import spatialgpu as sp
 
         n_cells = 10000
         coords = np.random.rand(n_cells, 2) * 1000
@@ -390,8 +393,9 @@ class TestPerformance:
     @pytest.mark.slow
     def test_large_scale_radius(self):
         """Test radius graph on large dataset."""
-        import spatialgpu as sp
         import time
+
+        import spatialgpu as sp
 
         n_cells = 10000
         coords = np.random.rand(n_cells, 2) * 1000
