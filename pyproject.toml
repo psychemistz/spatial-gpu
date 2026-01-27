@@ -1,0 +1,129 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "spatial-gpu"
+version = "0.1.0"
+description = "GPU-accelerated spatial omics analysis framework compatible with scverse ecosystem"
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.9"
+authors = [
+    { name = "Spatial-GPU Contributors" }
+]
+keywords = [
+    "spatial-omics",
+    "spatial-transcriptomics",
+    "single-cell",
+    "GPU",
+    "CUDA",
+    "bioinformatics",
+    "scverse",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "pandas>=1.3",
+    "anndata>=0.8",
+    "scanpy>=1.9",
+    "squidpy>=1.2",
+    "scikit-learn>=1.0",
+    "networkx>=2.6",
+    "tqdm>=4.62",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "cupy-cuda12x>=12.0",
+    "cuml-cu12>=24.0",
+    "cugraph-cu12>=24.0",
+    "cucim-cu12>=24.0",
+    "rmm-cu12>=24.0",
+]
+cuda11 = [
+    "cupy-cuda11x>=11.0",
+    "cuml-cu11>=24.0",
+    "cugraph-cu11>=24.0",
+]
+visualization = [
+    "napari>=0.4.17",
+    "matplotlib>=3.5",
+    "seaborn>=0.12",
+    "plotly>=5.10",
+]
+segmentation = [
+    "cellpose>=2.0",
+    "stardist>=0.8",
+    "torch>=2.0",
+    "torchvision>=0.15",
+]
+all = [
+    "spatial-gpu[cuda,visualization,segmentation]",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-benchmark>=4.0",
+    "black>=23.0",
+    "ruff>=0.1",
+    "mypy>=1.0",
+    "pre-commit>=3.0",
+]
+docs = [
+    "sphinx>=6.0",
+    "sphinx-rtd-theme>=1.2",
+    "myst-parser>=2.0",
+    "nbsphinx>=0.9",
+    "sphinx-autodoc-typehints>=1.23",
+]
+
+[project.urls]
+Documentation = "https://spatial-gpu.readthedocs.io"
+Repository = "https://github.com/spatial-gpu/spatial-gpu"
+Issues = "https://github.com/spatial-gpu/spatial-gpu/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["spatialgpu"]
+
+[tool.black]
+line-length = 88
+target-version = ["py39", "py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 88
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # Pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --cov=spatialgpu --cov-report=term-missing"
