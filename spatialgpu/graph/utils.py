@@ -181,6 +181,7 @@ def _compute_laplacian_cpu(
 ) -> sparse.csr_matrix:
     """CPU implementation of graph Laplacian."""
     from scipy.sparse.csgraph import laplacian
+
     return laplacian(adj, normed=normalized)
 
 
@@ -189,7 +190,6 @@ def _compute_laplacian_gpu(
     normalized: bool,
 ) -> sparse.csr_matrix:
     """GPU implementation of graph Laplacian."""
-    from spatialgpu.core.array_utils import to_gpu, to_cpu
     import cupy as cp
     import cupyx.scipy.sparse as cp_sparse
 
@@ -204,7 +204,10 @@ def _compute_laplacian_gpu(
         d_inv_sqrt = 1.0 / cp.sqrt(cp.maximum(degrees, 1))
         d_inv_sqrt_diag = cp_sparse.diags(d_inv_sqrt)
 
-        laplacian = cp_sparse.eye(adj_gpu.shape[0]) - d_inv_sqrt_diag @ adj_gpu @ d_inv_sqrt_diag
+        laplacian = (
+            cp_sparse.eye(adj_gpu.shape[0])
+            - d_inv_sqrt_diag @ adj_gpu @ d_inv_sqrt_diag
+        )
     else:
         # Unnormalized Laplacian: D - A
         D = cp_sparse.diags(degrees)
@@ -269,6 +272,7 @@ def graph_connected_components(
         Component label for each node.
     """
     from scipy.sparse.csgraph import connected_components
+
     return connected_components(adj, directed=False)
 
 

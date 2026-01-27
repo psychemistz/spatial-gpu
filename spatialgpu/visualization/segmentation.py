@@ -4,7 +4,8 @@ Segmentation visualization functions.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
@@ -89,10 +90,7 @@ def segmentation_overlay(
         # Generate random colors
         hues = np.linspace(0, 1, n_cells, endpoint=False)
         np.random.shuffle(hues)
-        colors = np.array([
-            hsv_to_rgb([h, 0.8, 0.9])
-            for h in hues
-        ])
+        colors = np.array([hsv_to_rgb([h, 0.8, 0.9]) for h in hues])
 
     # Create colored mask
     overlay = image.copy()
@@ -110,6 +108,7 @@ def segmentation_overlay(
     # Add boundaries
     if show_boundaries:
         from spatialgpu.segmentation.utils import compute_boundaries
+
         boundaries = compute_boundaries(masks)
         for c in range(3):
             overlay[:, :, c] = np.where(

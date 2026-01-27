@@ -5,9 +5,8 @@ Data readers for various spatial omics platforms.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
-import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
@@ -95,7 +94,6 @@ def read_xenium(
     --------
     >>> adata = sp.io.read_xenium("path/to/xenium_output")
     """
-    import anndata as ad
     import scanpy as sc
 
     path = Path(path)
@@ -192,9 +190,17 @@ def read_cosmx(
         expr_df = expr_df[expr_df["fov"].isin(fov)]
 
     # Extract cell IDs and gene names
-    id_cols = ["cell_ID", "fov", "CenterX_local_px", "CenterY_local_px",
-               "CenterX_global_px", "CenterY_global_px"]
-    gene_cols = [c for c in expr_df.columns if c not in id_cols and c not in ["cell", "Cell"]]
+    id_cols = [
+        "cell_ID",
+        "fov",
+        "CenterX_local_px",
+        "CenterY_local_px",
+        "CenterX_global_px",
+        "CenterY_global_px",
+    ]
+    gene_cols = [
+        c for c in expr_df.columns if c not in id_cols and c not in ["cell", "Cell"]
+    ]
 
     # Create count matrix
     X = expr_df[gene_cols].values

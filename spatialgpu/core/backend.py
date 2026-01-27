@@ -34,7 +34,7 @@ class GPUInfo:
     device_id: int
     name: str
     total_memory: int  # bytes
-    free_memory: int   # bytes
+    free_memory: int  # bytes
     compute_capability: tuple[int, int]
 
     @property
@@ -123,7 +123,11 @@ class Backend:
             mem_info = device.mem_info
             self._gpu_info = GPUInfo(
                 device_id=device.id,
-                name=props["name"].decode() if isinstance(props["name"], bytes) else props["name"],
+                name=(
+                    props["name"].decode()
+                    if isinstance(props["name"], bytes)
+                    else props["name"]
+                ),
                 total_memory=mem_info[1],
                 free_memory=mem_info[0],
                 compute_capability=(props["major"], props["minor"]),
@@ -181,9 +185,12 @@ class Backend:
             raise RuntimeError("No GPU available")
 
         import cupy as cp
+
         device_count = cp.cuda.runtime.getDeviceCount()
         if value < 0 or value >= device_count:
-            raise ValueError(f"Invalid device ID {value}. Available: 0-{device_count-1}")
+            raise ValueError(
+                f"Invalid device ID {value}. Available: 0-{device_count-1}"
+            )
 
         self._device_id = value
         cp.cuda.Device(value).use()
@@ -213,9 +220,13 @@ class Backend:
                 )
             self._backend_type = BackendType.CUDA
         elif backend == "auto":
-            self._backend_type = BackendType.CUDA if self._gpu_available else BackendType.CPU
+            self._backend_type = (
+                BackendType.CUDA if self._gpu_available else BackendType.CPU
+            )
         else:
-            raise ValueError(f"Unknown backend: {backend}. Use 'cpu', 'cuda', or 'auto'")
+            raise ValueError(
+                f"Unknown backend: {backend}. Use 'cpu', 'cuda', or 'auto'"
+            )
 
     @property
     def xp(self):
@@ -230,6 +241,7 @@ class Backend:
         if self._backend_type == BackendType.CUDA:
             if self._cupy is None:
                 import cupy as cp
+
                 self._cupy = cp
             return self._cupy
         return np
@@ -246,8 +258,10 @@ class Backend:
         """
         if self._backend_type == BackendType.CUDA:
             import cupyx.scipy
+
             return cupyx.scipy
         import scipy
+
         return scipy
 
     def get_cuml(self):
@@ -257,11 +271,12 @@ class Backend:
         if self._cuml is None:
             try:
                 import cuml
+
                 self._cuml = cuml
             except ImportError:
                 raise ImportError(
                     "cuML not installed. Install with: pip install spatial-gpu[cuda]"
-                )
+                ) from None
         return self._cuml
 
     def get_cugraph(self):
@@ -271,11 +286,12 @@ class Backend:
         if self._cugraph is None:
             try:
                 import cugraph
+
                 self._cugraph = cugraph
             except ImportError:
                 raise ImportError(
                     "cuGraph not installed. Install with: pip install spatial-gpu[cuda]"
-                )
+                ) from None
         return self._cugraph
 
     def memory_info(self) -> dict[str, Any]:
@@ -291,6 +307,7 @@ class Backend:
             return {"total": 0, "free": 0, "used": 0, "backend": "cpu"}
 
         import cupy as cp
+
         device = cp.cuda.Device(self._device_id)
         free, total = device.mem_info
 
@@ -308,6 +325,7 @@ class Backend:
         """Clear GPU memory cache."""
         if self._gpu_available and self._cupy is not None:
             import cupy as cp
+
             cp.get_default_memory_pool().free_all_blocks()
             cp.get_default_pinned_memory_pool().free_all_blocks()
 

@@ -6,16 +6,15 @@ Provides publication-quality plots for spatial omics data.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, Sequence, Union
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal, Optional
 
 import numpy as np
 
 if TYPE_CHECKING:
     import anndata as ad
-    import matplotlib.pyplot as plt
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
-    from numpy.typing import NDArray
 
 
 def spatial_scatter(
@@ -77,6 +76,7 @@ def spatial_scatter(
     >>> sp.viz.spatial_scatter(adata, color="GAPDH")
     """
     import matplotlib.pyplot as plt
+
     from spatialgpu.graph.utils import get_spatial_coords
 
     if ax is None:
@@ -95,12 +95,13 @@ def spatial_scatter(
             c_numeric = c.cat.codes.values
 
             if palette is None:
-                palette = plt.cm.tab20.colors[:len(categories)]
+                palette = plt.cm.tab20.colors[: len(categories)]
 
             colors = [palette[i % len(palette)] for i in c_numeric]
 
             scatter = ax.scatter(
-                coords[:, 0], coords[:, 1],
+                coords[:, 0],
+                coords[:, 1],
                 c=colors,
                 s=spot_size,
                 alpha=alpha,
@@ -117,7 +118,8 @@ def spatial_scatter(
         else:
             # Continuous
             scatter = ax.scatter(
-                coords[:, 0], coords[:, 1],
+                coords[:, 0],
+                coords[:, 1],
                 c=c,
                 s=spot_size,
                 alpha=alpha,
@@ -136,7 +138,8 @@ def spatial_scatter(
             c = adata.X[:, gene_idx].flatten()
 
         scatter = ax.scatter(
-            coords[:, 0], coords[:, 1],
+            coords[:, 0],
+            coords[:, 1],
             c=c,
             s=spot_size,
             alpha=alpha,
@@ -151,7 +154,8 @@ def spatial_scatter(
 
     if color is None:
         ax.scatter(
-            coords[:, 0], coords[:, 1],
+            coords[:, 0],
+            coords[:, 1],
             s=spot_size,
             alpha=alpha,
             **kwargs,
@@ -235,7 +239,8 @@ def spatial_heatmap(
         ax = axes[row, col]
 
         spatial_scatter(
-            adata, color=gene,
+            adata,
+            color=gene,
             spatial_key=spatial_key,
             spot_size=spot_size,
             cmap=cmap,

@@ -6,7 +6,7 @@ Provides 10-100x speedup over Squidpy for large datasets.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal, Optional
 
 import numpy as np
 from scipy import sparse
@@ -86,9 +86,9 @@ def spatial_neighbors(
         adata = adata.copy()
 
     coords = get_spatial_coords(adata, spatial_key=spatial_key)
-    n_cells = coords.shape[0]
+    coords.shape[0]
 
-    backend = get_backend()
+    get_backend()
 
     # Build graph based on method
     if radius is not None:
@@ -165,7 +165,6 @@ def knn_graph(
         Distance matrix (sparse CSR)
     """
     from spatialgpu.core.backend import get_backend
-    from spatialgpu.core.array_utils import to_gpu, to_cpu
 
     backend = get_backend()
     n_cells = coords.shape[0]
@@ -185,13 +184,11 @@ def _knn_graph_gpu(
     set_diag: bool = False,
 ) -> tuple[sparse.csr_matrix, sparse.csr_matrix]:
     """GPU implementation using cuML."""
+    from spatialgpu.core.array_utils import to_cpu, to_gpu
     from spatialgpu.core.backend import get_backend
-    from spatialgpu.core.array_utils import to_gpu, to_cpu
 
     backend = get_backend()
     cuml = backend.get_cuml()
-
-    import cupy as cp
 
     n_cells = coords.shape[0]
 
@@ -333,10 +330,10 @@ def _radius_graph_gpu(
     set_diag: bool = False,
 ) -> tuple[sparse.csr_matrix, sparse.csr_matrix]:
     """GPU implementation of radius graph."""
+    from spatialgpu.core.array_utils import to_cpu, to_gpu
     from spatialgpu.core.backend import get_backend
-    from spatialgpu.core.array_utils import to_gpu, to_cpu
 
-    backend = get_backend()
+    get_backend()
     import cupy as cp
 
     n_cells = coords.shape[0]
@@ -358,7 +355,7 @@ def _radius_graph_gpu(
 
             # Compute distances for this chunk pair
             diff = chunk_i[:, None, :] - chunk_j[None, :, :]
-            dist_chunk = cp.sqrt(cp.sum(diff ** 2, axis=2))
+            dist_chunk = cp.sqrt(cp.sum(diff**2, axis=2))
 
             # Find pairs within radius
             mask = (dist_chunk <= radius) & (dist_chunk > 0)
@@ -401,9 +398,9 @@ def _radius_graph_cpu(
     set_diag: bool = False,
 ) -> tuple[sparse.csr_matrix, sparse.csr_matrix]:
     """CPU implementation of radius graph."""
-    from sklearn.neighbors import radius_neighbors_graph, NearestNeighbors
+    from sklearn.neighbors import NearestNeighbors
 
-    n_cells = coords.shape[0]
+    coords.shape[0]
 
     nn = NearestNeighbors(radius=radius, metric=metric, algorithm="auto")
     nn.fit(coords)
@@ -514,7 +511,7 @@ def _cosine_transform(
     # Compute cosine similarities for connected pairs
     cos_sims = []
     for i, j in zip(rows, cols):
-        sim = cosine_similarity(coords[i:i+1], coords[j:j+1])[0, 0]
+        sim = cosine_similarity(coords[i : i + 1], coords[j : j + 1])[0, 0]
         cos_sims.append((sim + 1) / 2)  # Scale to [0, 1]
 
     return sparse.csr_matrix(

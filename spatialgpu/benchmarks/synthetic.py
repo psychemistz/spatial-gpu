@@ -22,7 +22,7 @@ def generate_synthetic_data(
     extent: tuple[float, float] = (0, 1000),
     sparsity: float = 0.9,
     seed: Optional[int] = None,
-) -> "ad.AnnData":
+) -> ad.AnnData:
     """
     Generate synthetic spatial data for benchmarking.
 
@@ -78,10 +78,13 @@ def generate_synthetic_data(
     )
 
     # Create observation dataframe
-    obs = pd.DataFrame({
-        "cluster": pd.Categorical(clusters),
-        "total_counts": np.array(X.sum(axis=1)).flatten(),
-    }, index=[f"cell_{i}" for i in range(n_cells)])
+    obs = pd.DataFrame(
+        {
+            "cluster": pd.Categorical(clusters),
+            "total_counts": np.array(X.sum(axis=1)).flatten(),
+        },
+        index=[f"cell_{i}" for i in range(n_cells)],
+    )
 
     # Create variable dataframe
     var = pd.DataFrame(
@@ -104,7 +107,7 @@ def generate_spatial_clusters(
     extent: tuple[float, float] = (0, 1000),
     noise: float = 0.1,
     seed: Optional[int] = None,
-) -> "ad.AnnData":
+) -> ad.AnnData:
     """
     Generate synthetic data with spatially coherent clusters.
 
@@ -197,17 +200,18 @@ def generate_spatial_clusters(
         )
 
         # Low background expression for other genes
-        counts[mask] += np.random.negative_binomial(
-            1, 0.8, size=(mask.sum(), n_genes)
-        )
+        counts[mask] += np.random.negative_binomial(1, 0.8, size=(mask.sum(), n_genes))
 
     X = sparse.csr_matrix(counts)
 
     # Create AnnData
-    obs = pd.DataFrame({
-        "cluster": pd.Categorical(clusters),
-        "total_counts": np.array(X.sum(axis=1)).flatten(),
-    }, index=[f"cell_{i}" for i in range(n_cells)])
+    obs = pd.DataFrame(
+        {
+            "cluster": pd.Categorical(clusters),
+            "total_counts": np.array(X.sum(axis=1)).flatten(),
+        },
+        index=[f"cell_{i}" for i in range(n_cells)],
+    )
 
     var = pd.DataFrame(
         {"gene_name": [f"gene_{i}" for i in range(n_genes)]},
@@ -283,7 +287,7 @@ def generate_image_with_cells(
         # Check for overlap
         overlaps = False
         for pos, rad in zip(positions, radii):
-            dist = np.sqrt((y - pos[0])**2 + (x - pos[1])**2)
+            dist = np.sqrt((y - pos[0]) ** 2 + (x - pos[1]) ** 2)
             if dist < r + rad + 5:  # 5 pixel buffer
                 overlaps = True
                 break
@@ -297,7 +301,7 @@ def generate_image_with_cells(
 
     for idx, ((cy, cx), r) in enumerate(zip(positions, radii), start=1):
         # Create circular mask
-        dist = np.sqrt((yy - cy)**2 + (xx - cx)**2)
+        dist = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
         cell_mask = dist <= r
 
         # Add to masks

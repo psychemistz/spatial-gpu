@@ -7,10 +7,9 @@ to segmented cells with GPU acceleration.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
-from tqdm import tqdm
 
 if TYPE_CHECKING:
     import anndata as ad
@@ -101,8 +100,8 @@ def _assign_transcripts_gpu(
     y: NDArray,
 ) -> NDArray:
     """GPU implementation of transcript assignment."""
-    from spatialgpu.core.array_utils import to_gpu, to_cpu
-    import cupy as cp
+
+    from spatialgpu.core.array_utils import to_cpu, to_gpu
 
     masks_gpu = to_gpu(masks)
     x_gpu = to_gpu(x)
@@ -168,8 +167,11 @@ def assign_transcripts_to_cells(
 
     # Assign transcripts to cells
     assigned = segment_transcripts(
-        transcripts, segmentation,
-        x_col=x_col, y_col=y_col, gene_col=gene_col,
+        transcripts,
+        segmentation,
+        x_col=x_col,
+        y_col=y_col,
+        gene_col=gene_col,
         pixel_size=pixel_size,
     )
 
@@ -224,25 +226,20 @@ def assign_transcripts_to_cells(
     # Add spatial coordinates (cell centroids)
     centroids = segmentation.centroids
     cell_id_to_centroid = {
-        cid: centroids[i]
-        for i, cid in enumerate(segmentation.cell_ids)
+        cid: centroids[i] for i, cid in enumerate(segmentation.cell_ids)
     }
 
-    spatial_coords = np.array([
-        cell_id_to_centroid.get(cid, [np.nan, np.nan])
-        for cid in kept_cell_ids
-    ])
+    spatial_coords = np.array(
+        [cell_id_to_centroid.get(cid, [np.nan, np.nan]) for cid in kept_cell_ids]
+    )
 
     adata_new.obsm[key_added] = spatial_coords
 
     # Add cell areas
     cell_id_to_area = {
-        cid: segmentation.areas[i]
-        for i, cid in enumerate(segmentation.cell_ids)
+        cid: segmentation.areas[i] for i, cid in enumerate(segmentation.cell_ids)
     }
-    adata_new.obs["cell_area"] = [
-        cell_id_to_area.get(cid, 0) for cid in kept_cell_ids
-    ]
+    adata_new.obs["cell_area"] = [cell_id_to_area.get(cid, 0) for cid in kept_cell_ids]
 
     return adata_new
 
@@ -275,15 +272,16 @@ def transcript_density(
     array
         Transcript density (count/area) per cell ID.
     """
-    from spatialgpu.segmentation.utils import compute_areas
 
     # Get segmentation result
     segmentation = SegmentationResult.from_masks(masks)
 
     # Assign transcripts
     assigned = segment_transcripts(
-        transcripts, segmentation,
-        x_col=x_col, y_col=y_col,
+        transcripts,
+        segmentation,
+        x_col=x_col,
+        y_col=y_col,
         pixel_size=pixel_size,
     )
 

@@ -11,6 +11,7 @@ import pandas as pd
 
 if TYPE_CHECKING:
     import anndata as ad
+    import spatialdata as sd
 
 
 def write_anndata(
@@ -68,7 +69,6 @@ def write_spatial_csv(
     --------
     >>> sp.io.write_spatial_csv(adata, "output/", prefix="my_sample")
     """
-    import numpy as np
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -91,7 +91,9 @@ def write_spatial_csv(
         coords_df = pd.DataFrame(
             adata.obsm[spatial_key],
             index=adata.obs_names,
-            columns=["x", "y"] if adata.obsm[spatial_key].shape[1] == 2 else ["x", "y", "z"],
+            columns=(
+                ["x", "y"] if adata.obsm[spatial_key].shape[1] == 2 else ["x", "y", "z"]
+            ),
         )
         coords_df.to_csv(output_dir / f"{prefix}_coordinates.csv")
 
@@ -105,7 +107,7 @@ def export_to_spatialdata(
     spatial_key: str = "spatial",
     image: Optional[any] = None,
     masks: Optional[any] = None,
-) -> "SpatialData":
+) -> sd.SpatialData:
     """
     Export to SpatialData format.
 
@@ -131,11 +133,11 @@ def export_to_spatialdata(
     """
     try:
         import spatialdata as sd
-        from spatialdata.models import TableModel, ShapesModel, PointsModel
+        from spatialdata.models import ShapesModel, TableModel
     except ImportError:
         raise ImportError(
             "spatialdata not installed. Install with: pip install spatialdata"
-        )
+        ) from None
 
     import geopandas as gpd
     from shapely.geometry import Point
@@ -168,11 +170,13 @@ def export_to_spatialdata(
     # Add image if provided
     if image is not None:
         from spatialdata.models import Image2DModel
+
         elements["image"] = Image2DModel.parse(image)
 
     # Add masks if provided
     if masks is not None:
         from spatialdata.models import Labels2DModel
+
         elements["masks"] = Labels2DModel.parse(masks)
 
     return sd.SpatialData(**elements)

@@ -8,9 +8,9 @@ tiled processing, and multi-model support.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
 from tqdm import tqdm
@@ -56,12 +56,14 @@ class SegmentationResult:
     metadata: dict = field(default_factory=dict)
 
     @classmethod
-    def from_masks(cls, masks: NDArray, model_name: str = "unknown") -> SegmentationResult:
+    def from_masks(
+        cls, masks: NDArray, model_name: str = "unknown"
+    ) -> SegmentationResult:
         """Create SegmentationResult from mask array."""
         from spatialgpu.segmentation.utils import (
-            compute_centroids,
             compute_areas,
             compute_boundaries,
+            compute_centroids,
         )
 
         cell_ids = np.unique(masks)
@@ -108,6 +110,7 @@ class BaseSegmentationModel(ABC):
         if device == "auto":
             try:
                 import torch
+
                 return "cuda" if torch.cuda.is_available() else "cpu"
             except ImportError:
                 return "cpu"
@@ -272,9 +275,7 @@ class CellSegmenter:
 
         if model_name.lower() not in models:
             available = ", ".join(models.keys())
-            raise ValueError(
-                f"Unknown model: {model_name}. Available: {available}"
-            )
+            raise ValueError(f"Unknown model: {model_name}. Available: {available}")
 
         return models[model_name.lower()](device=device, **kwargs)
 
@@ -390,7 +391,7 @@ class CellSegmenter:
             )
 
         for i in iterator:
-            batch = images[i:i + batch_size]
+            batch = images[i : i + batch_size]
             for img in batch:
                 result = self.segment(img, diameter=diameter, **kwargs)
                 results.append(result)

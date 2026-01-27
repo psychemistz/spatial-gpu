@@ -20,23 +20,23 @@ centrality_scores
     Graph centrality measures
 """
 
-from spatialgpu.graph.neighbors import (
-    spatial_neighbors,
-    knn_graph,
-    radius_graph,
-    delaunay_graph,
-)
 from spatialgpu.graph.analysis import (
-    nhood_enrichment,
+    centrality_scores,
     co_occurrence,
     interaction_matrix,
-    centrality_scores,
+    nhood_enrichment,
+)
+from spatialgpu.graph.neighbors import (
+    delaunay_graph,
+    knn_graph,
+    radius_graph,
+    spatial_neighbors,
 )
 from spatialgpu.graph.ripley import ripley
 from spatialgpu.graph.utils import (
-    get_spatial_coords,
     adjacency_to_edge_list,
     edge_list_to_adjacency,
+    get_spatial_coords,
 )
 
 __all__ = [

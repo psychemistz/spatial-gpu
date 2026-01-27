@@ -6,14 +6,14 @@ implementations, and against other libraries like Squidpy.
 """
 
 from spatialgpu.benchmarks.runner import (
-    benchmark,
-    compare_backends,
-    benchmark_suite,
     BenchmarkResult,
+    benchmark,
+    benchmark_suite,
+    compare_backends,
 )
 from spatialgpu.benchmarks.synthetic import (
-    generate_synthetic_data,
     generate_spatial_clusters,
+    generate_synthetic_data,
 )
 
 __all__ = [

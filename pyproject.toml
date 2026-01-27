@@ -104,6 +104,8 @@ target-version = ["py39", "py310", "py311", "py312"]
 
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -116,6 +118,9 @@ select = [
 ignore = [
     "E501",  # line too long (handled by black)
     "B008",  # do not perform function calls in argument defaults
+    "UP007", # Use X | Y for union types (needs Python 3.10+)
+    "UP035", # Import from collections.abc (keep typing for compatibility)
+    "UP045", # Use X | None for Optional (needs Python 3.10+)
 ]
 
 [tool.mypy]

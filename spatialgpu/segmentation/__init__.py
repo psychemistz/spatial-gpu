@@ -24,9 +24,13 @@ evaluate_segmentation
 """
 
 from spatialgpu.segmentation.core import (
+    CellSegmenter,
     segment_cells,
     segment_nuclei,
-    CellSegmenter,
+)
+from spatialgpu.segmentation.evaluation import (
+    compute_segmentation_metrics,
+    evaluate_segmentation,
 )
 from spatialgpu.segmentation.models import (
     CellposeModel,
@@ -34,12 +38,8 @@ from spatialgpu.segmentation.models import (
     get_available_models,
 )
 from spatialgpu.segmentation.transcript import (
-    segment_transcripts,
     assign_transcripts_to_cells,
-)
-from spatialgpu.segmentation.evaluation import (
-    evaluate_segmentation,
-    compute_segmentation_metrics,
+    segment_transcripts,
 )
 
 __all__ = [

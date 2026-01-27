@@ -7,13 +7,14 @@ with automatic backend detection.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Union, overload
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 from scipy import sparse
 
 if TYPE_CHECKING:
-    from numpy.typing import ArrayLike, NDArray
+    import cupy as cp
+    from numpy.typing import ArrayLike
 
 # Type alias for arrays that can be on CPU or GPU
 Array = Union[np.ndarray, "cp.ndarray"]
@@ -42,6 +43,7 @@ def get_array_module(x: ArrayLike):
     """
     try:
         import cupy as cp
+
         return cp.get_array_module(x)
     except ImportError:
         return np
@@ -63,6 +65,7 @@ def is_gpu_array(x: ArrayLike) -> bool:
     """
     try:
         import cupy as cp
+
         return isinstance(x, cp.ndarray)
     except ImportError:
         return False
@@ -182,6 +185,7 @@ def to_cpu(
     """
     if is_gpu_array(x):
         import cupy as cp
+
         arr = cp.asnumpy(x)
     elif sparse.issparse(x):
         arr = x.toarray()
@@ -319,6 +323,7 @@ def sparse_to_dense_chunked(
 
     if backend.is_gpu_active:
         import cupy as cp
+
         xp = cp
     else:
         xp = np

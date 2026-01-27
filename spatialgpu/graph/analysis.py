@@ -7,7 +7,8 @@ with significant speedups on GPU.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, Sequence, Union
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from scipy import sparse
@@ -15,7 +16,6 @@ from tqdm import tqdm
 
 if TYPE_CHECKING:
     import anndata as ad
-    import pandas as pd
     from numpy.typing import NDArray
 
 
@@ -76,7 +76,7 @@ def nhood_enrichment(
         cluster_idx = np.array([categories.index(c) for c in clusters])
 
     n_clusters = len(categories)
-    n_cells = len(cluster_idx)
+    len(cluster_idx)
 
     # Get connectivity matrix
     adj = adata.obsp[connectivity_key]
@@ -113,16 +113,16 @@ def _nhood_enrichment_gpu(
     show_progress: bool,
 ) -> tuple[NDArray, NDArray]:
     """GPU implementation of neighborhood enrichment."""
+    from spatialgpu.core.array_utils import to_cpu, to_gpu
     from spatialgpu.core.backend import get_backend
-    from spatialgpu.core.array_utils import to_gpu, to_cpu
 
-    backend = get_backend()
+    get_backend()
     import cupy as cp
 
     if seed is not None:
         cp.random.seed(seed)
 
-    n_cells = len(cluster_idx)
+    len(cluster_idx)
 
     # Transfer to GPU
     cluster_idx_gpu = to_gpu(cluster_idx.astype(np.int32))
@@ -197,7 +197,9 @@ def _compute_interaction_count_gpu(
         "interaction_kernel",
     )
 
-    interaction_kernel(adj_indices, adj_indptr, cluster_idx, n_clusters, count, size=n_cells)
+    interaction_kernel(
+        adj_indices, adj_indptr, cluster_idx, n_clusters, count, size=n_cells
+    )
 
     return count
 
@@ -214,7 +216,7 @@ def _nhood_enrichment_cpu(
     if seed is not None:
         np.random.seed(seed)
 
-    n_cells = len(cluster_idx)
+    len(cluster_idx)
 
     # Compute observed counts
     count = _compute_interaction_count_cpu(adj, cluster_idx, n_clusters)
@@ -352,8 +354,9 @@ def _co_occurrence_gpu(
     show_progress: bool,
 ) -> NDArray:
     """GPU implementation of co-occurrence."""
-    from spatialgpu.core.array_utils import to_gpu, to_cpu
     import cupy as cp
+
+    from spatialgpu.core.array_utils import to_cpu, to_gpu
 
     n_cells = len(cluster_idx)
     n_bins = len(bins) - 1
@@ -379,7 +382,7 @@ def _co_occurrence_gpu(
 
         # Compute pairwise distances
         diff = chunk_coords[:, None, :] - coords_gpu[None, :, :]
-        dists = cp.sqrt(cp.sum(diff ** 2, axis=2))
+        dists = cp.sqrt(cp.sum(diff**2, axis=2))
 
         # Bin distances and count co-occurrences
         for b in range(n_bins):
@@ -387,9 +390,8 @@ def _co_occurrence_gpu(
 
             for ci in range(n_clusters):
                 for cj in range(n_clusters):
-                    cluster_mask = (
-                        (chunk_clusters[:, None] == ci) &
-                        (cluster_idx_gpu[None, :] == cj)
+                    cluster_mask = (chunk_clusters[:, None] == ci) & (
+                        cluster_idx_gpu[None, :] == cj
                     )
                     occurrence[ci, cj, b] += cp.sum(mask & cluster_mask)
 
@@ -434,9 +436,8 @@ def _co_occurrence_cpu(
 
             for ci in range(n_clusters):
                 for cj in range(n_clusters):
-                    cluster_mask = (
-                        (cluster_idx[i:end_i, None] == ci) &
-                        (cluster_idx[None, :] == cj)
+                    cluster_mask = (cluster_idx[i:end_i, None] == ci) & (
+                        cluster_idx[None, :] == cj
                     )
                     occurrence[ci, cj, b] += np.sum(mask & cluster_mask)
 
@@ -541,10 +542,11 @@ def centrality_scores(
     If `copy=True`, returns dict of score arrays.
     Otherwise stores in `adata.uns[f'{cluster_key}_centrality_scores']`.
     """
-    from spatialgpu.core.backend import get_backend
     import networkx as nx
 
-    backend = get_backend()
+    from spatialgpu.core.backend import get_backend
+
+    get_backend()
 
     adj = adata.obsp[connectivity_key]
 
@@ -567,25 +569,23 @@ def centrality_scores(
 
     if "degree" in score_types:
         degree = np.array([d for n, d in G.degree()])
-        scores["degree"] = np.array([
-            np.mean(degree[cluster_idx == c]) for c in range(n_clusters)
-        ])
+        scores["degree"] = np.array(
+            [np.mean(degree[cluster_idx == c]) for c in range(n_clusters)]
+        )
 
     if "closeness" in score_types:
         closeness = np.array(list(nx.closeness_centrality(G).values()))
-        scores["closeness"] = np.array([
-            np.mean(closeness[cluster_idx == c]) for c in range(n_clusters)
-        ])
+        scores["closeness"] = np.array(
+            [np.mean(closeness[cluster_idx == c]) for c in range(n_clusters)]
+        )
 
     if "betweenness" in score_types:
         # Sample for large graphs
         k = min(1000, n_cells)
-        betweenness = np.array(list(
-            nx.betweenness_centrality(G, k=k).values()
-        ))
-        scores["betweenness"] = np.array([
-            np.mean(betweenness[cluster_idx == c]) for c in range(n_clusters)
-        ])
+        betweenness = np.array(list(nx.betweenness_centrality(G, k=k).values()))
+        scores["betweenness"] = np.array(
+            [np.mean(betweenness[cluster_idx == c]) for c in range(n_clusters)]
+        )
 
     if copy:
         return scores

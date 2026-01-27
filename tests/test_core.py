@@ -128,12 +128,12 @@ class TestArrayUtils:
 
         x = np.random.randn(1000, 10)
         result = chunked_operation(
-            lambda c: c ** 2,
+            lambda c: c**2,
             x,
             chunk_size=100,
         )
 
-        np.testing.assert_array_almost_equal(result, x ** 2)
+        np.testing.assert_array_almost_equal(result, x**2)
 
 
 class TestConfig:

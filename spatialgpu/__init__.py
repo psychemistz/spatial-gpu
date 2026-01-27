@@ -12,22 +12,18 @@ Key Features:
 - Full compatibility with AnnData and SpatialData formats
 """
 
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("spatial-gpu")
 except PackageNotFoundError:
     __version__ = "0.1.0.dev"
 
-from spatialgpu.core.backend import get_backend, set_backend, Backend
-from spatialgpu.core.config import config, GPUConfig
-
 # Graph operations (Squidpy-compatible API)
-from spatialgpu import graph
-from spatialgpu import segmentation
+from spatialgpu import benchmarks, graph, io, segmentation
 from spatialgpu import visualization as viz
-from spatialgpu import io
-from spatialgpu import benchmarks
+from spatialgpu.core.backend import Backend, get_backend, set_backend
+from spatialgpu.core.config import GPUConfig, config
 
 __all__ = [
     "__version__",

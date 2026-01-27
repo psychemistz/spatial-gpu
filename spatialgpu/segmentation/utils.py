@@ -155,7 +155,7 @@ def compute_circularity(
 
     # Circularity
     with np.errstate(divide="ignore", invalid="ignore"):
-        circularity = 4 * np.pi * areas / (perimeters ** 2)
+        circularity = 4 * np.pi * areas / (perimeters**2)
         circularity = np.nan_to_num(circularity, nan=0.0, posinf=1.0, neginf=0.0)
 
     return circularity
@@ -194,7 +194,7 @@ def merge_tiled_masks(
     # Map from tile cell IDs to global cell IDs
     cell_id_maps = []
 
-    for tile_idx, (tile_mask, (y_off, x_off)) in enumerate(tile_masks):
+    for _tile_idx, (tile_mask, (y_off, x_off)) in enumerate(tile_masks):
         h, w = tile_mask.shape
         cell_id_map = {}
 
@@ -209,7 +209,7 @@ def merge_tiled_masks(
             if cell_id == 0:
                 continue
 
-            cell_mask = tile_mask[:y_end-y_off, :x_end-x_off] == cell_id
+            cell_mask = tile_mask[: y_end - y_off, : x_end - x_off] == cell_id
             cell_area = np.sum(cell_mask)
 
             # Check for matching existing cells
@@ -238,7 +238,7 @@ def merge_tiled_masks(
 
         # Write to output using mapped IDs
         for orig_id, new_id in cell_id_map.items():
-            mask = tile_mask[:y_end-y_off, :x_end-x_off] == orig_id
+            mask = tile_mask[: y_end - y_off, : x_end - x_off] == orig_id
             output[y_off:y_end, x_off:x_end][mask] = new_id
 
     return output
@@ -359,12 +359,12 @@ def remove_edge_cells(
     edge_cells = set()
 
     # Top and bottom edges
-    edge_cells.update(np.unique(masks[:edge_buffer+1, :]))
-    edge_cells.update(np.unique(masks[-(edge_buffer+1):, :]))
+    edge_cells.update(np.unique(masks[: edge_buffer + 1, :]))
+    edge_cells.update(np.unique(masks[-(edge_buffer + 1) :, :]))
 
     # Left and right edges
-    edge_cells.update(np.unique(masks[:, :edge_buffer+1]))
-    edge_cells.update(np.unique(masks[:, -(edge_buffer+1):]))
+    edge_cells.update(np.unique(masks[:, : edge_buffer + 1]))
+    edge_cells.update(np.unique(masks[:, -(edge_buffer + 1) :]))
 
     # Remove background from set
     edge_cells.discard(0)

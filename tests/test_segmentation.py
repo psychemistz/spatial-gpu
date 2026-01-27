@@ -1,7 +1,6 @@
 """Tests for cell segmentation."""
 
 import numpy as np
-import pytest
 
 
 class TestSegmentationResult:
@@ -12,12 +11,14 @@ class TestSegmentationResult:
         from spatialgpu.segmentation.core import SegmentationResult
 
         # Create simple mask
-        masks = np.array([
-            [0, 1, 1, 0],
-            [0, 1, 1, 0],
-            [0, 0, 0, 2],
-            [0, 0, 2, 2],
-        ])
+        masks = np.array(
+            [
+                [0, 1, 1, 0],
+                [0, 1, 1, 0],
+                [0, 0, 0, 2],
+                [0, 0, 2, 2],
+            ]
+        )
 
         result = SegmentationResult.from_masks(masks)
 
@@ -36,12 +37,14 @@ class TestSegmentationUtils:
         """Test centroid computation."""
         from spatialgpu.segmentation.utils import compute_centroids
 
-        masks = np.array([
-            [0, 1, 1, 0],
-            [0, 1, 1, 0],
-            [0, 0, 0, 0],
-            [2, 2, 0, 0],
-        ])
+        masks = np.array(
+            [
+                [0, 1, 1, 0],
+                [0, 1, 1, 0],
+                [0, 0, 0, 0],
+                [2, 2, 0, 0],
+            ]
+        )
 
         centroids = compute_centroids(masks)
 
@@ -53,12 +56,14 @@ class TestSegmentationUtils:
         """Test area computation."""
         from spatialgpu.segmentation.utils import compute_areas
 
-        masks = np.array([
-            [0, 1, 1, 0],
-            [0, 1, 1, 0],
-            [0, 0, 0, 0],
-            [2, 2, 0, 0],
-        ])
+        masks = np.array(
+            [
+                [0, 1, 1, 0],
+                [0, 1, 1, 0],
+                [0, 0, 0, 0],
+                [2, 2, 0, 0],
+            ]
+        )
 
         areas = compute_areas(masks)
 
@@ -70,33 +75,37 @@ class TestSegmentationUtils:
         """Test boundary computation."""
         from spatialgpu.segmentation.utils import compute_boundaries
 
-        masks = np.array([
-            [0, 0, 0, 0, 0],
-            [0, 1, 1, 1, 0],
-            [0, 1, 1, 1, 0],
-            [0, 1, 1, 1, 0],
-            [0, 0, 0, 0, 0],
-        ])
+        masks = np.array(
+            [
+                [0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ]
+        )
 
         boundaries = compute_boundaries(masks)
 
         # Should have boundaries only at edges of cell 1
         assert boundaries.dtype == bool
         # Interior pixel should not be boundary
-        assert boundaries[2, 2] == False
+        assert not boundaries[2, 2]
         # Edge pixels should be boundaries
-        assert boundaries[1, 1] == True or boundaries[1, 2] == True
+        assert boundaries[1, 1] or boundaries[1, 2]
 
     def test_filter_by_size(self):
         """Test size filtering."""
         from spatialgpu.segmentation.utils import filter_by_size
 
-        masks = np.array([
-            [1, 1, 0, 2],
-            [1, 1, 0, 0],
-            [1, 1, 3, 3],
-            [1, 1, 3, 3],
-        ])  # Cell 1: 8px, Cell 2: 1px, Cell 3: 4px
+        masks = np.array(
+            [
+                [1, 1, 0, 2],
+                [1, 1, 0, 0],
+                [1, 1, 3, 3],
+                [1, 1, 3, 3],
+            ]
+        )  # Cell 1: 8px, Cell 2: 1px, Cell 3: 4px
 
         filtered = filter_by_size(masks, min_size=2)
 
@@ -111,13 +120,15 @@ class TestSegmentationUtils:
         """Test edge cell removal."""
         from spatialgpu.segmentation.utils import remove_edge_cells
 
-        masks = np.array([
-            [1, 1, 0, 0, 2],
-            [1, 1, 3, 3, 2],
-            [0, 0, 3, 3, 0],
-            [0, 0, 3, 3, 0],
-            [4, 4, 0, 0, 5],
-        ])
+        masks = np.array(
+            [
+                [1, 1, 0, 0, 2],
+                [1, 1, 3, 3, 2],
+                [0, 0, 3, 3, 0],
+                [0, 0, 3, 3, 0],
+                [4, 4, 0, 0, 5],
+            ]
+        )
 
         filtered = remove_edge_cells(masks)
 
@@ -134,12 +145,14 @@ class TestSegmentationMetrics:
         """Test metrics for perfect prediction."""
         from spatialgpu.segmentation.evaluation import compute_segmentation_metrics
 
-        masks = np.array([
-            [0, 1, 1, 0],
-            [0, 1, 1, 0],
-            [2, 2, 0, 0],
-            [2, 2, 0, 0],
-        ])
+        masks = np.array(
+            [
+                [0, 1, 1, 0],
+                [0, 1, 1, 0],
+                [2, 2, 0, 0],
+                [2, 2, 0, 0],
+            ]
+        )
 
         metrics = compute_segmentation_metrics(masks, masks)
 
@@ -152,19 +165,23 @@ class TestSegmentationMetrics:
         """Test metrics for no overlap."""
         from spatialgpu.segmentation.evaluation import compute_segmentation_metrics
 
-        pred = np.array([
-            [1, 1, 0, 0],
-            [1, 1, 0, 0],
-            [0, 0, 0, 0],
-            [0, 0, 0, 0],
-        ])
+        pred = np.array(
+            [
+                [1, 1, 0, 0],
+                [1, 1, 0, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+            ]
+        )
 
-        gt = np.array([
-            [0, 0, 0, 0],
-            [0, 0, 0, 0],
-            [0, 0, 2, 2],
-            [0, 0, 2, 2],
-        ])
+        gt = np.array(
+            [
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+                [0, 0, 2, 2],
+                [0, 0, 2, 2],
+            ]
+        )
 
         metrics = compute_segmentation_metrics(pred, gt)
 
@@ -176,19 +193,23 @@ class TestSegmentationMetrics:
         """Test metrics for partial overlap."""
         from spatialgpu.segmentation.evaluation import compute_segmentation_metrics
 
-        pred = np.array([
-            [0, 1, 1, 0],
-            [0, 1, 1, 0],
-            [0, 0, 0, 0],
-            [0, 0, 0, 0],
-        ])
+        pred = np.array(
+            [
+                [0, 1, 1, 0],
+                [0, 1, 1, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+            ]
+        )
 
-        gt = np.array([
-            [0, 1, 1, 1],
-            [0, 1, 1, 1],
-            [0, 0, 0, 0],
-            [0, 0, 0, 0],
-        ])
+        gt = np.array(
+            [
+                [0, 1, 1, 1],
+                [0, 1, 1, 1],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+            ]
+        )
 
         metrics = compute_segmentation_metrics(pred, gt, iou_threshold=0.5)
 
@@ -204,17 +225,21 @@ class TestMergeTiledMasks:
         from spatialgpu.segmentation.utils import merge_tiled_masks
 
         # Create two overlapping tiles
-        tile1 = np.array([
-            [1, 1, 0],
-            [1, 1, 0],
-            [0, 0, 0],
-        ])
+        tile1 = np.array(
+            [
+                [1, 1, 0],
+                [1, 1, 0],
+                [0, 0, 0],
+            ]
+        )
 
-        tile2 = np.array([
-            [0, 0, 0],
-            [0, 2, 2],
-            [0, 2, 2],
-        ])
+        tile2 = np.array(
+            [
+                [0, 0, 0],
+                [0, 2, 2],
+                [0, 2, 2],
+            ]
+        )
 
         tiles = [
             (tile1, (0, 0)),

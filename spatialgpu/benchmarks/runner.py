@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import gc
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Literal, Optional
 
 import numpy as np
 
@@ -130,6 +131,7 @@ def benchmark(
         if backend.is_gpu_active:
             backend.clear_memory()
             import cupy as cp
+
             cp.cuda.Stream.null.synchronize()
 
         start = time.perf_counter()
@@ -137,6 +139,7 @@ def benchmark(
 
         if backend.is_gpu_active:
             import cupy as cp
+
             cp.cuda.Stream.null.synchronize()
 
         end = time.perf_counter()
@@ -210,8 +213,11 @@ def compare_backends(
     # CPU benchmark
     set_backend("cpu")
     results["cpu"] = benchmark(
-        func, *args,
-        n_runs=n_runs, warmup=warmup, name=name,
+        func,
+        *args,
+        n_runs=n_runs,
+        warmup=warmup,
+        name=name,
         **kwargs,
     )
 
@@ -220,8 +226,11 @@ def compare_backends(
     if backend.is_gpu_available:
         set_backend("gpu")
         results["gpu"] = benchmark(
-            func, *args,
-            n_runs=n_runs, warmup=warmup, name=name,
+            func,
+            *args,
+            n_runs=n_runs,
+            warmup=warmup,
+            name=name,
             **kwargs,
         )
 
@@ -277,6 +286,7 @@ def benchmark_suite(
     # Ensure cluster labels exist
     if "cluster" not in adata.obs.columns:
         import numpy as np
+
         adata.obs["cluster"] = np.random.randint(0, 10, size=adata.n_obs).astype(str)
         adata.obs["cluster"] = adata.obs["cluster"].astype("category")
 
@@ -284,14 +294,16 @@ def benchmark_suite(
         if compare:
             results["neighbors"] = compare_backends(
                 sp.graph.spatial_neighbors,
-                adata, n_neighbors=6,
+                adata,
+                n_neighbors=6,
                 n_runs=n_runs,
                 name="spatial_neighbors",
             )
         else:
             results["neighbors"] = benchmark(
                 sp.graph.spatial_neighbors,
-                adata, n_neighbors=6,
+                adata,
+                n_neighbors=6,
                 n_runs=n_runs,
                 name="spatial_neighbors",
             )
@@ -304,14 +316,18 @@ def benchmark_suite(
         if compare:
             results["nhood_enrichment"] = compare_backends(
                 sp.graph.nhood_enrichment,
-                adata, cluster_key="cluster", n_perms=100,
+                adata,
+                cluster_key="cluster",
+                n_perms=100,
                 n_runs=n_runs,
                 name="nhood_enrichment",
             )
         else:
             results["nhood_enrichment"] = benchmark(
                 sp.graph.nhood_enrichment,
-                adata, cluster_key="cluster", n_perms=100,
+                adata,
+                cluster_key="cluster",
+                n_perms=100,
                 n_runs=n_runs,
                 name="nhood_enrichment",
             )
@@ -320,14 +336,18 @@ def benchmark_suite(
         if compare:
             results["co_occurrence"] = compare_backends(
                 sp.graph.co_occurrence,
-                adata, cluster_key="cluster", n_splits=20,
+                adata,
+                cluster_key="cluster",
+                n_splits=20,
                 n_runs=n_runs,
                 name="co_occurrence",
             )
         else:
             results["co_occurrence"] = benchmark(
                 sp.graph.co_occurrence,
-                adata, cluster_key="cluster", n_splits=20,
+                adata,
+                cluster_key="cluster",
+                n_splits=20,
                 n_runs=n_runs,
                 name="co_occurrence",
             )
@@ -336,14 +356,18 @@ def benchmark_suite(
         if compare:
             results["ripley"] = compare_backends(
                 sp.graph.ripley,
-                adata, mode="L", n_simulations=50,
+                adata,
+                mode="L",
+                n_simulations=50,
                 n_runs=n_runs,
                 name="ripley",
             )
         else:
             results["ripley"] = benchmark(
                 sp.graph.ripley,
-                adata, mode="L", n_simulations=50,
+                adata,
+                mode="L",
+                n_simulations=50,
                 n_runs=n_runs,
                 name="ripley",
             )
@@ -373,8 +397,16 @@ def format_benchmark_results(
     if format == "dict":
         return {
             op: {
-                "cpu_time": res.get("cpu", {}).mean_time if isinstance(res, dict) else res.mean_time,
-                "gpu_time": res.get("gpu", {}).mean_time if isinstance(res, dict) and "gpu" in res else None,
+                "cpu_time": (
+                    res.get("cpu", {}).mean_time
+                    if isinstance(res, dict)
+                    else res.mean_time
+                ),
+                "gpu_time": (
+                    res.get("gpu", {}).mean_time
+                    if isinstance(res, dict) and "gpu" in res
+                    else None
+                ),
                 "speedup": res.get("speedup", 1.0) if isinstance(res, dict) else 1.0,
             }
             for op, res in results.items()
@@ -386,7 +418,9 @@ def format_benchmark_results(
         lines.append("| Operation | CPU (s) | GPU (s) | Speedup |")
         lines.append("|-----------|---------|---------|---------|")
     else:
-        lines.append(f"{'Operation':<20} {'CPU (s)':>12} {'GPU (s)':>12} {'Speedup':>10}")
+        lines.append(
+            f"{'Operation':<20} {'CPU (s)':>12} {'GPU (s)':>12} {'Speedup':>10}"
+        )
         lines.append("-" * 56)
 
     for op, res in results.items():
@@ -402,6 +436,8 @@ def format_benchmark_results(
         if format == "markdown":
             lines.append(f"| {op} | {cpu_time:.4f} | {gpu_time:.4f} | {speedup:.1f}x |")
         else:
-            lines.append(f"{op:<20} {cpu_time:>12.4f} {gpu_time:>12.4f} {speedup:>9.1f}x")
+            lines.append(
+                f"{op:<20} {cpu_time:>12.4f} {gpu_time:>12.4f} {speedup:>9.1f}x"
+            )
 
     return "\n".join(lines)

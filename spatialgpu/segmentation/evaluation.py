@@ -138,23 +138,41 @@ def compute_segmentation_metrics(
 
     if n_pred == 0 and n_gt == 0:
         return SegmentationMetrics(
-            iou=1.0, precision=1.0, recall=1.0, f1=1.0,
-            n_true_positive=0, n_false_positive=0, n_false_negative=0,
-            mean_matched_iou=1.0, per_cell_iou=np.array([]),
+            iou=1.0,
+            precision=1.0,
+            recall=1.0,
+            f1=1.0,
+            n_true_positive=0,
+            n_false_positive=0,
+            n_false_negative=0,
+            mean_matched_iou=1.0,
+            per_cell_iou=np.array([]),
         )
 
     if n_pred == 0:
         return SegmentationMetrics(
-            iou=0.0, precision=0.0, recall=0.0, f1=0.0,
-            n_true_positive=0, n_false_positive=0, n_false_negative=n_gt,
-            mean_matched_iou=0.0, per_cell_iou=np.array([]),
+            iou=0.0,
+            precision=0.0,
+            recall=0.0,
+            f1=0.0,
+            n_true_positive=0,
+            n_false_positive=0,
+            n_false_negative=n_gt,
+            mean_matched_iou=0.0,
+            per_cell_iou=np.array([]),
         )
 
     if n_gt == 0:
         return SegmentationMetrics(
-            iou=0.0, precision=0.0, recall=0.0, f1=0.0,
-            n_true_positive=0, n_false_positive=n_pred, n_false_negative=0,
-            mean_matched_iou=0.0, per_cell_iou=np.array([]),
+            iou=0.0,
+            precision=0.0,
+            recall=0.0,
+            f1=0.0,
+            n_true_positive=0,
+            n_false_positive=n_pred,
+            n_false_negative=0,
+            mean_matched_iou=0.0,
+            per_cell_iou=np.array([]),
         )
 
     # Compute IoU matrix
@@ -200,7 +218,9 @@ def compute_segmentation_metrics(
 
     precision = n_tp / (n_tp + n_fp) if (n_tp + n_fp) > 0 else 0
     recall = n_tp / (n_tp + n_fn) if (n_tp + n_fn) > 0 else 0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    f1 = (
+        2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    )
 
     # Mean IoU
     if matched_ious:
@@ -261,8 +281,9 @@ def _compute_iou_matrix_gpu(
     gt_ids: NDArray,
 ) -> NDArray:
     """Compute IoU matrix on GPU."""
-    from spatialgpu.core.array_utils import to_gpu, to_cpu
     import cupy as cp
+
+    from spatialgpu.core.array_utils import to_cpu, to_gpu
 
     pred_masks_gpu = to_gpu(pred_masks)
     gt_masks_gpu = to_gpu(gt_masks)

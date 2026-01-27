@@ -25,30 +25,13 @@ def get_available_models() -> dict[str, bool]:
     dict
         Model name -> GPU support status.
     """
-    models = {}
+    from importlib.util import find_spec
 
-    # Check Cellpose
-    try:
-        import cellpose
-        models["cellpose"] = True
-    except ImportError:
-        models["cellpose"] = False
-
-    # Check StarDist
-    try:
-        import stardist
-        models["stardist"] = True
-    except ImportError:
-        models["stardist"] = False
-
-    # Check SAM
-    try:
-        import segment_anything
-        models["sam"] = True
-    except ImportError:
-        models["sam"] = False
-
-    return models
+    return {
+        "cellpose": find_spec("cellpose") is not None,
+        "stardist": find_spec("stardist") is not None,
+        "sam": find_spec("segment_anything") is not None,
+    }
 
 
 class CellposeModel(BaseSegmentationModel):
@@ -105,7 +88,7 @@ class CellposeModel(BaseSegmentationModel):
                 raise ImportError(
                     "Cellpose not installed. Install with: "
                     "pip install spatial-gpu[segmentation]"
-                )
+                ) from None
 
             self._model = models.Cellpose(
                 model_type=self.model_type,
@@ -218,7 +201,7 @@ class StarDistModel(BaseSegmentationModel):
                 raise ImportError(
                     "StarDist not installed. Install with: "
                     "pip install spatial-gpu[segmentation]"
-                )
+                ) from None
 
             self._model = StarDist2D.from_pretrained(self.model_name)
 
@@ -348,24 +331,19 @@ class EnsembleModel(BaseSegmentationModel):
                 results.append(result)
             except Exception as e:
                 import warnings
-                warnings.warn(f"Model {model.name} failed: {e}")
+
+                warnings.warn(f"Model {model.name} failed: {e}", stacklevel=2)
 
         if not results:
             raise RuntimeError("All models failed")
 
         # Combine predictions
         if self.method == "vote":
-            combined_masks = self._combine_by_voting(
-                [r.masks for r in results]
-            )
+            combined_masks = self._combine_by_voting([r.masks for r in results])
         elif self.method == "union":
-            combined_masks = self._combine_by_union(
-                [r.masks for r in results]
-            )
+            combined_masks = self._combine_by_union([r.masks for r in results])
         elif self.method == "intersection":
-            combined_masks = self._combine_by_intersection(
-                [r.masks for r in results]
-            )
+            combined_masks = self._combine_by_intersection([r.masks for r in results])
         else:
             raise ValueError(f"Unknown method: {self.method}")
 

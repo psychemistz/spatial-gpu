@@ -27,6 +27,7 @@ def synthetic_adata():
     clusters = np.random.choice(["A", "B", "C", "D"], size=n_cells)
 
     import pandas as pd
+
     adata = ad.AnnData(
         X=X,
         obs=pd.DataFrame(

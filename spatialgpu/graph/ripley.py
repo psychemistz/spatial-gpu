@@ -6,7 +6,8 @@ Implements K, L, F, and G functions for spatial point pattern analysis.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal, Optional
 
 import numpy as np
 from tqdm import tqdm
@@ -78,7 +79,7 @@ def ripley(
     backend = get_backend()
 
     coords = get_spatial_coords(adata, spatial_key=spatial_key)
-    n_points = coords.shape[0]
+    coords.shape[0]
 
     # Compute bounding box
     mins = coords.min(axis=0)
@@ -107,14 +108,26 @@ def ripley(
             mask = cluster_idx == cat_idx
             cat_coords = coords[mask]
             cat_results = _compute_ripley(
-                cat_coords, radii, mode, area, n_simulations, seed,
-                backend.is_gpu_active, show_progress
+                cat_coords,
+                radii,
+                mode,
+                area,
+                n_simulations,
+                seed,
+                backend.is_gpu_active,
+                show_progress,
             )
             results[cat] = cat_results
     else:
         results = _compute_ripley(
-            coords, radii, mode, area, n_simulations, seed,
-            backend.is_gpu_active, show_progress
+            coords,
+            radii,
+            mode,
+            area,
+            n_simulations,
+            seed,
+            backend.is_gpu_active,
+            show_progress,
         )
 
     output = {
@@ -162,8 +175,9 @@ def _compute_ripley_gpu(
     show_progress: bool,
 ) -> dict:
     """GPU implementation of Ripley statistics."""
-    from spatialgpu.core.array_utils import to_gpu, to_cpu
     import cupy as cp
+
+    from spatialgpu.core.array_utils import to_cpu, to_gpu
 
     if seed is not None:
         cp.random.seed(seed)
@@ -174,7 +188,7 @@ def _compute_ripley_gpu(
 
     # Compute pairwise distances
     diff = coords_gpu[:, None, :] - coords_gpu[None, :, :]
-    dists = cp.sqrt(cp.sum(diff ** 2, axis=2))
+    dists = cp.sqrt(cp.sum(diff**2, axis=2))
 
     # Compute K function
     K = cp.zeros(len(radii), dtype=cp.float32)
@@ -206,7 +220,7 @@ def _compute_ripley_gpu(
 
         # Compute K for random points
         rand_diff = rand_coords[:, None, :] - rand_coords[None, :, :]
-        rand_dists = cp.sqrt(cp.sum(rand_diff ** 2, axis=2))
+        rand_dists = cp.sqrt(cp.sum(rand_diff**2, axis=2))
 
         K_sim = cp.zeros(len(radii), dtype=cp.float32)
         for i, r in enumerate(radii_gpu):

@@ -21,17 +21,17 @@ interactive_viewer
 """
 
 from spatialgpu.visualization.plotting import (
-    spatial_scatter,
-    spatial_heatmap,
-    nhood_enrichment_plot,
     co_occurrence_plot,
     interaction_matrix_plot,
+    nhood_enrichment_plot,
     ripley_plot,
+    spatial_heatmap,
+    spatial_scatter,
 )
 from spatialgpu.visualization.segmentation import (
     segmentation_overlay,
-    show_masks,
     show_boundaries,
+    show_masks,
 )
 
 __all__ = [

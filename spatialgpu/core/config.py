@@ -171,6 +171,7 @@ class Config:
     def to_dict(self) -> dict:
         """Export configuration as dictionary."""
         from dataclasses import asdict
+
         return {
             "gpu": asdict(self.gpu),
             "compute": asdict(self.compute),
