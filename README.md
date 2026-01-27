@@ -2,9 +2,11 @@
 
 **GPU-accelerated spatial omics analysis framework for the scverse ecosystem**
 
+[![CI](https://github.com/psychemistz/spatial-gpu/actions/workflows/ci.yml/badge.svg)](https://github.com/psychemistz/spatial-gpu/actions/workflows/ci.yml)
 [![PyPI version](https://badge.fury.io/py/spatial-gpu.svg)](https://badge.fury.io/py/spatial-gpu)
 [![Documentation](https://readthedocs.org/projects/spatial-gpu/badge/?version=latest)](https://spatial-gpu.readthedocs.io)
 [![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
+[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org)
 
 spatial-gpu provides **10-100x speedup** for spatial transcriptomics and spatial omics analysis through GPU acceleration, while maintaining full compatibility with the scverse ecosystem (Scanpy, Squidpy, AnnData).
 
