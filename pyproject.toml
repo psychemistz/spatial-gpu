@@ -70,8 +70,11 @@ segmentation = [
     "torch>=2.0",
     "torchvision>=0.15",
 ]
+secact = [
+    "secactpy>=0.2.3",
+]
 all = [
-    "spatial-gpu[cuda,visualization,segmentation]",
+    "spatial-gpu[cuda,visualization,segmentation,secact]",
 ]
 dev = [
     "pytest>=7.0",

@@ -147,10 +147,28 @@ def generate_r_plots(output_dir: str) -> dict[str, str]:
         width=10, height=5, dpi=150
     )
 
-    # MostAbundantCellType
+    # MostAbundantCellType (needs explicit colors for discrete scale)
+    ct_names <- unlist(
+        SpaCET_obj@results$deconvolution$Ref$lineageTree
+    )
+    if("Malignant" %in% rownames(
+        SpaCET_obj@results$deconvolution$propMat
+    ) & !"Malignant" %in% ct_names) {{
+        ct_names <- c("Malignant", ct_names)
+    }}
+    tab20 <- c(
+        "#1f77b4","#aec7e8","#ff7f0e","#ffbb78","#2ca02c",
+        "#98df8a","#d62728","#ff9896","#9467bd","#c5b0d5",
+        "#8c564b","#c49c94","#e377c2","#f7b6d2","#7f7f7f",
+        "#c7c7c7","#bcbd22","#dbdb8d","#17becf","#9edae5"
+    )
+    ct_colors <- setNames(
+        tab20[seq_along(ct_names)], ct_names
+    )
     p <- SpaCET.visualize.spatialFeature(
         SpaCET_obj, spatialType="MostAbundantCellType",
-        spatialFeatures="SubLineage", imageBg=FALSE
+        spatialFeatures="SubLineage", imageBg=FALSE,
+        colors=ct_colors
     )
     ggsave(
         "{output_dir}/r_mostabundant.png", p,
@@ -195,10 +213,11 @@ def generate_r_plots(output_dir: str) -> dict[str, str]:
         width=8, height=6, dpi=150
     )
 
-    # CellTypeComposition (pie charts)
+    # CellTypeComposition (pie charts, needs explicit colors)
     p <- SpaCET.visualize.spatialFeature(
         SpaCET_obj, spatialType="CellTypeComposition",
-        spatialFeatures="SubLineage", imageBg=FALSE
+        spatialFeatures="SubLineage", imageBg=FALSE,
+        colors=ct_colors
     )
     ggsave(
         "{output_dir}/r_composition.png", p,

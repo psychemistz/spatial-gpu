@@ -37,6 +37,15 @@ from spatialgpu.deconvolution.reference import (
     read_gmt,
     write_gmt,
 )
+from spatialgpu.deconvolution.secact import (
+    secact_coxph_regression,
+    secact_inference,
+    secact_pattern_genes,
+    secact_signaling_patterns,
+    secact_signaling_velocity,
+    secact_spatial_ccc,
+    secact_survival_data,
+)
 from spatialgpu.deconvolution.spatial_correlation import (
     cal_weights,
     spatial_correlation,
@@ -45,6 +54,15 @@ from spatialgpu.deconvolution.visualization import (
     visualize_cell_type_pair,
     visualize_colocalization,
     visualize_distance_to_interface,
+    visualize_secact_bar,
+    visualize_secact_circle,
+    visualize_secact_dotplot,
+    visualize_secact_heatmap,
+    visualize_secact_heatmap_activity,
+    visualize_secact_lollipop,
+    visualize_secact_sankey,
+    visualize_secact_survival,
+    visualize_secact_velocity,
     visualize_spatial_feature,
 )
 
@@ -75,11 +93,29 @@ __all__ = [
     "get_cancer_signature",
     "read_gmt",
     "write_gmt",
+    # SecAct analysis
+    "secact_inference",
+    "secact_signaling_patterns",
+    "secact_pattern_genes",
+    "secact_signaling_velocity",
+    "secact_spatial_ccc",
+    "secact_coxph_regression",
+    "secact_survival_data",
     # Visualization
     "visualize_spatial_feature",
     "visualize_colocalization",
     "visualize_cell_type_pair",
     "visualize_distance_to_interface",
+    # SecAct visualization
+    "visualize_secact_heatmap",
+    "visualize_secact_circle",
+    "visualize_secact_sankey",
+    "visualize_secact_dotplot",
+    "visualize_secact_heatmap_activity",
+    "visualize_secact_bar",
+    "visualize_secact_lollipop",
+    "visualize_secact_velocity",
+    "visualize_secact_survival",
     # I/O
     "create_spacet_object",
     "create_spacet_object_10x",
