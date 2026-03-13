@@ -185,9 +185,7 @@ def constr_optim(
     theta = theta0.copy().astype(np.float64)
 
     if np.any(ui @ theta - ci <= 0):
-        raise ValueError(
-            "Initial value is not in the interior of the feasible region"
-        )
+        raise ValueError("Initial value is not in the interior of the feasible region")
 
     theta_old = theta.copy()
     obj = f(theta, *args)
@@ -213,7 +211,7 @@ def constr_optim(
         r = _BIG
     s_mu = 1.0 if mu > 0 else -1.0
 
-    for i in range(outer_iterations):
+    for _i in range(outer_iterations):
         r_old = r
         theta_old = theta.copy()
 

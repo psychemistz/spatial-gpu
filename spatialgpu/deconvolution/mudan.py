@@ -81,7 +81,6 @@ def _mudan_cluster_via_r(
     from scipy.io import mmwrite
 
     counts_sp = sparse.csc_matrix(counts, dtype=np.float64)
-    n_spots = counts_sp.shape[1]
 
     tmpdir = tempfile.mkdtemp()
     input_mtx = os.path.join(tmpdir, "counts.mtx")
@@ -223,9 +222,9 @@ def _normalize_variance_python(
 
     gene_means = np.asarray(mat_t.mean(axis=0)).ravel()
     mat_sq = mat_t.copy()
-    mat_sq.data = mat_sq.data ** 2
+    mat_sq.data = mat_sq.data**2
     mean_sq = np.asarray(mat_sq.mean(axis=0)).ravel()
-    gene_vars = (mean_sq - gene_means ** 2) * n_spots / (n_spots - 1)
+    gene_vars = (mean_sq - gene_means**2) * n_spots / (n_spots - 1)
 
     dfm = np.log(gene_means)
     dfv = np.log(gene_vars)

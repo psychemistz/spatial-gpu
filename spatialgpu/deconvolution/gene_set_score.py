@@ -7,13 +7,13 @@ Equivalent to SpaCET.GeneSetScore() in R.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 from scipy import sparse
 
-from spatialgpu.deconvolution.reference import load_gene_set, read_gmt
+from spatialgpu.deconvolution.reference import load_gene_set
 
 if TYPE_CHECKING:
     import anndata as ad

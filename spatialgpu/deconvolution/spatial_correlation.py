@@ -63,10 +63,12 @@ def cal_weights(
         Sparse weight matrix of shape (n_spots, n_spots). Row and column
         ordering follows ``adata.obs_names``.
     """
-    coords = np.column_stack([
-        adata.obs["coordinate_x_um"].values.astype(np.float64),
-        adata.obs["coordinate_y_um"].values.astype(np.float64),
-    ])
+    coords = np.column_stack(
+        [
+            adata.obs["coordinate_x_um"].values.astype(np.float64),
+            adata.obs["coordinate_y_um"].values.astype(np.float64),
+        ]
+    )
     n_spots = coords.shape[0]
 
     logger.info(
@@ -91,7 +93,7 @@ def cal_weights(
                 continue  # skip self
             d = np.sqrt(np.sum((coords[i] - coords[j]) ** 2))
             if d > 0 and d <= radius:
-                w = np.exp(-(d ** 2) / (2.0 * sigma ** 2))
+                w = np.exp(-(d**2) / (2.0 * sigma**2))
                 rows.append(i)
                 cols.append(j)
                 vals.append(w)
@@ -111,9 +113,7 @@ def cal_weights(
                 weights = np.array(row_data[0, nonzero_cols].toarray()).ravel()
                 # Keep top-k by weight (largest weights)
                 keep_idx = np.argsort(weights)[-k:]
-                remove_idx = np.setdiff1d(
-                    np.arange(len(nonzero_cols)), keep_idx
-                )
+                remove_idx = np.setdiff1d(np.arange(len(nonzero_cols)), keep_idx)
                 for ri in remove_idx:
                     W_lil[i, nonzero_cols[ri]] = 0.0
         W = W_lil.tocsr()
@@ -168,9 +168,7 @@ def spatial_correlation(
 
     valid_modes = ("univariate", "bivariate", "pairwise")
     if mode not in valid_modes:
-        raise ValueError(
-            f"Invalid mode '{mode}'. Must be one of {valid_modes}."
-        )
+        raise ValueError(f"Invalid mode '{mode}'. Must be one of {valid_modes}.")
 
     # Compute weight matrix if not provided
     if W is None:
@@ -199,7 +197,9 @@ def spatial_correlation(
         adata_sub = adata
 
     # ---- Step 1: Normalize with VST-equivalent ----
-    logger.info("Step 1: Normalize count matrix with variance stabilizing transformation.")
+    logger.info(
+        "Step 1: Normalize count matrix with variance stabilizing transformation."
+    )
     mat = _vst_normalize(adata_sub)
     # mat is genes x spots (dense, float64)
 
@@ -234,15 +234,19 @@ def spatial_correlation(
             # Columns vary; typically col index 1 = ligand, 3 = receptor
             lr_cols = lr_db.columns
             if len(lr_cols) >= 4:
-                item_df = pd.DataFrame({
-                    "L": lr_db.iloc[:, 1].values,
-                    "R": lr_db.iloc[:, 3].values,
-                })
+                item_df = pd.DataFrame(
+                    {
+                        "L": lr_db.iloc[:, 1].values,
+                        "R": lr_db.iloc[:, 3].values,
+                    }
+                )
             else:
-                item_df = pd.DataFrame({
-                    "L": lr_db.iloc[:, 0].values,
-                    "R": lr_db.iloc[:, 1].values,
-                })
+                item_df = pd.DataFrame(
+                    {
+                        "L": lr_db.iloc[:, 0].values,
+                        "R": lr_db.iloc[:, 1].values,
+                    }
+                )
             # Filter to genes present in the expression data
             all_genes_needed = set(item_df["L"].values) | set(item_df["R"].values)
             gene_mask = np.isin(gene_names, list(all_genes_needed))
@@ -266,7 +270,7 @@ def spatial_correlation(
     for i in range(mat.shape[0]):
         x = mat[i, :]
         dx = x - np.mean(x)
-        std_x = np.sqrt(np.sum(dx ** 2) / N)
+        std_x = np.sqrt(np.sum(dx**2) / N)
         if std_x > 0:
             mat[i, :] = dx / std_x
         else:
@@ -306,10 +310,12 @@ def spatial_correlation(
 
         else:  # bivariate
             n_items = len(item_df)
-            item_names = np.array([
-                f"{lig}_{rec}"
-                for lig, rec in zip(item_df["L"].values, item_df["R"].values)
-            ])
+            item_names = np.array(
+                [
+                    f"{lig}_{rec}"
+                    for lig, rec in zip(item_df["L"].values, item_df["R"].values)
+                ]
+            )
 
             # Get row indices for ligands and receptors
             l_indices = np.array([gene_to_idx[g] for g in item_df["L"].values])
@@ -332,9 +338,7 @@ def spatial_correlation(
             XW_obs = mat[l_indices, :] @ W
             if sparse.issparse(XW_obs):
                 XW_obs = XW_obs.toarray()
-            moran_perm[:, n_perm] = np.sum(
-                XW_obs * mat[r_indices, :], axis=1
-            )
+            moran_perm[:, n_perm] = np.sum(XW_obs * mat[r_indices, :], axis=1)
 
         # Normalize by sum of weights
         moran_perm /= W_sum

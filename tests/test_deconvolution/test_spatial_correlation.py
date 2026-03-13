@@ -7,7 +7,10 @@ import pandas as pd
 import pytest
 from scipy import sparse
 
-from spatialgpu.deconvolution.spatial_correlation import cal_weights, spatial_correlation
+from spatialgpu.deconvolution.spatial_correlation import (
+    cal_weights,
+    spatial_correlation,
+)
 
 
 class TestCalWeights:
@@ -97,8 +100,11 @@ class TestSpatialCorrelation:
     def test_univariate_output_format(self, adata_spatial):
         W = cal_weights(adata_spatial, radius=300, sigma=100)
         result = spatial_correlation(
-            adata_spatial, mode="univariate",
-            item=["g0", "g1"], W=W, n_permutation=100,
+            adata_spatial,
+            mode="univariate",
+            item=["g0", "g1"],
+            W=W,
+            n_permutation=100,
         )
         sc_res = result.uns["spacet"]["SpatialCorrelation"]["univariate"]
         assert isinstance(sc_res, pd.DataFrame)
@@ -111,8 +117,11 @@ class TestSpatialCorrelation:
         """Spatially structured gene should have high Moran's I."""
         W = cal_weights(adata_spatial, radius=300, sigma=100)
         result = spatial_correlation(
-            adata_spatial, mode="univariate",
-            item=["g0"], W=W, n_permutation=100,
+            adata_spatial,
+            mode="univariate",
+            item=["g0"],
+            W=W,
+            n_permutation=100,
         )
         sc_res = result.uns["spacet"]["SpatialCorrelation"]["univariate"]
         # Gene with spatial gradient should have positive Moran's I
@@ -121,7 +130,9 @@ class TestSpatialCorrelation:
     def test_pairwise_output_format(self, adata_spatial):
         W = cal_weights(adata_spatial, radius=300, sigma=100)
         result = spatial_correlation(
-            adata_spatial, mode="pairwise", W=W,
+            adata_spatial,
+            mode="pairwise",
+            W=W,
         )
         sc_res = result.uns["spacet"]["SpatialCorrelation"]["pairwise"]
         assert isinstance(sc_res, pd.DataFrame)
@@ -132,7 +143,9 @@ class TestSpatialCorrelation:
         """Diagonal of pairwise Moran's I should be positive (self-correlation)."""
         W = cal_weights(adata_spatial, radius=300, sigma=100)
         result = spatial_correlation(
-            adata_spatial, mode="pairwise", W=W,
+            adata_spatial,
+            mode="pairwise",
+            W=W,
         )
         sc_res = result.uns["spacet"]["SpatialCorrelation"]["pairwise"]
         diag = np.diag(sc_res.values)

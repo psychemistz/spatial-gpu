@@ -21,7 +21,9 @@ class TestCreateSpacetObject:
         n_genes, n_spots = 100, 50
         counts = np.random.poisson(5, (n_genes, n_spots)).astype(np.float64)
         gene_names = [f"Gene_{i}" for i in range(n_genes)]
-        spot_names = [f"{r}x{c}" for r, c in zip(range(n_spots), range(0, n_spots * 2, 2))]
+        spot_names = [
+            f"{r}x{c}" for r, c in zip(range(n_spots), range(0, n_spots * 2, 2))
+        ]
         counts_df = pd.DataFrame(counts, index=gene_names, columns=spot_names)
         coords = pd.DataFrame(
             {"X": np.random.rand(n_spots) * 1000, "Y": np.random.rand(n_spots) * 1000},
@@ -39,7 +41,7 @@ class TestCreateSpacetObject:
 
     def test_sparse_input(self, simple_data):
         counts_df, coords = simple_data
-        counts_sparse = sparse.csc_matrix(counts_df.values)
+        sparse.csc_matrix(counts_df.values)
         # Need to pass gene names via DataFrame
         adata = create_spacet_object(counts_df, coords, "Visium")
         assert sparse.issparse(adata.X)
@@ -52,12 +54,8 @@ class TestCreateSpacetObject:
     def test_spatial_coordinates(self, simple_data):
         counts_df, coords = simple_data
         adata = create_spacet_object(counts_df, coords, "Visium")
-        np.testing.assert_allclose(
-            adata.obsm["spatial"][:, 0], coords["X"].values
-        )
-        np.testing.assert_allclose(
-            adata.obsm["spatial"][:, 1], coords["Y"].values
-        )
+        np.testing.assert_allclose(adata.obsm["spatial"][:, 0], coords["X"].values)
+        np.testing.assert_allclose(adata.obsm["spatial"][:, 1], coords["Y"].values)
 
     def test_mismatched_spots_raises(self, simple_data):
         counts_df, coords = simple_data

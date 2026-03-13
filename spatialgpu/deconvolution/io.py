@@ -57,9 +57,7 @@ def create_spacet_object_10x(visium_path: str | Path) -> ad.AnnData:
 
     visium_path = Path(visium_path)
     if not visium_path.exists():
-        raise FileNotFoundError(
-            f"The visium_path does not exist: {visium_path}"
-        )
+        raise FileNotFoundError(f"The visium_path does not exist: {visium_path}")
 
     # ---- Read count matrix ----
     mtx_dir = visium_path / "filtered_feature_bc_matrix"
@@ -69,9 +67,7 @@ def create_spacet_object_10x(visium_path: str | Path) -> ad.AnnData:
         # Fallback to scanpy for h5
         import scanpy as sc
 
-        adata_raw = sc.read_10x_h5(
-            str(visium_path / "filtered_feature_bc_matrix.h5")
-        )
+        adata_raw = sc.read_10x_h5(str(visium_path / "filtered_feature_bc_matrix.h5"))
         counts = adata_raw.X.T  # genes x spots
         gene_names = np.array(adata_raw.var_names)
         barcodes = np.array(adata_raw.obs_names)
@@ -118,9 +114,7 @@ def create_spacet_object_10x(visium_path: str | Path) -> ad.AnnData:
     # ---- Build spot IDs: "{array_row}x{array_col}" ----
     spot_ids = [
         f"{r}x{c}"
-        for r, c in zip(
-            barcode_df["array_row"].values, barcode_df["array_col"].values
-        )
+        for r, c in zip(barcode_df["array_row"].values, barcode_df["array_col"].values)
     ]
 
     # ---- Compute micrometer coordinates ----
@@ -491,9 +485,7 @@ def _remove_duplicate_genes(
         best = dup_idx[np.argmax(row_sums)]
         dup_keep_indices.append(best)
 
-    keep_indices = np.sort(
-        np.concatenate([unique_indices, np.array(dup_keep_indices)])
-    )
+    keep_indices = np.sort(np.concatenate([unique_indices, np.array(dup_keep_indices)]))
 
     counts = counts[keep_indices]
     gene_names = gene_names[keep_indices]

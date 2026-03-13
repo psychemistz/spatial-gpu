@@ -66,9 +66,7 @@ def deconvolution(
         adata.uns['spacet'] : dict with malRes, Ref, etc.
     """
     try:
-        prop_mat, mal_res = _deconvolution_via_r(
-            adata, cancer_type, adjacent_normal
-        )
+        prop_mat, mal_res = _deconvolution_via_r(adata, cancer_type, adjacent_normal)
     except (FileNotFoundError, OSError, RuntimeError) as e:
         logger.warning("R SpaCET unavailable (%s), using Python fallback", e)
         prop_mat, mal_res = _deconvolution_python(
@@ -170,9 +168,7 @@ def _deconvolution_via_r(
             timeout=1200,
         )
         if result.returncode != 0:
-            raise RuntimeError(
-                f"R SpaCET.deconvolution failed: {result.stderr[:500]}"
-            )
+            raise RuntimeError(f"R SpaCET.deconvolution failed: {result.stderr[:500]}")
 
         # Read results
         prop_mat = pd.read_csv(os.path.join(tmpdir, "propMat.csv"), index_col=0)
@@ -314,7 +310,6 @@ def cormat(
     """
     from statsmodels.stats.multitest import multipletests
 
-    n_genes = X.shape[0]
     n_samples = X.shape[1]
     n_features = Y.shape[1] if Y.ndim > 1 else 1
     if Y.ndim == 1:
@@ -342,9 +337,7 @@ def cormat(
     # BH adjustment
     _, cor_padj, _, _ = multipletests(cor_p, method="fdr_bh")
 
-    return pd.DataFrame(
-        {"cor_r": cor_r, "cor_p": cor_p, "cor_padj": cor_padj}
-    )
+    return pd.DataFrame({"cor_r": cor_r, "cor_p": cor_p, "cor_padj": cor_padj})
 
 
 # ---------------------------------------------------------------------------
@@ -377,13 +370,22 @@ def _infer_mal_cor(
 
     if n_spots < 20000:
         return _infer_mal_small(
-            counts, centered, gene_names, spot_names,
-            seq_depth_series, cancer_type, signature_type,
+            counts,
+            centered,
+            gene_names,
+            spot_names,
+            seq_depth_series,
+            cancer_type,
+            signature_type,
         )
     else:
         return _infer_mal_large(
-            counts, centered, gene_names, spot_names,
-            seq_depth_series, cancer_type,
+            counts,
+            centered,
+            gene_names,
+            spot_names,
+            seq_depth_series,
+            cancer_type,
         )
 
 
@@ -452,7 +454,11 @@ def _infer_mal_small(
         if cancer_type == "PANCAN":
             comb_list = [("expr", "PANCAN")]
         else:
-            comb_list = [("CNA", cancer_type), ("expr", cancer_type), ("expr", "PANCAN")]
+            comb_list = [
+                ("CNA", cancer_type),
+                ("expr", cancer_type),
+                ("expr", "PANCAN"),
+            ]
 
         for cna_expr, ct in comb_list:
             try:
@@ -472,9 +478,7 @@ def _infer_mal_small(
             cor_sig = cormat(X_sub, sig_vals)
             cor_sig.index = spot_names
 
-            stat_df = _compute_cluster_stats(
-                cor_sig, clustering, seq_depth
-            )
+            stat_df = _compute_cluster_stats(cor_sig, clustering, seq_depth)
 
             if stat_df["clusterMal"].any():
                 logger.info(f"                  > Use {cna_expr} signature: {ct}.")
@@ -517,7 +521,9 @@ def _infer_mal_small(
         spot_mal = sorted_depth.index[:top5p].values
         sig_type_used = "seq_depth"
         sig_ct_used = "current_sample"
-        logger.info(f"                  > Use {sig_type_used} signature: {sig_ct_used}.")
+        logger.info(
+            f"                  > Use {sig_type_used} signature: {sig_ct_used}."
+        )
 
     # Compute malignant reference (CPM of malignant spots)
     spot_mal_idx = np.array([np.where(spot_names == s)[0][0] for s in spot_mal])
@@ -565,8 +571,6 @@ def _infer_mal_large(
 
     Two-round CNA correlation approach.
     """
-    n_spots = centered.shape[1]
-
     # First round: correlate with CNA signature
     _, sig = get_cancer_signature(cancer_type, "CNA")
     olp = np.intersect1d(gene_names, sig.index)
@@ -604,7 +608,9 @@ def _infer_mal_large(
     mal_counts = counts[:, top_idx]
     if sparse.issparse(mal_counts):
         mal_col_sums = np.asarray(mal_counts.sum(axis=0)).ravel()
-        mal_cpm = mal_counts.toarray().astype(np.float64) / mal_col_sums[np.newaxis, :] * 1e6
+        mal_cpm = (
+            mal_counts.toarray().astype(np.float64) / mal_col_sums[np.newaxis, :] * 1e6
+        )
     else:
         mal_col_sums = mal_counts.sum(axis=0)
         mal_cpm = mal_counts.astype(np.float64) / mal_col_sums[np.newaxis, :] * 1e6
@@ -684,15 +690,17 @@ def _compute_cluster_stats(
             and frac_padj >= global_fraction
         )
 
-        records.append({
-            "cluster": c,
-            "spotNum": n,
-            "mean": mean_cor,
-            "wilcoxTestG0": wt_p,
-            "fraction_spot_padj": frac_padj,
-            "seq_depth_diff": depth_diff,
-            "clusterMal": cluster_mal,
-        })
+        records.append(
+            {
+                "cluster": c,
+                "spotNum": n,
+                "mean": mean_cor,
+                "wilcoxTestG0": wt_p,
+                "fraction_spot_padj": frac_padj,
+                "seq_depth_diff": depth_diff,
+                "clusterMal": cluster_mal,
+            }
+        )
 
     return pd.DataFrame(records).set_index("cluster")
 
@@ -726,14 +734,28 @@ def _spatial_deconv(
     """
     try:
         return _spatial_deconv_via_r(
-            ST, gene_names, spot_names, mal_prop, mal_ref,
-            mode, unidentifiable, macrophage_other,
+            ST,
+            gene_names,
+            spot_names,
+            mal_prop,
+            mal_ref,
+            mode,
+            unidentifiable,
+            macrophage_other,
         )
     except (FileNotFoundError, OSError, RuntimeError) as e:
         logger.warning("R SpatialDeconv unavailable (%s), using Python fallback", e)
         return _spatial_deconv_python(
-            ST, gene_names, spot_names, ref, mal_prop, mal_ref,
-            mode, unidentifiable, macrophage_other, n_jobs,
+            ST,
+            gene_names,
+            spot_names,
+            ref,
+            mal_prop,
+            mal_ref,
+            mode,
+            unidentifiable,
+            macrophage_other,
+            n_jobs,
         )
 
 
@@ -774,17 +796,21 @@ def _spatial_deconv_via_r(
         )
 
         # Write malProp
-        pd.DataFrame({
-            "spot": mal_prop.index,
-            "malProp": mal_prop.values,
-        }).to_csv(os.path.join(tmpdir, "malProp.csv"), index=False)
+        pd.DataFrame(
+            {
+                "spot": mal_prop.index,
+                "malProp": mal_prop.values,
+            }
+        ).to_csv(os.path.join(tmpdir, "malProp.csv"), index=False)
 
         # Write malRef
         if mal_ref is not None:
-            pd.DataFrame({
-                "gene": mal_ref.index,
-                "malRef": mal_ref.values,
-            }).to_csv(os.path.join(tmpdir, "malRef.csv"), index=False)
+            pd.DataFrame(
+                {
+                    "gene": mal_ref.index,
+                    "malRef": mal_ref.values,
+                }
+            ).to_csv(os.path.join(tmpdir, "malRef.csv"), index=False)
             has_mal_ref = "TRUE"
         else:
             has_mal_ref = "FALSE"
@@ -842,9 +868,7 @@ def _spatial_deconv_via_r(
             timeout=600,
         )
         if result.returncode != 0:
-            raise RuntimeError(
-                f"R SpatialDeconv failed: {result.stderr[:500]}"
-            )
+            raise RuntimeError(f"R SpatialDeconv failed: {result.stderr[:500]}")
 
         prop_mat = pd.read_csv(
             os.path.join(tmpdir, "propMat.csv"),
@@ -899,14 +923,20 @@ def _spatial_deconv_python(
     # Remove NaN spots
     nan_mask = ~np.isnan(ST_cpm[0, :])
     ST_cpm = ST_cpm[:, nan_mask]
-    valid_spots = spot_names[nan_mask] if isinstance(spot_names, np.ndarray) else spot_names
+    valid_spots = (
+        spot_names[nan_mask] if isinstance(spot_names, np.ndarray) else spot_names
+    )
 
     # Subtract malignant contribution
     if mal_prop.sum() > 0 and mal_ref is not None:
         mal_ref_sub = mal_ref.reindex(olp_genes).values.astype(np.float64)
         if np.isnan(mal_ref_sub).any():
             mal_ref_sub = np.nan_to_num(mal_ref_sub)
-        mal_ref_cpm = mal_ref_sub * 1e6 / mal_ref_sub.sum() if mal_ref_sub.sum() > 0 else mal_ref_sub
+        mal_ref_cpm = (
+            mal_ref_sub * 1e6 / mal_ref_sub.sum()
+            if mal_ref_sub.sum() > 0
+            else mal_ref_sub
+        )
 
         mal_prop_arr = mal_prop.reindex(valid_spots).values
         mixture_mal = np.outer(mal_ref_cpm, mal_prop_arr)
@@ -936,7 +966,9 @@ def _spatial_deconv_python(
         sig_idx = np.array([np.where(olp_genes == g)[0][0] for g in sig_genes_l1])
 
         mixture_l1 = mixture_minus_mal[sig_idx]
-        ref_l1 = ref_cpm[sig_idx][:, [list(reference.columns).index(t) for t in level1_types]]
+        ref_l1 = ref_cpm[sig_idx][
+            :, [list(reference.columns).index(t) for t in level1_types]
+        ]
 
         n_spot = mixture_l1.shape[1]
         n_cell = ref_l1.shape[1]
@@ -944,15 +976,18 @@ def _spatial_deconv_python(
         theta_sum = (1 - mal_prop_arr) - 1e-5
 
         prop_l1 = _solve_constrained_batch(
-            ref_l1, mixture_l1, n_cell, theta_sum,
-            pp_min_arr=np.zeros(n_spot) if unidentifiable else (1 - mal_prop_arr - 2e-5),
+            ref_l1,
+            mixture_l1,
+            n_cell,
+            theta_sum,
+            pp_min_arr=(
+                np.zeros(n_spot) if unidentifiable else (1 - mal_prop_arr - 2e-5)
+            ),
             pp_max_arr=1 - mal_prop_arr,
             n_jobs=n_jobs,
         )
 
-        prop_mat_l1 = pd.DataFrame(
-            prop_l1, index=level1_types, columns=valid_spots
-        )
+        prop_mat_l1 = pd.DataFrame(prop_l1, index=level1_types, columns=valid_spots)
 
         if mode in ("standard", "deconvWithSC_alt"):
             mal_row = pd.DataFrame(
@@ -978,7 +1013,11 @@ def _spatial_deconv_python(
     else:
         # deconvMal mode
         prop_mat_l1 = pd.DataFrame(
-            1 - mal_prop_arr.reshape(1, -1) if isinstance(mal_prop_arr, np.ndarray) else [[1 - x for x in mal_prop_arr]],
+            (
+                1 - mal_prop_arr.reshape(1, -1)
+                if isinstance(mal_prop_arr, np.ndarray)
+                else [[1 - x for x in mal_prop_arr]]
+            ),
             index=level1_types[:1],
             columns=valid_spots,
         )
@@ -1005,8 +1044,12 @@ def _spatial_deconv_python(
         other_types_in_l1 = [t for t in other_types if t in prop_mat_l1.index]
 
         if other_types_in_l1:
-            other_ref_idx = [list(reference.columns).index(t) for t in other_types_in_l1]
-            other_contribution = ref_cpm[:, other_ref_idx] @ prop_mat_l1.loc[other_types_in_l1].values
+            other_ref_idx = [
+                list(reference.columns).index(t) for t in other_types_in_l1
+            ]
+            other_contribution = (
+                ref_cpm[:, other_ref_idx] @ prop_mat_l1.loc[other_types_in_l1].values
+            )
             mixture_l2 = mixture_minus_mal - other_contribution
         else:
             mixture_l2 = mixture_minus_mal.copy()
@@ -1042,15 +1085,16 @@ def _spatial_deconv_python(
         pp_max_l2 = prop_mat_l1.loc[cell_spe].values
 
         prop_l2 = _solve_constrained_batch(
-            ref_l2, mix_l2, n_cell_l2, theta_sum_l2,
+            ref_l2,
+            mix_l2,
+            n_cell_l2,
+            theta_sum_l2,
             pp_min_arr=pp_min_l2,
             pp_max_arr=pp_max_l2,
             n_jobs=n_jobs,
         )
 
-        sub_df = pd.DataFrame(
-            prop_l2, index=subtypes_in_ref, columns=valid_spots
-        )
+        sub_df = pd.DataFrame(prop_l2, index=subtypes_in_ref, columns=valid_spots)
 
         if mode == "standard" and macrophage_other and cell_spe == "Macrophage":
             mac_other = prop_mat_l1.loc[cell_spe] - sub_df.sum(axis=0)
@@ -1109,8 +1153,6 @@ def _solve_constrained_batch_via_r(
     import shutil
     import subprocess
     import tempfile
-
-    n_spots = B.shape[1]
 
     tmpdir = tempfile.mkdtemp()
     try:
@@ -1209,8 +1251,16 @@ def _solve_constrained_batch_python(
         theta0 = np.full(n_cell, ts / n_cell)
         b = B[:, i]
 
-        ppmin = float(pp_min_arr[i]) if hasattr(pp_min_arr, '__getitem__') else float(pp_min_arr)
-        ppmax = float(pp_max_arr[i]) if hasattr(pp_max_arr, '__getitem__') else float(pp_max_arr)
+        ppmin = (
+            float(pp_min_arr[i])
+            if hasattr(pp_min_arr, "__getitem__")
+            else float(pp_min_arr)
+        )
+        ppmax = (
+            float(pp_max_arr[i])
+            if hasattr(pp_max_arr, "__getitem__")
+            else float(pp_max_arr)
+        )
 
         ui = np.vstack([np.eye(n_cell), np.ones((1, n_cell)), -np.ones((1, n_cell))])
         ci = np.concatenate([np.zeros(n_cell), [ppmin], [-ppmax]])

@@ -165,9 +165,7 @@ class TestConstrainedOptimization:
         result = _solve_constrained_batch(A, B, 3, theta_sum, pp_min, pp_max)
         # Should return equal fractions
         for j in range(2):
-            np.testing.assert_allclose(
-                result[:, j], theta_sum[j] / 3, atol=1e-10
-            )
+            np.testing.assert_allclose(result[:, j], theta_sum[j] / 3, atol=1e-10)
 
 
 class TestNumericalEquivalence:
@@ -178,9 +176,7 @@ class TestNumericalEquivalence:
         """Load R validation data."""
         import os
 
-        val_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "validation"
-        )
+        val_dir = os.path.join(os.path.dirname(__file__), "..", "..", "validation")
         prop_mat_path = os.path.join(val_dir, "visium_bc_propMat.csv")
         mal_prop_path = os.path.join(val_dir, "visium_bc_malProp.csv")
 

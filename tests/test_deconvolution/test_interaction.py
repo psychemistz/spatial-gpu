@@ -82,9 +82,14 @@ class TestIdentifyInterface:
         import anndata as ad
 
         spots = [
-            "10x10", "10x12", "10x14",
-            "11x11", "11x13",
-            "12x10", "12x12", "12x14",
+            "10x10",
+            "10x12",
+            "10x14",
+            "11x11",
+            "11x13",
+            "12x10",
+            "12x12",
+            "12x14",
         ]
         n_spots = len(spots)
 

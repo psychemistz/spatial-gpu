@@ -121,9 +121,7 @@ def deconvolution_malignant(
             "Consider lowering the cutoff."
         )
 
-    mal_spot_idx = np.array(
-        [np.where(spot_names == s)[0][0] for s in mal_spots]
-    )
+    mal_spot_idx = np.array([np.where(spot_names == s)[0][0] for s in mal_spots])
 
     # --- CPM normalize malignant spots (1e5, matching R) ---
     counts_mal = counts[:, mal_spot_idx]
@@ -209,17 +207,13 @@ def deconvolution_malignant(
                 continue
 
             other_mask = (content == other_state).values
-            markers = _de_ttest(
-                log_mal, gene_names, state_mask, other_mask, n_top=500
-            )
+            markers = _de_ttest(log_mal, gene_names, state_mask, other_mask, n_top=500)
             temp_markers.extend(markers)
 
         # Signature genes: appear in exactly 1 comparison
         # (R code: tempMarkers==1, which means unique to one comparison)
         marker_counts = pd.Series(temp_markers).value_counts()
-        sig_genes[state_name] = list(
-            marker_counts[marker_counts == 1].index
-        )
+        sig_genes[state_name] = list(marker_counts[marker_counts == 1].index)
 
     lineage_tree_new: dict[str, list[str]] = {
         malignant: [f"Malignant cell state {s}" for s in states]
@@ -264,18 +258,14 @@ def deconvolution_malignant(
 
     # Merge: keep existing rows, add new state rows (exclude "Malignant"
     # row from prop_mat_new since it's already in res_deconv)
-    new_rows = prop_mat_new.loc[
-        ~prop_mat_new.index.isin([malignant])
-    ]
+    new_rows = prop_mat_new.loc[~prop_mat_new.index.isin([malignant])]
     prop_mat_merged = pd.concat([res_deconv, new_rows])
 
     # Update adata
     deconv["propMat"] = prop_mat_merged
     adata.uns["spacet"]["deconvolution"] = deconv
     adata.uns["spacet"]["propMat_columns"] = list(prop_mat_merged.index)
-    adata.obsm["spacet_propMat"] = (
-        prop_mat_merged.T.reindex(adata.obs_names).values
-    )
+    adata.obsm["spacet_propMat"] = prop_mat_merged.T.reindex(adata.obs_names).values
 
     return adata
 
@@ -332,9 +322,7 @@ def deconvolution_matched_scrnaseq(
 
     # --- Downsampling ---
     if sc_downsampling:
-        logger.info(
-            f"Down-sampling: True, n={sc_n_cell_each_lineage}"
-        )
+        logger.info(f"Down-sampling: True, n={sc_n_cell_each_lineage}")
         sc_counts, sc_annotation = _downsample_cells(
             sc_counts, sc_annotation, sc_n_cell_each_lineage
         )
@@ -351,17 +339,11 @@ def deconvolution_matched_scrnaseq(
         sc_counts = sc_counts[keep]
 
     # --- Generate reference ---
-    logger.info(
-        "1. Generate the cell type reference from the matched scRNAseq data."
-    )
-    ref = generate_ref(
-        sc_counts, sc_annotation, sc_lineage_tree, n_jobs=n_jobs
-    )
+    logger.info("1. Generate the cell type reference from the matched scRNAseq data.")
+    ref = generate_ref(sc_counts, sc_annotation, sc_lineage_tree, n_jobs=n_jobs)
 
     # --- Get ST counts ---
-    logger.info(
-        "2. Hierarchically deconvolve the Spatial Transcriptomics dataset."
-    )
+    logger.info("2. Hierarchically deconvolve the Spatial Transcriptomics dataset.")
     counts = _get_counts_genes_by_spots(adata)
     gene_names = np.array(adata.var_names)
     spot_names = np.array(adata.obs_names)
@@ -393,9 +375,7 @@ def deconvolution_matched_scrnaseq(
         )
     else:
         if cancer_type is None:
-            raise ValueError(
-                "cancer_type is required when sc_include_malignant=False."
-            )
+            raise ValueError("cancer_type is required when sc_include_malignant=False.")
 
         logger.info("Stage 1. Infer malignant cell fraction.")
         mal_res = _infer_mal_cor(
@@ -424,9 +404,7 @@ def deconvolution_matched_scrnaseq(
         },
         "propMat_columns": list(prop_mat.index),
     }
-    adata.obsm["spacet_propMat"] = (
-        prop_mat.T.reindex(adata.obs_names).values
-    )
+    adata.obsm["spacet_propMat"] = prop_mat.T.reindex(adata.obs_names).values
 
     return adata
 
@@ -518,9 +496,7 @@ def deconvolution_malignant_custom_scrnaseq(
 
     # --- Generate reference ---
     logger.info("1. Generate the reference from the input scRNAseq data.")
-    ref_new = generate_ref(
-        sc_counts, sc_annotation, sc_lineage_tree, n_jobs=n_jobs
-    )
+    ref_new = generate_ref(sc_counts, sc_annotation, sc_lineage_tree, n_jobs=n_jobs)
 
     # --- Get ST counts ---
     logger.info("2. Deconvolve malignant cells.")
@@ -538,9 +514,7 @@ def deconvolution_malignant_custom_scrnaseq(
     gene_names = gene_names[nonzero_mask]
 
     # --- Known cell fractions (non-malignant) ---
-    known_cell_types = [
-        k for k in lineage_tree_orig.keys() if k != malignant
-    ]
+    known_cell_types = [k for k in lineage_tree_orig.keys() if k != malignant]
     known_fractions = list(known_cell_types)
     if "Unidentifiable" in res_deconv.index:
         known_fractions.append("Unidentifiable")
@@ -569,9 +543,7 @@ def deconvolution_malignant_custom_scrnaseq(
 
     # Merge: keep existing + add new rows (exclude the parent lineage name)
     lineage_parent = list(sc_lineage_tree.keys())[0]
-    new_rows = prop_mat_new.loc[
-        ~prop_mat_new.index.isin([lineage_parent])
-    ]
+    new_rows = prop_mat_new.loc[~prop_mat_new.index.isin([lineage_parent])]
     prop_mat_merged = pd.concat([res_deconv, new_rows])
 
     # Update adata
@@ -579,9 +551,7 @@ def deconvolution_malignant_custom_scrnaseq(
     deconv["malRef"] = ref_new
     adata.uns["spacet"]["deconvolution"] = deconv
     adata.uns["spacet"]["propMat_columns"] = list(prop_mat_merged.index)
-    adata.obsm["spacet_propMat"] = (
-        prop_mat_merged.T.reindex(adata.obs_names).values
-    )
+    adata.obsm["spacet_propMat"] = prop_mat_merged.T.reindex(adata.obs_names).values
 
     return adata
 
@@ -627,9 +597,7 @@ def generate_ref(
 
     # Build cell ID -> cell type mapping
     if "cellID" not in sc_annotation.columns or "cellType" not in sc_annotation.columns:
-        raise ValueError(
-            "sc_annotation must have 'cellID' and 'cellType' columns."
-        )
+        raise ValueError("sc_annotation must have 'cellID' and 'cellType' columns.")
     sc_annotation = sc_annotation.copy()
     sc_annotation.index = sc_annotation["cellID"].astype(str).values
 
@@ -652,9 +620,9 @@ def generate_ref(
     # --- Build reference ---
     cell_types_level_1 = list(sc_lineage_tree.keys())
     cell_types_to_be_split = [
-        ct for ct in cell_types_level_1
-        if len(sc_lineage_tree[ct]) != 1
-        or sc_lineage_tree[ct][0] != ct
+        ct
+        for ct in cell_types_level_1
+        if len(sc_lineage_tree[ct]) != 1 or sc_lineage_tree[ct][0] != ct
     ]
 
     ref_profiles = pd.DataFrame(index=gene_names, dtype=np.float64)
@@ -682,9 +650,7 @@ def generate_ref(
                 other_subtypes = sc_lineage_tree[other_ct]
                 other_mask = np.isin(cell_types, other_subtypes)
 
-                markers = _de_ttest(
-                    sc_log2, gene_names, ct_mask, other_mask, n_top=500
-                )
+                markers = _de_ttest(sc_log2, gene_names, ct_mask, other_mask, n_top=500)
                 all_markers.append(markers)
 
             # Signature genes: present in >= (n_lineages - 1) comparisons
@@ -707,9 +673,7 @@ def generate_ref(
                 ref_profiles[subtype] = sc_norm[:, sub_col_idx].mean(axis=1)
 
                 # DE: subtype vs rest of the same lineage
-                other_subtypes_in_lineage = [
-                    s for s in subtypes if s != subtype
-                ]
+                other_subtypes_in_lineage = [s for s in subtypes if s != subtype]
                 other_sub_mask = np.isin(cell_types, other_subtypes_in_lineage)
 
                 if other_sub_mask.sum() > 0:
@@ -771,13 +735,23 @@ def _de_ttest(
     """
     try:
         return _de_limma_via_r(
-            log_expr, gene_names, group1_mask, group2_mask,
-            n_top, logfc_cutoff, fdr_cutoff,
+            log_expr,
+            gene_names,
+            group1_mask,
+            group2_mask,
+            n_top,
+            logfc_cutoff,
+            fdr_cutoff,
         )
     except (FileNotFoundError, OSError, RuntimeError):
         return _de_ttest_python(
-            log_expr, gene_names, group1_mask, group2_mask,
-            n_top, logfc_cutoff, fdr_cutoff,
+            log_expr,
+            gene_names,
+            group1_mask,
+            group2_mask,
+            n_top,
+            logfc_cutoff,
+            fdr_cutoff,
         )
 
 
@@ -890,7 +864,7 @@ def _de_ttest_python(
     logfc = mean1 - mean2
 
     sorted_idx = np.argsort(-t_stat)
-    top_idx = sorted_idx[:min(n_top, len(sorted_idx))]
+    top_idx = sorted_idx[: min(n_top, len(sorted_idx))]
 
     top_genes = gene_names[top_idx]
     top_logfc = logfc[top_idx]
@@ -946,9 +920,7 @@ def _validate_sc_inputs(
         count_ids = {str(c) for c in sc_counts.columns}
         anno_ids = {str(c) for c in sc_annotation.index}
         if count_ids != anno_ids:
-            raise ValueError(
-                "Cell IDs in sc_counts and sc_annotation do not match."
-            )
+            raise ValueError("Cell IDs in sc_counts and sc_annotation do not match.")
 
     # Validate lineage tree
     if len(sc_lineage_tree) == 0:

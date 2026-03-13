@@ -53,7 +53,9 @@ def visium_adata():
 
     adata = ad.AnnData(
         X=counts_sparse.T.tocsr(),
-        obs=pd.DataFrame(coords.values, index=pd.Index(spot_names), columns=coords.columns),
+        obs=pd.DataFrame(
+            coords.values, index=pd.Index(spot_names), columns=coords.columns
+        ),
         var=pd.DataFrame(index=pd.Index(gene_names)),
     )
 

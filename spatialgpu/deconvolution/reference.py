@@ -31,9 +31,7 @@ def load_comb_ref() -> dict[str, Any]:
         lineageTree : dict[str, list[str]]
             Hierarchical lineage tree (major -> [sub1, sub2, ...]).
     """
-    ref_profiles = pd.read_csv(
-        _DATA_DIR / "combRef_refProfiles.csv", index_col=0
-    )
+    ref_profiles = pd.read_csv(_DATA_DIR / "combRef_refProfiles.csv", index_col=0)
     with open(_DATA_DIR / "combRef_sigGenes.json") as f:
         sig_genes = json.load(f)
     with open(_DATA_DIR / "combRef_lineageTree.json") as f:
@@ -191,9 +189,7 @@ def get_cancer_signature(
         for name, series in cancer_dict[sig_type].items():
             if cancer_type in name:
                 return (sig_type, series)
-        raise ValueError(
-            f"SpaCET does not include {cancer_type} {sig_type} signature."
-        )
+        raise ValueError(f"SpaCET does not include {cancer_type} {sig_type} signature.")
 
     if cancer_type == "PANCAN":
         comb_list = [("expr", "PANCAN")]

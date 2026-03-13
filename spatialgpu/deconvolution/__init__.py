@@ -16,11 +16,6 @@ from spatialgpu.deconvolution.extensions import (
     generate_ref,
 )
 from spatialgpu.deconvolution.gene_set_score import gene_set_score
-from spatialgpu.deconvolution.io import (
-    create_spacet_object,
-    create_spacet_object_10x,
-    quality_control,
-)
 from spatialgpu.deconvolution.interaction import (
     cci_cell_type_pair,
     cci_colocalization,
@@ -28,6 +23,11 @@ from spatialgpu.deconvolution.interaction import (
     combine_interface,
     distance_to_interface,
     identify_interface,
+)
+from spatialgpu.deconvolution.io import (
+    create_spacet_object,
+    create_spacet_object_10x,
+    quality_control,
 )
 from spatialgpu.deconvolution.reference import (
     get_cancer_signature,
@@ -41,7 +41,12 @@ from spatialgpu.deconvolution.spatial_correlation import (
     cal_weights,
     spatial_correlation,
 )
-from spatialgpu.deconvolution.visualization import visualize_spatial_feature
+from spatialgpu.deconvolution.visualization import (
+    visualize_cell_type_pair,
+    visualize_colocalization,
+    visualize_distance_to_interface,
+    visualize_spatial_feature,
+)
 
 __all__ = [
     # Core deconvolution
@@ -72,6 +77,9 @@ __all__ = [
     "write_gmt",
     # Visualization
     "visualize_spatial_feature",
+    "visualize_colocalization",
+    "visualize_cell_type_pair",
+    "visualize_distance_to_interface",
     # I/O
     "create_spacet_object",
     "create_spacet_object_10x",

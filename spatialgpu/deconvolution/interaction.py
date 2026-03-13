@@ -37,9 +37,7 @@ logger = logging.getLogger(__name__)
 def _ensure_cci(adata: ad.AnnData) -> dict:
     """Return adata.uns['spacet']['CCI'], creating it if absent."""
     if "spacet" not in adata.uns:
-        raise ValueError(
-            "No SpaCET results found. Run deconvolution() first."
-        )
+        raise ValueError("No SpaCET results found. Run deconvolution() first.")
     spacet = adata.uns["spacet"]
     if "CCI" not in spacet:
         spacet["CCI"] = {}
@@ -77,9 +75,7 @@ def cci_colocalization(adata: ad.AnnData) -> ad.AnnData:
 
     # Remove helper rows
     exclude = {"Unidentifiable", "Macrophage other"}
-    res_deconv = res_deconv.loc[
-        ~res_deconv.index.isin(exclude)
-    ]
+    res_deconv = res_deconv.loc[~res_deconv.index.isin(exclude)]
 
     # Round to 2 decimals
     res_deconv = res_deconv.round(2)
@@ -114,20 +110,20 @@ def cci_colocalization(adata: ad.AnnData) -> ad.AnnData:
         for j in range(n_types):
             ct1 = cell_types[i]
             ct2 = cell_types[j]
-            rows.append({
-                "cell_type_1": ct1,
-                "cell_type_2": ct2,
-                "fraction_product": float(
-                    overall_fraction[ct1] * overall_fraction[ct2]
-                ),
-                "fraction_rho": round(float(rho_frac[i, j]), 3),
-                "fraction_pv": float(pval_frac[i, j]),
-            })
+            rows.append(
+                {
+                    "cell_type_1": ct1,
+                    "cell_type_2": ct2,
+                    "fraction_product": float(
+                        overall_fraction[ct1] * overall_fraction[ct2]
+                    ),
+                    "fraction_rho": round(float(rho_frac[i, j]), 3),
+                    "fraction_pv": float(pval_frac[i, j]),
+                }
+            )
 
     summary_df = pd.DataFrame(rows)
-    summary_df.index = [
-        f"{r['cell_type_1']}_{r['cell_type_2']}" for r in rows
-    ]
+    summary_df.index = [f"{r['cell_type_1']}_{r['cell_type_2']}" for r in rows]
 
     # Replace NaN rho with 0, NaN pv with 1
     summary_df["fraction_rho"] = summary_df["fraction_rho"].fillna(0.0)
@@ -182,15 +178,11 @@ def cci_colocalization(adata: ad.AnnData) -> ad.AnnData:
             ct2 = ref_types[j]
             key = f"{ct1}_{ct2}"
             if key in summary_df.index:
-                summary_df.loc[key, "reference_rho"] = round(
-                    float(rho_ref[i, j]), 3
-                )
+                summary_df.loc[key, "reference_rho"] = round(float(rho_ref[i, j]), 3)
                 summary_df.loc[key, "reference_pv"] = float(pval_ref[i, j])
 
     # Remove same cell-type pairs
-    summary_df = summary_df.loc[
-        summary_df["cell_type_1"] != summary_df["cell_type_2"]
-    ]
+    summary_df = summary_df.loc[summary_df["cell_type_1"] != summary_df["cell_type_2"]]
 
     cci = _ensure_cci(adata)
     cci["colocalization"] = summary_df
@@ -260,10 +252,12 @@ def cci_lr_network_score(
 
     # Load LR database
     lr_db = load_lr_database()
-    lr_pairs = pd.DataFrame({
-        "L": lr_db.iloc[:, 1].values,
-        "R": lr_db.iloc[:, 3].values,
-    })
+    lr_pairs = pd.DataFrame(
+        {
+            "L": lr_db.iloc[:, 1].values,
+            "R": lr_db.iloc[:, 3].values,
+        }
+    )
 
     # Filter DLK2 from receptors
     lr_pairs = lr_pairs.loc[lr_pairs["R"] != "DLK2"]
@@ -276,9 +270,7 @@ def cci_lr_network_score(
     lr_pairs.index = lr_pairs["L"] + "_" + lr_pairs["R"]
 
     n_pairs = len(lr_pairs)
-    logger.info(
-        f"Step 1. Permute Ligand-Receptor network. ({n_pairs} pairs)"
-    )
+    logger.info(f"Step 1. Permute Ligand-Receptor network. ({n_pairs} pairs)")
 
     # Build bipartite adjacency matrix
     ligands = sorted(lr_pairs["L"].unique())
@@ -463,13 +455,9 @@ def cci_cell_type_pair(
     spacet = adata.uns["spacet"]
     res_deconv: pd.DataFrame = spacet["deconvolution"]["propMat"]
 
-    missing = [
-        ct for ct in cell_type_pair if ct not in res_deconv.index
-    ]
+    missing = [ct for ct in cell_type_pair if ct not in res_deconv.index]
     if missing:
-        raise ValueError(
-            f"Cell type(s) not found in deconvolution results: {missing}"
-        )
+        raise ValueError(f"Cell type(s) not found in deconvolution results: {missing}")
 
     # Sort alphabetically (matching R behavior)
     cell_type_pair = sorted(cell_type_pair)
@@ -534,10 +522,12 @@ def cci_cell_type_pair(
     if content.eq("Both").sum() > 5:
         # Build comparison dataframe
         network_score = lr_score_mat[1, :]  # Network_Score row
-        fg_df = pd.DataFrame({
-            "group": content.values,
-            "value": network_score,
-        })
+        fg_df = pd.DataFrame(
+            {
+                "group": content.values,
+                "value": network_score,
+            }
+        )
         fg_df = fg_df.dropna(subset=["group"])
         fg_df.loc[fg_df["group"].isin(cell_type_pair), "group"] = "Single"
 
@@ -549,9 +539,7 @@ def cci_cell_type_pair(
         cd1 = float(f"{cd1:.2g}")
 
         # Wilcoxon rank-sum test
-        _, pv2 = stats.mannwhitneyu(
-            both_vals, single_vals, alternative="two-sided"
-        )
+        _, pv2 = stats.mannwhitneyu(both_vals, single_vals, alternative="two-sided")
         pv2 = float(f"{pv2:.2g}")
 
         test_res.loc[pair_key, "groupCompare_cohen.d"] = cd1
@@ -656,9 +644,7 @@ def identify_interface(
         )
 
     if not (0 <= malignant_cutoff <= 1):
-        raise ValueError(
-            "malignant_cutoff must be between 0 and 1."
-        )
+        raise ValueError("malignant_cutoff must be between 0 and 1.")
 
     spot_names = list(res_deconv.columns)
     mal_fracs = res_deconv.loc[malignant].values.astype(np.float64)
@@ -688,9 +674,7 @@ def identify_interface(
         ]
 
         # Get classifications of existing neighbors
-        neighbor_types = [
-            content[n] for n in neighbors if n in content.index
-        ]
+        neighbor_types = [content[n] for n in neighbors if n in content.index]
 
         if len(neighbor_types) == 0:
             # No neighbors found, keep as Stroma
@@ -752,13 +736,9 @@ def combine_interface(
     res_deconv: pd.DataFrame = spacet["deconvolution"]["propMat"]
     cci = _ensure_cci(adata)
 
-    missing = [
-        ct for ct in cell_type_pair if ct not in res_deconv.index
-    ]
+    missing = [ct for ct in cell_type_pair if ct not in res_deconv.index]
     if missing:
-        raise ValueError(
-            f"Cell type(s) not found in deconvolution results: {missing}"
-        )
+        raise ValueError(f"Cell type(s) not found in deconvolution results: {missing}")
 
     cell_type_pair = sorted(cell_type_pair)
     ct1, ct2 = cell_type_pair
@@ -771,12 +751,11 @@ def combine_interface(
     if "Interface" not in interface_df.index:
         raise ValueError("Run identify_interface() first.")
 
-    if "interaction" not in cci or pair_key not in cci["interaction"].get(
-        "testRes", pd.DataFrame()
-    ).index:
-        raise ValueError(
-            f"Run cci_cell_type_pair() for {cell_type_pair} first."
-        )
+    if (
+        "interaction" not in cci
+        or pair_key not in cci["interaction"].get("testRes", pd.DataFrame()).index
+    ):
+        raise ValueError(f"Run cci_cell_type_pair() for {cell_type_pair} first.")
 
     group_mat = cci["interaction"]["groupMat"]
     spot_names = list(res_deconv.columns)
@@ -787,8 +766,7 @@ def combine_interface(
 
     # Filter to Stroma spots on interface
     stroma_spots = [
-        s for s in spot_names
-        if interface_df.loc["Interface", s] == "Stroma"
+        s for s in spot_names if interface_df.loc["Interface", s] == "Stroma"
     ]
     interaction_spots = [s for s in both_spots if s in stroma_spots]
 
@@ -877,12 +855,10 @@ def distance_to_interface(
 
     # Interface (border) spots and Stroma core spots
     spot_border = [
-        s for s in spot_names
-        if interface_df.loc["Interface", s] == "Interface"
+        s for s in spot_names if interface_df.loc["Interface", s] == "Interface"
     ]
     spot_stroma = [
-        s for s in spot_names
-        if interface_df.loc["Interface", s] == "Stroma"
+        s for s in spot_names if interface_df.loc["Interface", s] == "Stroma"
     ]
 
     # "Both" spots restricted to Stroma
@@ -890,14 +866,12 @@ def distance_to_interface(
     pair_groups = group_mat.loc[pair_key, spot_names]
 
     both_spots = [
-        s for s in spot_names
-        if pair_groups[s] == "Both" and s in spot_stroma
+        s for s in spot_names if pair_groups[s] == "Both" and s in spot_stroma
     ]
 
     # Single-type spots restricted to Stroma
     single_spots = [
-        s for s in spot_names
-        if pair_groups[s] in cell_type_pair and s in spot_stroma
+        s for s in spot_names if pair_groups[s] in cell_type_pair and s in spot_stroma
     ]
 
     if len(both_spots) == 0 or len(spot_border) == 0:

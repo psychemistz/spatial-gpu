@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from spatialgpu.deconvolution.reference import (
     get_cancer_signature,
@@ -35,14 +33,14 @@ class TestCombRef:
     def test_sig_genes_not_empty(self):
         ref = load_comb_ref()
         assert len(ref["sigGenes"]) > 0
-        for key, genes in ref["sigGenes"].items():
+        for _key, genes in ref["sigGenes"].items():
             assert isinstance(genes, list)
 
     def test_lineage_tree_hierarchy(self):
         ref = load_comb_ref()
         tree = ref["lineageTree"]
         assert len(tree) > 5  # >5 major lineages
-        for key, subtypes in tree.items():
+        for _key, subtypes in tree.items():
             assert isinstance(subtypes, list)
             assert len(subtypes) >= 1
 
@@ -63,7 +61,7 @@ class TestCancerDictionary:
     def test_cna_signatures(self):
         cd = load_cancer_dictionary()
         assert len(cd["CNA"]) > 0
-        for name, sig in cd["CNA"].items():
+        for _name, sig in cd["CNA"].items():
             assert isinstance(sig, pd.Series)
             assert len(sig) > 0
 
@@ -113,7 +111,7 @@ class TestGMT:
     def test_read_hallmark(self):
         gmt = load_gene_set("Hallmark")
         assert len(gmt) >= 50  # MSigDB Hallmark has 50 sets
-        for name, genes in gmt.items():
+        for _name, genes in gmt.items():
             assert len(genes) > 0
 
     def test_read_cancer_cell_state(self):
