@@ -137,3 +137,14 @@ Thumbs.db
 benchmark_results.csv
 *.h5ad
 *.zarr/
+
+# Claude Code local files
+CLAUDE.md
+.claude/
+
+# Validation data (large R outputs for numerical equivalence testing)
+/validation/
+/data/
+
+# Local instruction files
+INSTRUCTION.md
