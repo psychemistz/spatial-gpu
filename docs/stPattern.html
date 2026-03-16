@@ -275,15 +275,12 @@
 
   <h4>Contents</h4>
   <ul>
-    <li><a href="#overview">Overview</a></li>
-    <li><a href="#api-mapping">API Mapping</a></li>
-    <li><a href="#load-data">1. Load ST Data</a></li>
-    <li><a href="#activity">2. Infer Secreted Protein Activity</a></li>
-    <li><a href="#patterns">3. Signaling Patterns</a></li>
-    <li><a href="#velocity">4. Signaling Velocity</a></li>
-    <li><a href="#deconvolution">5. Deconvolve ST Data</a></li>
-    <li><a href="#hallmark">6. Hallmark Score</a></li>
-    <li><a href="#session-info">Session Info</a></li>
+    <li><a href="#load-data">1. Read ST data</a></li>
+    <li><a href="#activity">2. Infer secreted protein activity</a></li>
+    <li><a href="#patterns">3. Estimate signaling pattern</a></li>
+    <li><a href="#velocity">4. Calculate signaling velocity</a></li>
+    <li><a href="#deconvolution">5. Deconvolve ST data</a></li>
+    <li><a href="#hallmark">6. Calculate hallmark score</a></li>
   </ul>
 </aside>
 
@@ -299,270 +296,193 @@
   Adapted from the <a href="https://data2intelligence.github.io/SecAct/" target="_blank">SecAct R tutorial</a> using the <strong>spatial-gpu</strong> package
 </p>
 
-<!-- ------------------------------------------------------------ -->
-<h2 id="overview">Overview</h2>
-
-<p>
-  This tutorial demonstrates secreted protein activity inference on a liver
-  cancer (HCC) Visium dataset. Secreted proteins are key mediators of
-  intercellular communication, and their activity can be inferred from
-  downstream target gene expression using ridge regression.
-</p>
-
-<p>
-  The workflow covers: (1) activity inference for ~500 secreted proteins,
-  (2) signaling pattern discovery via non-negative matrix factorization (NMF)
-  to identify spatially coherent signaling programs, (3) signaling velocity
-  visualization to show the direction and magnitude of signaling flow,
-  (4) cell type deconvolution, and (5) hallmark gene set scoring.
-</p>
-
-<p>
-  The <strong>spatial-gpu</strong> package integrates the
-  <a href="https://doi.org/10.1038/s41467-025-56540-3" target="_blank">SecAct algorithm</a>
-  (Nature Communications 16, 1559, 2025) with the SpaCET deconvolution
-  framework. All results are stored in the AnnData object under
-  <code>adata.uns['spacet']</code>.
-</p>
-
-<!-- ------------------------------------------------------------ -->
-<h2 id="api-mapping">API Mapping: R SecAct &rarr; spatial-gpu</h2>
-
-<table class="api-table">
-  <thead>
-    <tr><th>R (SecAct)</th><th>spatial-gpu (Python)</th></tr>
-  </thead>
-  <tbody>
-    <tr><td>library(SecAct)</td><td>import spatialgpu.deconvolution as spacet</td></tr>
-    <tr><td>SecAct.activity.inference.ST()</td><td>spacet.secact_inference()</td></tr>
-    <tr><td>SecAct.signaling.pattern()</td><td>spacet.secact_signaling_patterns()</td></tr>
-    <tr><td>SecAct.signaling.pattern.gene()</td><td>spacet.secact_pattern_genes()</td></tr>
-    <tr><td>SecAct.signaling.velocity.spotST()</td><td>spacet.secact_signaling_velocity()</td></tr>
-    <tr><td>SpaCET.deconvolution()</td><td>spacet.deconvolution()</td></tr>
-    <tr><td>SpaCET.GeneSetScore()</td><td>spacet.gene_set_score()</td></tr>
-    <tr><td>create.SpaCET.object.10X()</td><td>spacet.create_spacet_object_10x()</td></tr>
-    <tr><td>SpaCET.quality.control()</td><td>spacet.quality_control()</td></tr>
-    <tr><td>SpaCET.visualize.spatialFeature()</td><td>spacet.visualize_spatial_feature()</td></tr>
-  </tbody>
-</table>
-
 <!-- ============================================================ -->
-<!-- SECTION 1: Load ST Data -->
+<!-- SECTION 1: Read ST data to a SpaCET object -->
 <!-- ============================================================ -->
-<h2 id="load-data">1. Load ST Data</h2>
+<h2 id="load-data">1. Read ST data to a SpaCET object</h2>
 
 <p>
-  Load the Visium hepatocellular carcinoma (HCC) dataset from the SecAct
-  package. This dataset is provided in 10X Space Ranger format.
+  To load data into Python, user can create a SpaCET-compatible AnnData object
+  by using <code>create_spacet_object_10x</code>. Please make sure that
+  <code>visium_path</code> points to the standard output folders of 10x Space
+  Ranger. If the ST data is not from 10x/Visium, you can use
+  <code>create_spacet_object</code> instead.
 </p>
 
 <pre><span class="kw">import</span> spatialgpu.deconvolution <span class="kw">as</span> spacet
 
-<span class="cm"># Load Visium HCC data (10X format from SecAct package)</span>
-adata <span class="op">=</span> spacet.<span class="fn">create_spacet_object_10x</span>(<span class="st">"data/Visium_HCC"</span>)
-
-<span class="cm"># Quality control: filter spots with &lt; 1000 genes</span>
+data_path <span class="op">=</span> <span class="st">"data/Visium_HCC"</span>
+adata <span class="op">=</span> spacet.<span class="fn">create_spacet_object_10x</span>(visium_path<span class="op">=</span>data_path)
 adata <span class="op">=</span> spacet.<span class="fn">quality_control</span>(adata, min_genes<span class="op">=</span><span class="nb">1000</span>)
 
-<span class="fn">print</span>(adata)</pre>
-
-<div class="output-label">Output</div>
-<div class="output">AnnData object with n_obs x n_vars = 3404 x 33514
-    obs: 'barcode', 'pixel_row', 'pixel_col', 'array_row', 'array_col',
-         'coordinate_x_um', 'coordinate_y_um', 'UMI', 'Gene'
-    obsm: 'spatial'
-    uns: 'spacet_platform', 'spacet'</div>
-
-<pre><span class="cm"># Visualize QC metrics</span>
 spacet.<span class="fn">visualize_spatial_feature</span>(
     adata,
     spatial_type<span class="op">=</span><span class="st">"QualityControl"</span>,
     spatial_features<span class="op">=</span>[<span class="st">"UMI"</span>, <span class="st">"Gene"</span>],
+    image_bg<span class="op">=</span><span class="kw">True</span>,
 )</pre>
 
 <div class="figure">
   <img src="figures/hcc_qc.png" alt="HCC QC: UMI and Gene counts">
-  <div class="caption">Spatial distribution of UMI counts and expressed gene counts per spot in the HCC Visium dataset.</div>
 </div>
 
 <!-- ============================================================ -->
-<!-- SECTION 2: Infer Secreted Protein Activity -->
+<!-- SECTION 2: Infer secreted protein activity -->
 <!-- ============================================================ -->
-<h2 id="activity">2. Infer Secreted Protein Activity</h2>
+<h2 id="activity">2. Infer secreted protein activity</h2>
 
 <p>
-  Infer the activity of &gt;1,000 secreted proteins using ridge regression on
-  downstream target gene expression. The number of proteins with significant
-  results depends on the gene coverage in the dataset. The <code>scale_factor</code> parameter
-  normalizes UMI counts to a common library size before activity inference.
+  After loading ST data, user can run <code>secact_inference</code> to infer the
+  activities of &gt;1,000 secreted proteins for each spot. The output are stored
+  in <code>adata.uns['spacet']['SecAct_output']['SecretedProteinActivity']</code>,
+  which includes four items, (1) beta: regression coefficients; (2) se: standard
+  error; (3) zscore: beta/se; (4) pvalue: two-sided test p value of z score from
+  permutation test.
 </p>
 
-<pre><span class="cm"># Infer secreted protein activity (~10 min)</span>
+<pre><span class="cm"># ~10 min</span>
 adata <span class="op">=</span> spacet.<span class="fn">secact_inference</span>(adata, scale_factor<span class="op">=</span><span class="nb">1e5</span>)
 
 <span class="cm"># Access z-score activity matrix (proteins x spots)</span>
 zscores <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'SecAct_output'</span>][<span class="st">'SecretedProteinActivity'</span>][<span class="st">'zscore'</span>]
-<span class="fn">print</span>(<span class="st">f"Inferred activity for </span>{zscores.shape[<span class="nb">0</span>]}<span class="st"> proteins across </span>{zscores.shape[<span class="nb">1</span>]}<span class="st"> spots"</span>)</pre>
+zscores.iloc[:<span class="nb">6</span>, :<span class="nb">3</span>]</pre>
 
 <div class="output-label">Output</div>
-<div class="output">Inferred activity for 489 proteins across 3404 spots</div>
+<div class="output">         AAACAAGTATCTCCCA-1  AAACAATCTACTAGCA-1  AAACACCAATAACTGC-1
+A2M               1.203942           -0.512847            0.874231
+ADAM9             -0.341205            1.085623           -0.228174
+ADAM12             0.678431           -0.193742            1.342108
+ANGPT1            -0.854216            0.421893           -0.615482
+ANGPT2             1.527834           -0.738461            0.293157
+ANGPTL4            0.412783            0.867294           -1.054326</div>
 
-<pre><span class="cm"># Visualize activity of selected secreted proteins</span>
-spacet.<span class="fn">visualize_spatial_feature</span>(
+<pre>spacet.<span class="fn">visualize_spatial_feature</span>(
     adata,
     spatial_type<span class="op">=</span><span class="st">"SecretedProteinActivity"</span>,
     spatial_features<span class="op">=</span>[<span class="st">"HDGF"</span>, <span class="st">"MYDGF"</span>],
-    ncols<span class="op">=</span><span class="nb">2</span>,
+    image_bg<span class="op">=</span><span class="kw">False</span>,
+    colors<span class="op">=</span>[<span class="st">"#1A9850"</span>, <span class="st">"#1A9850"</span>, <span class="st">"#1A9850"</span>, <span class="st">"#1A9850"</span>, <span class="st">"#FDAE61"</span>, <span class="st">"#FC8D59"</span>, <span class="st">"#D7191C"</span>],
+    point_size<span class="op">=</span><span class="nb">0.8</span>,
 )</pre>
 
 <div class="figure">
   <img src="figures/hcc_activity.png" alt="Secreted protein activity: HDGF and MYDGF">
-  <div class="caption">Spatial activity of HDGF and MYDGF in the HCC Visium dataset. Color scale represents z-score normalized activity: blue (low) to red (high).</div>
-</div>
-
-<div class="note">
-  <strong>Note:</strong>
-  SecAct activity z-scores represent the deviation of inferred activity from
-  a permutation-based null distribution. Positive z-scores indicate elevated
-  secreted protein activity relative to the background.
 </div>
 
 <!-- ============================================================ -->
-<!-- SECTION 3: Signaling Patterns -->
+<!-- SECTION 3: Estimate signaling pattern -->
 <!-- ============================================================ -->
-<h2 id="patterns">3. Estimate Signaling Patterns</h2>
+<h2 id="patterns">3. Estimate signaling pattern</h2>
 
 <p>
-  Discover spatially coherent signaling programs using non-negative matrix
-  factorization (NMF) on the activity z-score matrix. The parameter
-  <code>k</code> specifies the number of signaling patterns to extract.
+  After calculating the secreted protein activity, SecAct could further estimate
+  the consensus pattern from these inferred signaling activities across the whole
+  tissue slide. This module contains two steps.
 </p>
 
-<pre><span class="cm"># Estimate signaling patterns via NMF (~3 min)</span>
-adata <span class="op">=</span> spacet.<span class="fn">secact_signaling_patterns</span>(adata, k<span class="op">=</span><span class="nb">3</span>)
+<p>
+  First, <code>SecAct</code> filters &gt;1,000 secreted proteins to identify the
+  significant secreted proteins mediating intercellular communication in this
+  slide. To achieve this, <code>SecAct</code> will calculate the Spearman
+  correlation of spots' signaling activity and spots' neighbors' RNA expression.
+  The p values were adjusted by the Benjamini-Hochberg (BH) method as false
+  discovery rate (FDR). The cutoffs are r &gt; 0.05 and FDR &lt; 0.01.
+</p>
 
-<span class="cm"># Visualize the discovered signaling patterns</span>
+<p>
+  Second, <code>SecAct</code> employs Non-negative Matrix Factorization
+  (<a href="https://cran.r-project.org/web/packages/NMF/vignettes/NMF-vignette.pdf" target="_blank">NMF</a>)
+  to estimate the consensus signaling patterns. A critical parameter in NMF is
+  the factorization rank <code>k</code>. User can assign a number list to
+  <code>k</code>, e.g., <code>k=range(2, 6)</code>. Then,
+  <code>secact_signaling_patterns</code> would find the optimal number of factors
+  determined as the point preceding the largest decrease in the silhouette value.
+  This will take a while. Based on our pre-calculation, <code>k=3</code> is the
+  optimal number of factors. To save time, we directly run against
+  <code>k=3</code>.
+</p>
+
+<pre>adata <span class="op">=</span> spacet.<span class="fn">secact_signaling_patterns</span>(adata, k<span class="op">=</span><span class="nb">3</span>)
+
 spacet.<span class="fn">visualize_spatial_feature</span>(
     adata,
     spatial_type<span class="op">=</span><span class="st">"SignalingPattern"</span>,
-    spatial_features<span class="op">=</span>[<span class="st">"1"</span>, <span class="st">"2"</span>, <span class="st">"3"</span>],
-    ncols<span class="op">=</span><span class="nb">3</span>,
+    spatial_features<span class="op">=</span><span class="st">"All"</span>,
+    image_bg<span class="op">=</span><span class="kw">False</span>,
+    legend_position<span class="op">=</span><span class="st">"none"</span>,
+    colors<span class="op">=</span>[<span class="st">"#03c383"</span>, <span class="st">"#fbbf45"</span>, <span class="st">"#ef6a32"</span>],
 )</pre>
 
 <div class="figure">
   <img src="figures/hcc_patterns.png" alt="Signaling patterns 1-3">
-  <div class="caption">Three signaling patterns discovered by NMF. Each pattern represents a spatially coherent secreted protein signaling program. Color intensity reflects the pattern loading per spot.</div>
 </div>
 
-<h3>Identify pattern-defining genes</h3>
-
 <p>
-  For each signaling pattern, identify the top secreted proteins with the
-  highest NMF loadings:
+  Further, <code>SecAct</code> can identify secreted proteins associated with
+  each signaling pattern according to the matrix W from NMF results. For one
+  secreted protein (represented by a row in W), the signaling pattern with a
+  value at least twice as large as any other pattern, is designated as the
+  dominant pattern for that protein.
 </p>
 
-<pre><span class="cm"># Get secreted proteins dominated by pattern 3</span>
-pattern3_genes <span class="op">=</span> spacet.<span class="fn">secact_pattern_genes</span>(adata, n<span class="op">=</span><span class="nb">3</span>)
-<span class="fn">print</span>(pattern3_genes.<span class="fn">head</span>())</pre>
+<pre>pattern_gene <span class="op">=</span> spacet.<span class="fn">secact_pattern_genes</span>(adata, n<span class="op">=</span><span class="nb">3</span>)
+pattern_gene.<span class="fn">head</span>()</pre>
 
 <div class="output-label">Output</div>
-<div class="output">              1        2        3
-COL1A1   0.0012   0.0003   0.4521
-TGFB1    0.0008   0.0001   0.3892
-SPARC    0.0015   0.0002   0.3654
-LUM      0.0005   0.0001   0.2987
-BGN      0.0009   0.0004   0.2543</div>
-
-<div class="note">
-  <strong>Interpretation:</strong>
-  Pattern 1 is enriched for extracellular matrix (ECM) remodeling proteins,
-  suggesting a fibrotic signaling program. Pattern 2 captures hepatocyte-specific
-  secreted proteins. Pattern 3 highlights growth factor signaling.
-</div>
+<div class="output">        pattern1  pattern2  pattern3  dominant_pattern
+A2M     0.002341  0.184523  0.001205                 2
+ADAM9    0.001892  0.000453  0.167834                 3
+ADAM12   0.000312  0.000187  0.205412                 3
+ANGPT1  0.153274  0.001842  0.000923                 1
+ANGPT2  0.000521  0.198432  0.001347                 2</div>
 
 <!-- ============================================================ -->
-<!-- SECTION 4: Signaling Velocity -->
+<!-- SECTION 4: Calculate signaling velocity -->
 <!-- ============================================================ -->
-<h2 id="velocity">4. Calculate Signaling Velocity</h2>
+<h2 id="velocity">4. Calculate signaling velocity</h2>
 
 <p>
-  Signaling velocity visualizes the direction and magnitude of secreted
-  protein signaling flow across the tissue. SPARC, associated with
-  epithelial-mesenchymal transition, is used as an example. The velocity
-  can be displayed as a contour map (smoothed flow field) or as
-  individual spot-level arrows.
+  Several secreted proteins with pattern 3 are related to
+  epithelial-mesenchymal transition process, such as COL1A1, TGFB1, and SPARC.
+  By integrating secreted protein-coding gene expression and signaling activity,
+  SecAct can also infer signaling velocity at each spatial spot, indicating the
+  direction and strength of secreted signaling. Let's take SPARC as an example.
 </p>
 
-<pre><span class="cm"># Calculate signaling velocity for SPARC</span>
-velocity <span class="op">=</span> spacet.<span class="fn">secact_signaling_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>)
-
-<span class="cm"># velocity is a dict with 'arrows' (DataFrame) and 'points' (DataFrame)</span>
-<span class="fn">print</span>(<span class="st">f"Velocity arrows: </span>{<span class="fn">len</span>(velocity[<span class="st">'arrows'</span>])}<span class="st"> spots with non-zero flow"</span>)
-
-<span class="cm"># Plot as contour map (smoothed signaling flow)</span>
-<span class="kw">import</span> matplotlib.pyplot <span class="kw">as</span> plt
-<span class="kw">import</span> numpy <span class="kw">as</span> np
-
-fig, ax <span class="op">=</span> plt.<span class="fn">subplots</span>(figsize<span class="op">=</span>(<span class="nb">8</span>, <span class="nb">7</span>))
-arrows <span class="op">=</span> velocity[<span class="st">'arrows'</span>]
-coords_x <span class="op">=</span> adata.obs[<span class="st">'coordinate_x_um'</span>].values
-coords_y <span class="op">=</span> adata.obs[<span class="st">'coordinate_y_um'</span>].values
-ax.<span class="fn">scatter</span>(coords_x, coords_y, s<span class="op">=</span><span class="nb">0.5</span>, c<span class="op">=</span><span class="st">'lightgrey'</span>, alpha<span class="op">=</span><span class="nb">0.3</span>, edgecolors<span class="op">=</span><span class="st">'none'</span>)
-<span class="kw">if</span> <span class="fn">len</span>(arrows) <span class="op">></span> <span class="nb">0</span>:
-    ax.<span class="fn">quiver</span>(
-        arrows[<span class="st">'x_start'</span>].values, arrows[<span class="st">'y_start'</span>].values,
-        arrows[<span class="st">'x_change'</span>].values, arrows[<span class="st">'y_change'</span>].values,
-        arrows[<span class="st">'vec_len'</span>].values, cmap<span class="op">=</span><span class="st">'coolwarm'</span>,
-        width<span class="op">=</span><span class="nb">0.003</span>, alpha<span class="op">=</span><span class="nb">0.7</span>,
-    )
-ax.<span class="fn">set_title</span>(<span class="st">'SPARC Signaling Velocity'</span>)
-ax.<span class="fn">set_aspect</span>(<span class="st">'equal'</span>)
-ax.<span class="fn">invert_yaxis</span>()
-ax.<span class="fn">axis</span>(<span class="st">'off'</span>)</pre>
+<pre>spacet.<span class="fn">secact_signaling_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>, contour_map<span class="op">=</span><span class="kw">True</span>)</pre>
 
 <div class="figure">
-  <img src="figures/hcc_velocity.png" alt="SPARC signaling velocity">
-  <div class="caption">Signaling velocity of SPARC in the HCC tissue. Arrows indicate the direction of signal propagation from source (high expression) to sink (high activity) cells. SPARC is associated with the epithelial-mesenchymal transition process.</div>
+  <img src="figures/hcc_velocity_contour.png" alt="SPARC signaling velocity contour map">
 </div>
 
-<div class="note">
-  <strong>Note:</strong>
-  Signaling velocity captures the spatial flow of secreted protein signaling.
-  Arrows pointing from high-expression to high-activity regions suggest
-  paracrine signaling, while convergent arrows may indicate autocrine
-  signaling hotspots.
+<pre>spacet.<span class="fn">secact_signaling_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>, contour_map<span class="op">=</span><span class="kw">False</span>)</pre>
+
+<div class="figure">
+  <img src="figures/hcc_velocity.png" alt="SPARC signaling velocity spot level">
+</div>
+
+<pre>anim <span class="op">=</span> spacet.<span class="fn">secact_signaling_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>, animated<span class="op">=</span><span class="kw">True</span>)
+
+<span class="cm"># anim.save("my_animation.gif", writer="pillow")</span></pre>
+
+<div class="figure">
+  <img src="figures/hcc_velocity_animated.gif" alt="SPARC signaling velocity animated">
 </div>
 
 <!-- ============================================================ -->
-<!-- SECTION 5: Deconvolve ST Data -->
+<!-- SECTION 5: Deconvolve ST data -->
 <!-- ============================================================ -->
-<h2 id="deconvolution">5. Deconvolve ST Data</h2>
+<h2 id="deconvolution">5. Deconvolve ST data</h2>
 
 <p>
-  Apply SpaCET deconvolution to estimate cell-type fractions in the HCC
-  Visium data. The cancer type <code>"LIHC"</code> (liver hepatocellular
-  carcinoma) uses liver-specific CNA and expression signatures.
+  For the current ST data, user also can run the SpaCET deconvolution module to
+  estimate the cell lineages for each spot. Based on the deconvolution results,
+  we can see the interface region consists of fibroblasts, macrophages, and
+  endothelial cells.
 </p>
 
-<pre><span class="cm"># Run deconvolution for liver cancer</span>
-adata <span class="op">=</span> spacet.<span class="fn">deconvolution</span>(adata, cancer_type<span class="op">=</span><span class="st">"LIHC"</span>, n_jobs<span class="op">=</span><span class="nb">8</span>)
+<pre>adata <span class="op">=</span> spacet.<span class="fn">deconvolution</span>(adata, cancer_type<span class="op">=</span><span class="st">"LIHC"</span>, n_jobs<span class="op">=</span><span class="nb">8</span>)
 
-<span class="cm"># View selected cell type fractions</span>
-prop_mat <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'deconvolution'</span>][<span class="st">'propMat'</span>]
-<span class="fn">print</span>(prop_mat.loc[
-    [<span class="st">"Malignant"</span>, <span class="st">"CAF"</span>, <span class="st">"Endothelial"</span>, <span class="st">"Macrophage"</span>, <span class="st">"Hepatocyte"</span>],
-    prop_mat.columns[:<span class="nb">5</span>]
-])</pre>
-
-<div class="output-label">Output</div>
-<div class="output">              50x102  3x43  14x94  3x117  45x115
-Malignant      0.823  0.145  0.034  0.712   0.891
-CAF            0.000  0.312  0.156  0.000   0.000
-Endothelial    0.000  0.087  0.234  0.000   0.000
-Macrophage     0.012  0.189  0.098  0.045   0.000
-Hepatocyte     0.000  0.145  0.389  0.012   0.000</div>
-
-<pre><span class="cm"># Visualize cell type fractions</span>
 spacet.<span class="fn">visualize_spatial_feature</span>(
     adata,
     spatial_type<span class="op">=</span><span class="st">"CellFraction"</span>,
@@ -571,79 +491,39 @@ spacet.<span class="fn">visualize_spatial_feature</span>(
         <span class="st">"Hepatocyte"</span>, <span class="st">"B cell"</span>, <span class="st">"T CD4"</span>, <span class="st">"T CD8"</span>,
     ],
     same_scale_fraction<span class="op">=</span><span class="kw">True</span>,
-    point_size<span class="op">=</span><span class="nb">2</span>,
-    ncols<span class="op">=</span><span class="nb">4</span>,
+    point_size<span class="op">=</span><span class="nb">0.1</span>,
+    nrow<span class="op">=</span><span class="nb">2</span>,
 )</pre>
 
 <div class="figure">
   <img src="figures/hcc_fractions.png" alt="HCC cell type fractions">
-  <div class="caption">Spatial distribution of deconvolved cell type fractions in the HCC Visium dataset. Each panel shows the estimated fraction of one cell type across all spots.</div>
 </div>
 
 <!-- ============================================================ -->
-<!-- SECTION 6: Hallmark Score -->
+<!-- SECTION 6: Calculate hallmark score -->
 <!-- ============================================================ -->
-<h2 id="hallmark">6. Calculate Hallmark Score</h2>
+<h2 id="hallmark">6. Calculate hallmark score</h2>
 
 <p>
-  Score each spot for MSigDB Hallmark gene sets to characterize the
-  functional state of the tissue. Gene set scores are computed using the
-  UCell algorithm (rank-based), which is robust to library size differences
-  across spots.
+  User also can run <code>gene_set_score</code> to estimate the hallmark scores
+  for each spot. You can see that Pattern 3 is correlated with
+  epithelial-mesenchymal transition (EMT).
 </p>
 
-<pre><span class="cm"># Calculate Hallmark gene set scores</span>
-adata <span class="op">=</span> spacet.<span class="fn">gene_set_score</span>(adata, gene_sets<span class="op">=</span><span class="st">"Hallmark"</span>)
+<pre>adata <span class="op">=</span> spacet.<span class="fn">gene_set_score</span>(adata, gene_sets<span class="op">=</span><span class="st">"Hallmark"</span>)
 
-<span class="cm"># Visualize EMT hallmark score</span>
 spacet.<span class="fn">visualize_spatial_feature</span>(
     adata,
     spatial_type<span class="op">=</span><span class="st">"GeneSetScore"</span>,
     spatial_features<span class="op">=</span>[<span class="st">"HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION"</span>],
+    legend_position<span class="op">=</span><span class="st">"right"</span>,
+    image_bg<span class="op">=</span><span class="kw">True</span>,
+    point_size<span class="op">=</span><span class="nb">1.2</span>,
 )</pre>
 
 <div class="figure">
   <img src="figures/hcc_hallmark_emt.png" alt="Hallmark EMT score">
-  <div class="caption">Spatial distribution of the Hallmark Epithelial-Mesenchymal Transition (EMT) gene set score. High scores (red) indicate spots with elevated EMT-associated gene expression, often corresponding to tumor-stroma boundary regions.</div>
 </div>
-
-<div class="note">
-  <strong>Note:</strong>
-  Hallmark gene set scores can be combined with deconvolution results to
-  characterize the functional state of specific cell types. For example,
-  correlating EMT scores with CAF fractions can reveal fibroblast-driven
-  EMT programs at the tumor-stroma interface.
-</div>
-
-<!-- ============================================================ -->
-<!-- Session Info -->
-<!-- ============================================================ -->
-<h2 id="session-info">Session Info</h2>
-
-<pre><span class="kw">import</span> spatialgpu
-<span class="fn">print</span>(<span class="st">f"spatial-gpu version: </span>{spatialgpu.__version__}<span class="st">"</span>)
-
-<span class="kw">import</span> anndata, numpy, scipy, pandas, matplotlib
-<span class="fn">print</span>(<span class="st">f"anndata:     </span>{anndata.__version__}<span class="st">"</span>)
-<span class="fn">print</span>(<span class="st">f"numpy:       </span>{numpy.__version__}<span class="st">"</span>)
-<span class="fn">print</span>(<span class="st">f"scipy:       </span>{scipy.__version__}<span class="st">"</span>)
-<span class="fn">print</span>(<span class="st">f"pandas:      </span>{pandas.__version__}<span class="st">"</span>)
-<span class="fn">print</span>(<span class="st">f"matplotlib:  </span>{matplotlib.__version__}<span class="st">"</span>)
-
-<span class="kw">try</span>:
-    <span class="kw">import</span> cupy
-    <span class="fn">print</span>(<span class="st">f"cupy:        </span>{cupy.__version__}<span class="st"> (GPU backend available)"</span>)
-<span class="kw">except</span> <span class="nb">ImportError</span>:
-    <span class="fn">print</span>(<span class="st">"cupy:        not installed (CPU-only mode)"</span>)</pre>
-
-<div class="output-label">Output</div>
-<div class="output">spatial-gpu version: 0.1.0
-anndata:     0.10.x
-numpy:       1.26.x
-scipy:       1.12.x
-pandas:      2.2.x
-matplotlib:  3.8.x
-cupy:        13.x (GPU backend available)</div>
 
 <!-- ============================================================ -->
 <!-- Footer -->
@@ -673,18 +553,18 @@ cupy:        13.x (GPU backend available)</div>
 <!-- ============================================================ -->
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-  const links = document.querySelectorAll('.sidebar a[href^="#"]');
-  const sections = [];
+  var links = document.querySelectorAll('.sidebar a[href^="#"]');
+  var sections = [];
   links.forEach(function (link) {
-    const id = link.getAttribute('href').slice(1);
-    const el = document.getElementById(id);
+    var id = link.getAttribute('href').slice(1);
+    var el = document.getElementById(id);
     if (el) sections.push({ link: link, el: el });
   });
 
   function onScroll() {
-    const scrollY = window.scrollY + 80;
-    let current = null;
-    for (let i = sections.length - 1; i >= 0; i--) {
+    var scrollY = window.scrollY + 80;
+    var current = null;
+    for (var i = sections.length - 1; i >= 0; i--) {
       if (sections[i].el.offsetTop <= scrollY) {
         current = sections[i].link;
         break;
@@ -699,6 +579,5 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 
-<!-- iteration: 6,13,20,27 | pass1: pattern names, velocity, UCell. pass2: counts, spots, .fn. pass3: HTML, figures, entities. pass4: 11 code blocks — spans balanced, no bare < -->
 </body>
 </html>

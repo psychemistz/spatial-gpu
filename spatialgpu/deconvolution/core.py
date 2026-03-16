@@ -806,18 +806,18 @@ def _spatial_deconv_via_r(
         if isinstance(mal_prop, pd.DataFrame):
             mal_prop.to_csv(os.path.join(tmpdir, "malProp.csv"), index=True)
         else:
-            pd.DataFrame(
-                {"malProp": mal_prop.values}, index=mal_prop.index
-            ).to_csv(os.path.join(tmpdir, "malProp.csv"), index=True)
+            pd.DataFrame({"malProp": mal_prop.values}, index=mal_prop.index).to_csv(
+                os.path.join(tmpdir, "malProp.csv"), index=True
+            )
 
         # Write malRef (may be a DataFrame with multiple columns)
         if mal_ref is not None:
             if isinstance(mal_ref, pd.DataFrame):
                 mal_ref.to_csv(os.path.join(tmpdir, "malRef.csv"), index=True)
             else:
-                pd.DataFrame(
-                    {"malRef": mal_ref.values}, index=mal_ref.index
-                ).to_csv(os.path.join(tmpdir, "malRef.csv"), index=True)
+                pd.DataFrame({"malRef": mal_ref.values}, index=mal_ref.index).to_csv(
+                    os.path.join(tmpdir, "malRef.csv"), index=True
+                )
             has_mal_ref = "TRUE"
         else:
             has_mal_ref = "FALSE"
@@ -949,7 +949,9 @@ def _spatial_deconv_python(
         mal_prop_reindexed = mal_prop.reindex(columns=valid_spots, fill_value=0.0)
         mal_prop_arr = mal_prop_reindexed.sum(axis=0).values.astype(np.float64)
     else:
-        mal_prop_arr = mal_prop.reindex(valid_spots, fill_value=0.0).values.astype(np.float64)
+        mal_prop_arr = mal_prop.reindex(valid_spots, fill_value=0.0).values.astype(
+            np.float64
+        )
 
     if mal_prop_arr.sum() > 0 and mal_ref is not None:
         if isinstance(mal_ref, pd.DataFrame):

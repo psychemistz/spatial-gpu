@@ -708,7 +708,9 @@ def secact_spatial_ccc(
     n_cells = len(common_spots)
 
     # Remap original indices to common_spots indices
-    orig_to_new = {name_to_idx[name]: new_idx for new_idx, name in enumerate(common_spots)}
+    orig_to_new = {
+        name_to_idx[name]: new_idx for new_idx, name in enumerate(common_spots)
+    }
 
     # Build neighbor pair lists remapped to common_spots indices
     i_list, j_list = [], []
