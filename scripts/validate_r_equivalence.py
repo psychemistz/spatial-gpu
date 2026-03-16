@@ -18,9 +18,10 @@ RTOL = 1e-10
 ATOL = 1e-12
 
 DATASETS = {
-    "vst1": {"path": "data/Visium_BC", "cancer": "BRCA", "min_genes": 1000},
-    "vst2": {"path": "data/Visium_HCC", "cancer": "LIHC", "min_genes": 1000},
-    "vst3": {"path": "data/hiresST_CRC/hiresST_CRC.h5ad", "cancer": "CRC", "min_genes": 1000},
+    # min_genes=0 matches R validation data (no QC filtering applied)
+    "vst1": {"path": "data/Visium_BC", "cancer": "BRCA", "min_genes": 0},
+    "vst2": {"path": "data/Visium_HCC", "cancer": "LIHC", "min_genes": 0},
+    "vst3": {"path": "data/hiresST_CRC/hiresST_CRC.h5ad", "cancer": "CRC", "min_genes": 0},
 }
 
 
@@ -39,7 +40,19 @@ def validate_dataset(name, cfg):
         adata = ad.read_h5ad(cfg["path"])
     else:
         adata = spacet.create_spacet_object_10x(cfg["path"])
-    adata = spacet.quality_control(adata, min_genes=cfg["min_genes"])
+    if cfg["min_genes"] > 0:
+        adata = spacet.quality_control(adata, min_genes=cfg["min_genes"])
+    else:
+        # Add QC columns without filtering (match R validation data)
+        from scipy import sparse as sp
+
+        X = adata.X
+        if sp.issparse(X):
+            adata.obs["UMI"] = np.asarray(X.sum(axis=1)).ravel()
+            adata.obs["Gene"] = np.asarray((X > 0).sum(axis=1)).ravel()
+        else:
+            adata.obs["UMI"] = X.sum(axis=1)
+            adata.obs["Gene"] = (X > 0).sum(axis=1)
     print(f"  Loaded: {adata.shape[0]} spots x {adata.shape[1]} genes ({time.time()-t0:.1f}s)")
 
     # Run Python deconvolution

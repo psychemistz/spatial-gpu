@@ -81,7 +81,12 @@ def _mudan_cluster_python(
     dist = np.maximum(dist, 0)
 
     condensed = squareform(dist, checks=False)
-    Z = linkage(condensed, method="ward")
+    # R's hclust(method="ward.D") uses raw distances internally,
+    # while scipy's linkage(method="ward") matches R's "ward.D2"
+    # (squared distances). To replicate R's ward.D, square the
+    # condensed distances before linkage, then take sqrt of merge heights.
+    Z = linkage(condensed**2, method="ward")
+    Z[:, 2] = np.sqrt(Z[:, 2])
 
     cluster_numbers = list(range(2, 10))
     sil_scores = []
