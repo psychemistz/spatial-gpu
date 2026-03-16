@@ -83,6 +83,13 @@ def deconvolution(
         "propMat_columns": list(prop_mat.index),
     }
 
+    # Always store combined reference for downstream CCI analysis
+    try:
+        comb_ref = load_comb_ref()
+        adata.uns["spacet"]["deconvolution"]["Ref"] = comb_ref
+    except Exception:
+        logger.warning("Could not load combined reference for CCI.")
+
     return adata
 
 
@@ -165,7 +172,7 @@ def _deconvolution_via_r(
             ["Rscript", "-e", r_code],
             capture_output=True,
             text=True,
-            timeout=1200,
+            timeout=3600,
         )
         if result.returncode != 0:
             raise RuntimeError(f"R SpaCET.deconvolution failed: {result.stderr[:500]}")
@@ -715,8 +722,8 @@ def _spatial_deconv(
     gene_names: np.ndarray,
     spot_names: np.ndarray,
     ref: dict[str, Any],
-    mal_prop: pd.Series,
-    mal_ref: pd.Series | None,
+    mal_prop: pd.Series | pd.DataFrame,
+    mal_ref: pd.Series | pd.DataFrame | None,
     mode: str = "standard",
     unidentifiable: bool = True,
     macrophage_other: bool = True,
@@ -795,22 +802,22 @@ def _spatial_deconv_via_r(
             os.path.join(tmpdir, "spot_names.csv"), index=False
         )
 
-        # Write malProp
-        pd.DataFrame(
-            {
-                "spot": mal_prop.index,
-                "malProp": mal_prop.values,
-            }
-        ).to_csv(os.path.join(tmpdir, "malProp.csv"), index=False)
-
-        # Write malRef
-        if mal_ref is not None:
+        # Write malProp (may be a Series or DataFrame)
+        if isinstance(mal_prop, pd.DataFrame):
+            mal_prop.to_csv(os.path.join(tmpdir, "malProp.csv"), index=True)
+        else:
             pd.DataFrame(
-                {
-                    "gene": mal_ref.index,
-                    "malRef": mal_ref.values,
-                }
-            ).to_csv(os.path.join(tmpdir, "malRef.csv"), index=False)
+                {"malProp": mal_prop.values}, index=mal_prop.index
+            ).to_csv(os.path.join(tmpdir, "malProp.csv"), index=True)
+
+        # Write malRef (may be a DataFrame with multiple columns)
+        if mal_ref is not None:
+            if isinstance(mal_ref, pd.DataFrame):
+                mal_ref.to_csv(os.path.join(tmpdir, "malRef.csv"), index=True)
+            else:
+                pd.DataFrame(
+                    {"malRef": mal_ref.values}, index=mal_ref.index
+                ).to_csv(os.path.join(tmpdir, "malRef.csv"), index=True)
             has_mal_ref = "TRUE"
         else:
             has_mal_ref = "FALSE"
@@ -830,15 +837,23 @@ def _spatial_deconv_via_r(
         rownames(ST) <- gene_names
         colnames(ST) <- spot_names
 
-        malProp_df <- read.csv("{tmpdir}/malProp.csv")
-        malProp <- malProp_df$malProp
-        names(malProp) <- malProp_df$spot
+        malProp_df <- read.csv("{tmpdir}/malProp.csv", row.names=1)
+        if (ncol(malProp_df) == 1) {{
+            malProp <- malProp_df[,1]
+            names(malProp) <- rownames(malProp_df)
+        }} else {{
+            malProp <- as.matrix(malProp_df)
+        }}
 
         has_malRef <- {has_mal_ref}
         if (has_malRef) {{
-            malRef_df <- read.csv("{tmpdir}/malRef.csv")
-            malRef <- malRef_df$malRef
-            names(malRef) <- malRef_df$gene
+            malRef_df <- read.csv("{tmpdir}/malRef.csv", row.names=1)
+            if (ncol(malRef_df) == 1) {{
+                malRef <- malRef_df[,1]
+                names(malRef) <- rownames(malRef_df)
+            }} else {{
+                malRef <- as.matrix(malRef_df)
+            }}
         }} else {{
             malRef <- NULL
         }}
@@ -865,7 +880,7 @@ def _spatial_deconv_via_r(
             ["Rscript", "-e", r_code],
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=3600,
         )
         if result.returncode != 0:
             raise RuntimeError(f"R SpatialDeconv failed: {result.stderr[:500]}")
@@ -928,22 +943,44 @@ def _spatial_deconv_python(
     )
 
     # Subtract malignant contribution
-    if mal_prop.sum() > 0 and mal_ref is not None:
-        mal_ref_sub = mal_ref.reindex(olp_genes).values.astype(np.float64)
-        if np.isnan(mal_ref_sub).any():
-            mal_ref_sub = np.nan_to_num(mal_ref_sub)
-        mal_ref_cpm = (
-            mal_ref_sub * 1e6 / mal_ref_sub.sum()
-            if mal_ref_sub.sum() > 0
-            else mal_ref_sub
-        )
+    # In deconvMal mode, mal_prop is a DataFrame (cell_types × spots)
+    # representing known fractions; mal_prop_arr = colSums = total known fraction
+    if isinstance(mal_prop, pd.DataFrame):
+        mal_prop_reindexed = mal_prop.reindex(columns=valid_spots, fill_value=0.0)
+        mal_prop_arr = mal_prop_reindexed.sum(axis=0).values.astype(np.float64)
+    else:
+        mal_prop_arr = mal_prop.reindex(valid_spots, fill_value=0.0).values.astype(np.float64)
 
-        mal_prop_arr = mal_prop.reindex(valid_spots).values
-        mixture_mal = np.outer(mal_ref_cpm, mal_prop_arr)
-        mixture_minus_mal = ST_cpm - mixture_mal
+    if mal_prop_arr.sum() > 0 and mal_ref is not None:
+        if isinstance(mal_ref, pd.DataFrame):
+            # Multi-column reference: subtract sum of all known contributions
+            # Align: only use fraction rows that have matching reference columns
+            shared_types = [t for t in mal_ref.columns if t in mal_prop_reindexed.index]
+            mal_ref_aligned = mal_ref[shared_types]
+            mal_prop_aligned = mal_prop_reindexed.loc[shared_types]
+            mal_ref_sub = mal_ref_aligned.reindex(olp_genes).values.astype(np.float64)
+            mal_ref_sub = np.nan_to_num(mal_ref_sub)
+            # Compute CPM per column and weight by known fractions
+            col_sums = mal_ref_sub.sum(axis=0)
+            col_sums[col_sums == 0] = 1
+            mal_ref_cpm = mal_ref_sub * 1e6 / col_sums
+            # Each known cell type contributes: ref_cpm * fraction
+            known_fracs = mal_prop_aligned.values  # (n_types, n_spots)
+            mixture_mal = mal_ref_cpm @ known_fracs
+            mixture_minus_mal = ST_cpm - mixture_mal
+        else:
+            mal_ref_sub = mal_ref.reindex(olp_genes).values.astype(np.float64)
+            if np.isnan(mal_ref_sub).any():
+                mal_ref_sub = np.nan_to_num(mal_ref_sub)
+            mal_ref_cpm = (
+                mal_ref_sub * 1e6 / mal_ref_sub.sum()
+                if mal_ref_sub.sum() > 0
+                else mal_ref_sub
+            )
+            mixture_mal = np.outer(mal_ref_cpm, mal_prop_arr)
+            mixture_minus_mal = ST_cpm - mixture_mal
     else:
         mixture_minus_mal = ST_cpm
-        mal_prop_arr = mal_prop.reindex(valid_spots).values
 
     # Level 1: Major lineages
     level1_types = [t for t in tree.keys() if t in reference.columns]
@@ -1218,7 +1255,7 @@ def _solve_constrained_batch_via_r(
             ["Rscript", "-e", r_code],
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=3600,
         )
         if result.returncode != 0:
             raise RuntimeError(f"R constrOptim failed: {result.stderr}")

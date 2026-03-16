@@ -43,11 +43,13 @@ _COLORMAPS = {
     ],
     "GeneSetScore": ["#91bfdb", "#fee090", "#d73027"],
     "SecretedProteinActivity": [
-        "#b8e186",
-        "#b8e186",
-        "#b8e186",
-        "#de77ae",
-        "#c51b7d",
+        "#1A9850",
+        "#1A9850",
+        "#1A9850",
+        "#1A9850",
+        "#FDAE61",
+        "#FC8D59",
+        "#D7191C",
     ],
     "SignalingPattern": [
         "#000004",
@@ -168,6 +170,7 @@ def visualize_spatial_feature(
 
     # Get coordinates
     coords = _get_spot_coordinates(adata)
+    yflip = _needs_yflip(adata)
 
     # CellTypeComposition uses pie charts — special path
     if spatial_type == "CellTypeComposition":
@@ -178,6 +181,7 @@ def visualize_spatial_feature(
             point_size,
             figsize,
             coords,
+            yflip,
         )
 
     # Prepare data and metadata
@@ -214,6 +218,7 @@ def visualize_spatial_feature(
             point_alpha,
             same_scale_fraction and spatial_type == "CellFraction",
             spatial_type,
+            yflip,
         )
         return None
 
@@ -238,6 +243,7 @@ def visualize_spatial_feature(
             point_alpha,
             same_scale_fraction and spatial_type == "CellFraction",
             spatial_type,
+            yflip,
         )
 
     # Hide unused axes
@@ -482,9 +488,12 @@ def visualize_cell_type_pair(
                 s=3,
                 alpha=1.0,
                 label=group_name,
+                edgecolors="none",
             )
     ax1.set_title("Spatial distribution of two cell-types", fontsize=10)
     ax1.set_aspect("equal")
+    if _needs_yflip(adata):
+        ax1.invert_yaxis()
     ax1.axis("off")
 
     # --- Panel 2: Scatter (fraction vs fraction) ---
@@ -628,8 +637,7 @@ def visualize_distance_to_interface(
     ct_pair = sorted(cell_type_pair)
     pair_key = f"{ct_pair[0]}_{ct_pair[1]}"
 
-    if test_res.loc[pair_key, "Interaction"] is False:
-        raise ValueError(f"Interaction not significant for {pair_key}.")
+    # Draw histogram regardless of significance
 
     # Get interface spots
     if isinstance(interface, pd.DataFrame):
@@ -717,6 +725,13 @@ def visualize_distance_to_interface(
 # ===========================================================================
 # Internal helpers
 # ===========================================================================
+
+
+def _needs_yflip(adata: ad.AnnData) -> bool:
+    """Check if Y-axis should be inverted (Visium pixel coordinates)."""
+    platform = adata.uns.get("spacet_platform", "")
+    # Visium/VisiumHD use pixel coordinates where row increases downward
+    return platform in ("Visium", "VisiumHD")
 
 
 def _get_spot_coordinates(adata: ad.AnnData) -> np.ndarray:
@@ -1011,7 +1026,9 @@ def _prepare_signaling_pattern(
 ) -> tuple[dict[str, np.ndarray], str, bool]:
     sec_act = spacet.get("SecAct_output", {})
     pattern = sec_act.get("pattern", {})
-    signal_h = pattern.get("signal_H") or pattern.get("signal.H")
+    signal_h = pattern.get("signal_H")
+    if signal_h is None:
+        signal_h = pattern.get("signal.H")
     if signal_h is None:
         raise ValueError("Run SecAct signaling pattern first.")
 
@@ -1061,6 +1078,7 @@ def _plot_single(
     point_alpha: float,
     fixed_scale: bool,
     spatial_type: str = "",
+    yflip: bool = False,
 ) -> None:
     """Plot a single spatial feature on the given axes."""
     x = coords[:, 0]
@@ -1098,6 +1116,7 @@ def _plot_single(
                 s=point_size,
                 alpha=point_alpha,
                 label=cat,
+                edgecolors="none",
             )
         ax.legend(
             title=legend_name,
@@ -1127,11 +1146,14 @@ def _plot_single(
             alpha=point_alpha,
             vmin=vmin,
             vmax=vmax,
+            edgecolors="none",
         )
         plt.colorbar(sc, ax=ax, label=legend_name, shrink=0.8)
 
     ax.set_title(title, fontsize=10)
     ax.set_aspect("equal")
+    if yflip:
+        ax.invert_yaxis()
     ax.axis("off")
 
 
@@ -1147,6 +1169,7 @@ def _plot_cell_type_composition(
     point_size: float,
     figsize: tuple[float, float] | None,
     coords: np.ndarray,
+    yflip: bool = False,
 ) -> plt.Figure:
     """Plot cell type composition as pie charts at each spot.
 
@@ -1177,6 +1200,11 @@ def _plot_cell_type_composition(
         all_cell_types = ["Malignant"] + all_cell_types
 
     available = [ct for ct in all_cell_types if ct in prop_mat.index]
+
+    # Fallback: if lineageTree doesn't match propMat, use all propMat types
+    if len(available) <= 1:
+        exclude = {"Unidentifiable", "Macrophage other"}
+        available = [ct for ct in prop_mat.index if ct not in exclude]
 
     # Add Unidentifiable if present
     if "Unidentifiable" in prop_mat.index:
@@ -1227,6 +1255,8 @@ def _plot_cell_type_composition(
     ax.set_xlim(coords[:, 0].min() - radius * 3, coords[:, 0].max() + radius * 3)
     ax.set_ylim(coords[:, 1].min() - radius * 3, coords[:, 1].max() + radius * 3)
     ax.set_aspect("equal")
+    if yflip:
+        ax.invert_yaxis()
     ax.axis("off")
     ax.set_title(feature, fontsize=11)
 

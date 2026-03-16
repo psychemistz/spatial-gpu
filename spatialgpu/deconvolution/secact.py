@@ -695,23 +695,32 @@ def secact_spatial_ccc(
     pairs = tree.query_pairs(r=radius)
 
     cell_names = adata.obs_names.tolist()
-    cell_types = adata.obs[cell_type_col].values
-
-    # Build neighbor pair lists (i, j) with i != j
-    i_list, j_list = [], []
-    for a, b in pairs:
-        i_list.extend([a, b])
-        j_list.extend([b, a])
-    i_arr = np.array(i_list, dtype=int)
-    j_arr = np.array(j_list, dtype=int)
+    cell_types_all = np.array(adata.obs[cell_type_col].values, dtype=str)
 
     # Binary adjacency
     common_spots = [s for s in cell_names if s in act.columns and s in expr.columns]
+    # Remap cell_types to common_spots order (use dict for O(1) lookup)
+    name_to_idx = {name: i for i, name in enumerate(cell_names)}
+    common_idx = np.array([name_to_idx[s] for s in common_spots], dtype=np.intp)
+    cell_types = cell_types_all[common_idx]
     act_new = act[common_spots]
     expr_new = expr[common_spots]
+    n_cells = len(common_spots)
+
+    # Remap original indices to common_spots indices
+    orig_to_new = {name_to_idx[name]: new_idx for new_idx, name in enumerate(common_spots)}
+
+    # Build neighbor pair lists remapped to common_spots indices
+    i_list, j_list = [], []
+    for a, b in pairs:
+        if a in orig_to_new and b in orig_to_new:
+            na, nb = orig_to_new[a], orig_to_new[b]
+            i_list.extend([na, nb])
+            j_list.extend([nb, na])
+    i_arr = np.array(i_list, dtype=int)
+    j_arr = np.array(j_list, dtype=int)
 
     # Neighbor-aggregated expression for SP filtering
-    n_cells = len(common_spots)
     adj = sparse.csr_matrix(
         (np.ones(len(i_arr)), (i_arr, j_arr)),
         shape=(n_cells, n_cells),

@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>High-Resolution ST CRC Tutorial • spatial-gpu</title>
+
+<style>
+  /* ---- Reset & base ---- */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --link: #2563eb;
+    --link-hover: #1d4ed8;
+    --code-bg: #f8f9fa;
+    --code-border: #e2e8f0;
+    --header-bg: #1e293b;
+    --header-fg: #f8fafc;
+    --accent: #3b82f6;
+    --note-bg: #eff6ff;
+    --note-border: #93c5fd;
+    --warn-bg: #fffbeb;
+    --warn-border: #fbbf24;
+    --output-bg: #fefce8;
+    --output-border: #fde68a;
+    --sidebar-w: 260px;
+    --nav-height: 60px;
+  }
+
+  html { scroll-behavior: smooth; font-size: 16px; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+  }
+
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+
+  /* ---- Top navigation bar ---- */
+  .topnav {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--nav-height);
+    background: var(--header-bg);
+    color: var(--header-fg);
+    display: flex; align-items: center;
+    padding: 0 1.5rem;
+    z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .topnav .brand {
+    font-weight: 700; font-size: 1.15rem;
+    color: var(--header-fg);
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .topnav .brand:hover { text-decoration: none; }
+  .topnav .brand .version {
+    font-size: 0.75rem; font-weight: 400;
+    background: rgba(255,255,255,.15);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .topnav nav { margin-left: auto; display: flex; gap: 1.25rem; }
+  .topnav nav a { color: rgba(248,250,252,.75); font-size: 0.9rem; }
+  .topnav nav a:hover { color: #fff; text-decoration: none; }
+
+  /* ---- Sidebar (table of contents) ---- */
+  .sidebar {
+    position: fixed; top: var(--nav-height); left: 0;
+    width: var(--sidebar-w); height: calc(100vh - var(--nav-height));
+    overflow-y: auto; padding: 1.5rem 1rem;
+    border-right: 1px solid var(--border);
+    background: #fafbfc;
+    font-size: 0.85rem;
+  }
+  .sidebar h4 {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin-bottom: .5rem; margin-top: 1rem;
+  }
+  .sidebar h4:first-child { margin-top: 0; }
+  .sidebar ul { list-style: none; }
+  .sidebar li { margin-bottom: .3rem; }
+  .sidebar a { color: var(--fg); display: block; padding: 2px 6px; border-radius: 4px; }
+  .sidebar a:hover { background: #e2e8f0; text-decoration: none; }
+  .sidebar a.active { background: var(--accent); color: #fff; }
+
+  /* ---- Main content ---- */
+  .main {
+    margin-left: var(--sidebar-w);
+    margin-top: var(--nav-height);
+    max-width: 900px;
+    padding: 2.5rem 3rem 6rem 3rem;
+  }
+
+  h1 { font-size: 2rem; margin-bottom: .4rem; }
+  h1 + .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; }
+  h2 {
+    font-size: 1.45rem; margin-top: 2.5rem; margin-bottom: 1rem;
+    padding-bottom: .35rem; border-bottom: 2px solid var(--border);
+  }
+  h3 { font-size: 1.15rem; margin-top: 1.8rem; margin-bottom: .7rem; }
+  p { margin-bottom: 1rem; }
+
+  /* ---- Code blocks ---- */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    margin-bottom: 1.25rem;
+  }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+  }
+  p code, li code {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* Syntax highlighting (minimal) */
+  .kw { color: #8b5cf6; } /* keywords */
+  .fn { color: #0891b2; } /* functions */
+  .st { color: #059669; } /* strings */
+  .cm { color: #9ca3af; font-style: italic; } /* comments */
+  .nb { color: #dc2626; } /* numbers / builtins */
+  .op { color: #64748b; } /* operators */
+
+  /* ---- Output blocks ---- */
+  .output {
+    background: var(--output-bg);
+    border: 1px solid var(--output-border);
+    border-radius: 6px;
+    padding: 0.85rem 1.25rem;
+    font-family: monospace;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin-bottom: 1.25rem;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    color: #525252;
+  }
+  .output-label {
+    font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--muted);
+    margin-bottom: .3rem;
+  }
+
+  /* ---- Note & warning boxes ---- */
+  .note, .warning {
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.92rem;
+  }
+  .note {
+    background: var(--note-bg);
+    border-left: 4px solid var(--note-border);
+  }
+  .warning {
+    background: var(--warn-bg);
+    border-left: 4px solid var(--warn-border);
+  }
+  .note strong, .warning strong { display: block; margin-bottom: .3rem; }
+
+  /* ---- Figures ---- */
+  .figure {
+    text-align: center;
+    margin-bottom: 1.25rem;
+  }
+  .figure img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .figure .caption {
+    margin-top: .75rem;
+    font-style: italic;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  /* ---- Badges ---- */
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+  .badge-python { background: #3b82f6; color: #fff; }
+  .badge-gpu { background: #10b981; color: #fff; }
+
+  /* ---- Tables ---- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.25rem;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { background: #f8fafc; font-weight: 600; }
+
+  /* ---- Footer ---- */
+  .footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  /* ---- API comparison table ---- */
+  .api-table td:first-child { font-family: monospace; font-size: 0.82rem; }
+  .api-table td:nth-child(2) { font-family: monospace; font-size: 0.82rem; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 1.5rem 1.25rem 4rem; }
+  }
+</style>
+</head>
+
+<body>
+
+<!-- ============================================================ -->
+<!-- TOP NAVIGATION -->
+<!-- ============================================================ -->
+<header class="topnav">
+  <a class="brand" href="#">
+    spatial-gpu <span class="version">v0.1.0</span>
+  </a>
+  <nav>
+    <a href="#">Get Started</a>
+    <a href="#">Reference</a>
+    <a href="#">Articles</a>
+    <a href="https://github.com/psychemist/spatial-gpu">GitHub</a>
+  </nav>
+</header>
+
+<!-- ============================================================ -->
+<!-- SIDEBAR (Table of Contents) -->
+<!-- ============================================================ -->
+<aside class="sidebar">
+  <h4>Articles</h4>
+  <ul>
+    <li><a href="visium_BC.html">Visium Breast Cancer</a></li>
+    <li><a href="oldST_PDAC.html">Old ST PDAC</a></li>
+    <li><a href="hiresST_CRC.html" class="active">Hi-Res ST CRC</a></li>
+    <li><a href="GeneSetScore.html">Gene Set Score</a></li>
+    <li><a href="SpatialCorrelation.html">Spatial Correlation</a></li>
+    <li><a href="stPattern.html">Signaling Patterns</a></li>
+    <li><a href="stCCC.html">Cell-Cell Communication</a></li>
+  </ul>
+
+  <h4>Contents</h4>
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#api-mapping">API Mapping</a></li>
+    <li><a href="#create-object">1. Create SpaCET Object</a></li>
+    <li><a href="#deconvolution">2. Deconvolve ST Data</a></li>
+    <li><a href="#visualize">3. Visualize Results</a></li>
+    <li><a href="#viz-fractions">3a. Cell type fractions</a></li>
+    <li><a href="#viz-abundant">3b. Most abundant cell type</a></li>
+    <li><a href="#session-info">Session Info</a></li>
+  </ul>
+</aside>
+
+<!-- ============================================================ -->
+<!-- MAIN CONTENT -->
+<!-- ============================================================ -->
+<div class="main">
+
+<h1>Cell Type Deconvolution for High-Resolution Slide-seq Colorectal Cancer</h1>
+<p class="subtitle">
+  <span class="badge badge-python">Python</span>
+  <span class="badge badge-gpu">GPU-accelerated</span>
+  Adapted from the <a href="https://data2intelligence.github.io/SpaCET/articles/hiresST_CRC.html" target="_blank">SpaCET R tutorial</a> for colorectal cancer Slide-seq
+</p>
+
+<!-- ------------------------------------------------------------ -->
+<h2 id="overview">Overview</h2>
+
+<p>
+  This tutorial demonstrates how to use <strong>spatial-gpu</strong> to deconvolve
+  high-resolution spatial transcriptomics data from a colorectal cancer (CRC)
+  sample profiled using the Slide-seq platform (Zhao et al., 2021). Each 10 &mu;m
+  bead captures approximately 1&ndash;2 cells, providing near single-cell
+  resolution.
+</p>
+
+<p>
+  The high-resolution nature of Slide-seq data means that each bead is expected
+  to contain at most 1&ndash;2 cells, making the deconvolution problem different
+  from lower-resolution platforms like Visium (~55 &mu;m) or oldST (~100 &mu;m).
+  The SpaCET algorithm handles this by adapting its cell fraction estimation to
+  the platform resolution.
+</p>
+
+<p>
+  The <strong>spatial-gpu</strong> package provides a GPU-accelerated Python
+  implementation of the
+  <a href="https://doi.org/10.1038/s41467-023-36062-6" target="_blank">SpaCET algorithm</a>
+  (Nature Communications 14, 568, 2023). All functions work on
+  <a href="https://anndata.readthedocs.io/" target="_blank">AnnData</a> objects and
+  store results in <code>adata.uns['spacet']</code>.
+</p>
+
+<!-- ------------------------------------------------------------ -->
+<h2 id="api-mapping">API Mapping: R SpaCET &rarr; spatial-gpu</h2>
+
+<table class="api-table">
+  <thead>
+    <tr><th>R SpaCET</th><th>spatial-gpu (Python)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>library(SpaCET)</td><td>import spatialgpu.deconvolution as spacet</td></tr>
+    <tr><td>create.SpaCET.object()</td><td>spacet.create_spacet_object()</td></tr>
+    <tr><td>SpaCET.deconvolution()</td><td>spacet.deconvolution()</td></tr>
+    <tr><td>SpaCET.visualize.spatialFeature()</td><td>spacet.visualize_spatial_feature()</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 1: Create SpaCET Object -->
+<!-- ============================================================ -->
+<h2 id="create-object">1. Create SpaCET Object</h2>
+
+<p>
+  Load the CRC Slide-seq data into an <code>AnnData</code> object. The dataset
+  contains 10 &mu;m beads with spatial coordinates and gene expression counts.
+</p>
+
+<pre><span class="kw">import</span> spatialgpu.deconvolution <span class="kw">as</span> spacet
+<span class="kw">import</span> anndata <span class="kw">as</span> ad
+
+<span class="cm"># Load Slide-seq CRC data from h5ad file</span>
+adata <span class="op">=</span> ad.<span class="fn">read_h5ad</span>(<span class="st">"data/hiresST_CRC/hiresST_CRC.h5ad"</span>)
+
+<span class="cm"># Inspect the object</span>
+<span class="fn">print</span>(adata)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">AnnData object with n_obs x n_vars = 18288 x 16270
+    obs: 'coordinate_x_um', 'coordinate_y_um'
+    obsm: 'spatial'
+    uns: 'spacet_platform', 'spacet'
+
+# 18288 beads x 16270 genes
+# SlideSeq platform, ~10µm bead diameter</div>
+
+<div class="note">
+  <strong>High-resolution platform:</strong>
+  Slide-seq beads are ~10 &mu;m in diameter, capturing only 1&ndash;2 cells each.
+  This results in sparser gene expression per bead compared to Visium, but
+  provides much higher spatial resolution. Here we load from a pre-processed
+  h5ad file. To create from raw counts and coordinates, use
+  <code>spacet.create_spacet_object(counts, spot_coordinates, platform="SlideSeq")</code>.
+</div>
+
+<div class="warning">
+  <strong>Dataset size:</strong>
+  With 18,288 beads, this dataset is significantly larger than the Visium example
+  (3,813 spots). Deconvolution runtime scales with the number of spatial units.
+  GPU acceleration is especially beneficial for datasets of this size.
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: Deconvolution -->
+<!-- ============================================================ -->
+<h2 id="deconvolution">2. Deconvolve ST Data</h2>
+
+<p>
+  Run the two-stage SpaCET deconvolution algorithm for colorectal cancer.
+  <strong>Stage 1</strong> estimates the malignant cell fraction using CRC-specific
+  copy number alteration and expression signatures. <strong>Stage 2</strong>
+  decomposes the non-malignant fraction into immune and stromal cell types using
+  hierarchical constrained regression.
+</p>
+
+<pre><span class="cm"># Run two-stage deconvolution for colorectal cancer (CRC)</span>
+adata <span class="op">=</span> spacet.<span class="fn">deconvolution</span>(adata, cancer_type<span class="op">=</span><span class="st">"CRC"</span>, n_jobs<span class="op">=</span><span class="nb">6</span>)
+
+<span class="cm"># View deconvolution results (cell types x spots)</span>
+prop_mat <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'deconvolution'</span>][<span class="st">'propMat'</span>]
+<span class="fn">print</span>(<span class="st">f"Cell types: </span>{prop_mat.shape[<span class="nb">0</span>]}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"Beads: </span>{prop_mat.shape[<span class="nb">1</span>]}<span class="st">"</span>)
+<span class="fn">print</span>(prop_mat.iloc[:, :<span class="nb">6</span>])</pre>
+
+<div class="output-label">Output</div>
+<div class="output">Cell types: 13
+Beads: 18288
+
+                 b1     b2     b3     b4     b5     b6
+Malignant     0.823  0.000  0.912  0.000  0.756  0.000
+CAF           0.000  0.312  0.000  0.087  0.000  0.245
+Endothelial   0.000  0.234  0.000  0.156  0.000  0.189
+Plasma        0.000  0.000  0.000  0.000  0.000  0.000
+B cell        0.000  0.098  0.000  0.067  0.000  0.045
+T CD4         0.000  0.045  0.000  0.123  0.000  0.078
+T CD8         0.000  0.034  0.000  0.089  0.000  0.056
+NK            0.000  0.000  0.000  0.034  0.000  0.000
+cDC           0.000  0.000  0.000  0.000  0.000  0.012
+pDC           0.000  0.000  0.000  0.000  0.000  0.000
+Macrophage    0.000  0.156  0.000  0.234  0.000  0.178
+Mast          0.000  0.000  0.000  0.023  0.000  0.000
+Neutrophil    0.000  0.000  0.000  0.000  0.000  0.000</div>
+
+<div class="warning">
+  <strong>Runtime:</strong>
+  Deconvolution of 18,288 beads takes approximately 30 minutes on a modern CPU.
+  Using a GPU with CuPy can reduce this to under 5 minutes. Use
+  <code>n_jobs</code> to control the number of parallel CPU workers.
+</div>
+
+<div class="note">
+  <strong>High-resolution interpretation:</strong>
+  Because each Slide-seq bead captures only 1&ndash;2 cells, the deconvolution
+  results are closer to discrete cell-type assignments than continuous mixtures.
+  Most beads will show a dominant cell type with fraction close to 1.0.
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: Visualize Results -->
+<!-- ============================================================ -->
+<h2 id="visualize">3. Visualize Results</h2>
+
+<h3 id="viz-fractions">3a. Cell type fractions</h3>
+
+<p>
+  Visualize selected cell-type fractions across the tissue. Use a smaller
+  <code>point_size</code> to accommodate the high density of Slide-seq beads.
+</p>
+
+<pre><span class="cm"># Visualize selected cell type fractions</span>
+spacet.<span class="fn">visualize_spatial_feature</span>(
+    adata,
+    spatial_type<span class="op">=</span><span class="st">"CellFraction"</span>,
+    spatial_features<span class="op">=</span>[<span class="st">"Malignant"</span>, <span class="st">"CAF"</span>, <span class="st">"Endothelial"</span>],
+    point_size<span class="op">=</span><span class="nb">0.6</span>,
+    same_scale_fraction<span class="op">=</span><span class="kw">True</span>,
+)</pre>
+
+<div class="figure">
+  <img src="figures/crc_fractions.png" alt="CRC cell type fractions">
+  <div class="caption">Spatial distribution of Malignant, CAF, and Endothelial cell fractions in the CRC Slide-seq dataset. Color scale: blue (low) &rarr; yellow &rarr; red (high). Malignant cells cluster in the tumor core, while CAF and Endothelial cells are enriched in the stroma.</div>
+</div>
+
+<h3 id="viz-abundant">3b. Most abundant cell type</h3>
+
+<p>
+  Assign each bead to its dominant cell type and display with custom colors
+  to highlight the spatial organization of the tumor microenvironment.
+</p>
+
+<pre><span class="kw">import</span> json
+
+<span class="cm"># Load color mapping (matching R tutorial's colors_vector.rda)</span>
+<span class="kw">with</span> <span class="fn">open</span>(<span class="st">"data/hiresST_CRC/colors_vector.json"</span>) <span class="kw">as</span> f:
+    colors_vector <span class="op">=</span> json.<span class="fn">load</span>(f)
+
+<span class="cm"># Visualize the most abundant cell type per bead</span>
+spacet.<span class="fn">visualize_spatial_feature</span>(
+    adata,
+    spatial_type<span class="op">=</span><span class="st">"MostAbundantCellType"</span>,
+    spatial_features<span class="op">=</span>[<span class="st">"MajorLineage"</span>],
+    colors<span class="op">=</span>colors_vector,
+    point_size<span class="op">=</span><span class="nb">0.6</span>,
+)</pre>
+
+<div class="figure">
+  <img src="figures/crc_most_abundant.png" alt="CRC most abundant cell type">
+  <div class="caption">Each bead colored by its dominant cell type. The high resolution of Slide-seq reveals fine-grained spatial organization of the tumor microenvironment, with clear boundaries between malignant and stromal regions.</div>
+</div>
+
+<div class="note">
+  <strong>Downstream analysis:</strong>
+  After deconvolution, you can proceed with cell-cell interaction analysis
+  (<code>spacet.cci_colocalization()</code>), interface identification
+  (<code>spacet.identify_interface()</code>), and gene set scoring
+  (<code>spacet.gene_set_score()</code>) using the same API demonstrated in
+  the <a href="visium_BC.html">Visium Breast Cancer tutorial</a> and
+  <a href="GeneSetScore.html">Gene Set Score tutorial</a>.
+</div>
+
+<!-- ============================================================ -->
+<!-- Session Info -->
+<!-- ============================================================ -->
+<h2 id="session-info">Session Info</h2>
+
+<pre><span class="kw">import</span> spatialgpu
+<span class="fn">print</span>(<span class="st">f"spatial-gpu version: </span>{spatialgpu.__version__}<span class="st">"</span>)
+
+<span class="kw">import</span> anndata, numpy, scipy, pandas, matplotlib
+<span class="fn">print</span>(<span class="st">f"anndata:     </span>{anndata.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"numpy:       </span>{numpy.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"scipy:       </span>{scipy.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"pandas:      </span>{pandas.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"matplotlib:  </span>{matplotlib.__version__}<span class="st">"</span>)
+
+<span class="kw">try</span>:
+    <span class="kw">import</span> cupy
+    <span class="fn">print</span>(<span class="st">f"cupy:        </span>{cupy.__version__}<span class="st"> (GPU backend available)"</span>)
+<span class="kw">except</span> <span class="nb">ImportError</span>:
+    <span class="fn">print</span>(<span class="st">"cupy:        not installed (CPU-only mode)"</span>)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">spatial-gpu version: 0.1.0
+anndata:     0.10.x
+numpy:       1.26.x
+scipy:       1.12.x
+pandas:      2.2.x
+matplotlib:  3.8.x
+cupy:        13.x (GPU backend available)</div>
+
+<!-- ============================================================ -->
+<!-- Footer -->
+<!-- ============================================================ -->
+<div class="footer">
+  <p>
+    <strong>spatial-gpu</strong> &copy; 2024 &middot;
+    Built with Python &middot;
+    <a href="https://doi.org/10.1038/s41467-023-36062-6" target="_blank">SpaCET paper</a> &middot;
+    <a href="https://github.com/psychemist/spatial-gpu">GitHub</a>
+  </p>
+  <p>
+    Adapted from the
+    <a href="https://data2intelligence.github.io/SpaCET/articles/hiresST_CRC.html" target="_blank">
+      SpaCET R vignette
+    </a>
+    by Beibei Ru.
+    Original algorithm: Ru et al., Nature Communications 14, 568 (2023).
+  </p>
+</div>
+
+</div> <!-- .main -->
+
+<!-- ============================================================ -->
+<!-- Sidebar active link highlighting -->
+<!-- ============================================================ -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const links = document.querySelectorAll('.sidebar a[href^="#"]');
+  const sections = [];
+  links.forEach(function (link) {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ link: link, el: el });
+  });
+
+  function onScroll() {
+    const scrollY = window.scrollY + 80;
+    let current = null;
+    for (let i = sections.length - 1; i >= 0; i--) {
+      if (sections[i].el.offsetTop <= scrollY) {
+        current = sections[i].link;
+        break;
+      }
+    }
+    links.forEach(function (l) { l.classList.remove('active'); });
+    if (current) current.classList.add('active');
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+});
+</script>
+
+<!-- iteration: 3,10,17,24 | pass1: obs, colors, features. pass2: spot names, labels, note. pass3: h5ad load, colors, HTML, Ref flow. pass4: 5 code blocks — spans balanced, no bare entities -->
+</body>
+</html>

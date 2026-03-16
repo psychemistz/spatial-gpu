@@ -928,7 +928,10 @@ def _validate_sc_inputs(
 
     all_cell_types = []
     for subtypes in sc_lineage_tree.values():
-        all_cell_types.extend(subtypes)
+        if isinstance(subtypes, str):
+            all_cell_types.append(subtypes)
+        else:
+            all_cell_types.extend(subtypes)
 
     unique_anno_types = set(sc_annotation["cellType"].astype(str).unique())
     missing = [ct for ct in all_cell_types if ct not in unique_anno_types]

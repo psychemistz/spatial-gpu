@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gene Set Score Calculation • spatial-gpu</title>
+
+<style>
+  /* ---- Reset & base ---- */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --link: #2563eb;
+    --link-hover: #1d4ed8;
+    --code-bg: #f8f9fa;
+    --code-border: #e2e8f0;
+    --header-bg: #1e293b;
+    --header-fg: #f8fafc;
+    --accent: #3b82f6;
+    --note-bg: #eff6ff;
+    --note-border: #93c5fd;
+    --warn-bg: #fffbeb;
+    --warn-border: #fbbf24;
+    --output-bg: #fefce8;
+    --output-border: #fde68a;
+    --sidebar-w: 260px;
+    --nav-height: 60px;
+  }
+
+  html { scroll-behavior: smooth; font-size: 16px; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+  }
+
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+
+  /* ---- Top navigation bar ---- */
+  .topnav {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--nav-height);
+    background: var(--header-bg);
+    color: var(--header-fg);
+    display: flex; align-items: center;
+    padding: 0 1.5rem;
+    z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .topnav .brand {
+    font-weight: 700; font-size: 1.15rem;
+    color: var(--header-fg);
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .topnav .brand:hover { text-decoration: none; }
+  .topnav .brand .version {
+    font-size: 0.75rem; font-weight: 400;
+    background: rgba(255,255,255,.15);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .topnav nav { margin-left: auto; display: flex; gap: 1.25rem; }
+  .topnav nav a { color: rgba(248,250,252,.75); font-size: 0.9rem; }
+  .topnav nav a:hover { color: #fff; text-decoration: none; }
+
+  /* ---- Sidebar (table of contents) ---- */
+  .sidebar {
+    position: fixed; top: var(--nav-height); left: 0;
+    width: var(--sidebar-w); height: calc(100vh - var(--nav-height));
+    overflow-y: auto; padding: 1.5rem 1rem;
+    border-right: 1px solid var(--border);
+    background: #fafbfc;
+    font-size: 0.85rem;
+  }
+  .sidebar h4 {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin-bottom: .5rem; margin-top: 1rem;
+  }
+  .sidebar h4:first-child { margin-top: 0; }
+  .sidebar ul { list-style: none; }
+  .sidebar li { margin-bottom: .3rem; }
+  .sidebar a { color: var(--fg); display: block; padding: 2px 6px; border-radius: 4px; }
+  .sidebar a:hover { background: #e2e8f0; text-decoration: none; }
+  .sidebar a.active { background: var(--accent); color: #fff; }
+
+  /* ---- Main content ---- */
+  .main {
+    margin-left: var(--sidebar-w);
+    margin-top: var(--nav-height);
+    max-width: 900px;
+    padding: 2.5rem 3rem 6rem 3rem;
+  }
+
+  h1 { font-size: 2rem; margin-bottom: .4rem; }
+  h1 + .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; }
+  h2 {
+    font-size: 1.45rem; margin-top: 2.5rem; margin-bottom: 1rem;
+    padding-bottom: .35rem; border-bottom: 2px solid var(--border);
+  }
+  h3 { font-size: 1.15rem; margin-top: 1.8rem; margin-bottom: .7rem; }
+  p { margin-bottom: 1rem; }
+
+  /* ---- Code blocks ---- */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    margin-bottom: 1.25rem;
+  }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+  }
+  p code, li code {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* Syntax highlighting (minimal) */
+  .kw { color: #8b5cf6; } /* keywords */
+  .fn { color: #0891b2; } /* functions */
+  .st { color: #059669; } /* strings */
+  .cm { color: #9ca3af; font-style: italic; } /* comments */
+  .nb { color: #dc2626; } /* numbers / builtins */
+  .op { color: #64748b; } /* operators */
+
+  /* ---- Output blocks ---- */
+  .output {
+    background: var(--output-bg);
+    border: 1px solid var(--output-border);
+    border-radius: 6px;
+    padding: 0.85rem 1.25rem;
+    font-family: monospace;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin-bottom: 1.25rem;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    color: #525252;
+  }
+  .output-label {
+    font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--muted);
+    margin-bottom: .3rem;
+  }
+
+  /* ---- Note & warning boxes ---- */
+  .note, .warning {
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.92rem;
+  }
+  .note {
+    background: var(--note-bg);
+    border-left: 4px solid var(--note-border);
+  }
+  .warning {
+    background: var(--warn-bg);
+    border-left: 4px solid var(--warn-border);
+  }
+  .note strong, .warning strong { display: block; margin-bottom: .3rem; }
+
+  /* ---- Figures ---- */
+  .figure {
+    text-align: center;
+    margin-bottom: 1.25rem;
+  }
+  .figure img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .figure .caption {
+    margin-top: .75rem;
+    font-style: italic;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  /* ---- Badges ---- */
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+  .badge-python { background: #3b82f6; color: #fff; }
+  .badge-gpu { background: #10b981; color: #fff; }
+
+  /* ---- Tables ---- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.25rem;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { background: #f8fafc; font-weight: 600; }
+
+  /* ---- Footer ---- */
+  .footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  /* ---- API comparison table ---- */
+  .api-table td:first-child { font-family: monospace; font-size: 0.82rem; }
+  .api-table td:nth-child(2) { font-family: monospace; font-size: 0.82rem; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 1.5rem 1.25rem 4rem; }
+  }
+</style>
+</head>
+
+<body>
+
+<!-- ============================================================ -->
+<!-- TOP NAVIGATION -->
+<!-- ============================================================ -->
+<header class="topnav">
+  <a class="brand" href="#">
+    spatial-gpu <span class="version">v0.1.0</span>
+  </a>
+  <nav>
+    <a href="#">Get Started</a>
+    <a href="#">Reference</a>
+    <a href="#">Articles</a>
+    <a href="https://github.com/psychemist/spatial-gpu">GitHub</a>
+  </nav>
+</header>
+
+<!-- ============================================================ -->
+<!-- SIDEBAR (Table of Contents) -->
+<!-- ============================================================ -->
+<aside class="sidebar">
+  <h4>Articles</h4>
+  <ul>
+    <li><a href="visium_BC.html">Visium Breast Cancer</a></li>
+    <li><a href="oldST_PDAC.html">Old ST PDAC</a></li>
+    <li><a href="hiresST_CRC.html">Hi-Res ST CRC</a></li>
+    <li><a href="GeneSetScore.html" class="active">Gene Set Score</a></li>
+    <li><a href="SpatialCorrelation.html">Spatial Correlation</a></li>
+    <li><a href="stPattern.html">Signaling Patterns</a></li>
+    <li><a href="stCCC.html">Cell-Cell Communication</a></li>
+  </ul>
+
+  <h4>Contents</h4>
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#api-mapping">API Mapping</a></li>
+    <li><a href="#create-object">1. Create SpaCET Object</a></li>
+    <li><a href="#hallmark">2. Hallmark Score</a></li>
+    <li><a href="#cancer-state">3. Cancer Cell State Score</a></li>
+    <li><a href="#tls">4. TLS Score</a></li>
+    <li><a href="#custom">5. Custom Gene Sets</a></li>
+    <li><a href="#custom-dict">5a. Dictionary input</a></li>
+    <li><a href="#custom-gmt">5b. GMT file input</a></li>
+    <li><a href="#session-info">Session Info</a></li>
+  </ul>
+</aside>
+
+<!-- ============================================================ -->
+<!-- MAIN CONTENT -->
+<!-- ============================================================ -->
+<div class="main">
+
+<h1>Gene Set Score Calculation and Visualization</h1>
+<p class="subtitle">
+  <span class="badge badge-python">Python</span>
+  <span class="badge badge-gpu">GPU-accelerated</span>
+  Adapted from the <a href="https://data2intelligence.github.io/SpaCET/articles/GeneSetScore.html" target="_blank">SpaCET R tutorial</a>
+</p>
+
+<!-- ------------------------------------------------------------ -->
+<h2 id="overview">Overview</h2>
+
+<p>
+  This tutorial demonstrates how to calculate and visualize gene set scores
+  using <strong>spatial-gpu</strong>. Gene set scoring quantifies the activity
+  of biological pathways or cell states at each spot in spatial transcriptomics
+  data, enabling spatial mapping of functional programs across the tissue.
+</p>
+
+<p>
+  The <code>gene_set_score()</code> function implements the
+  <a href="https://doi.org/10.1016/j.csbj.2021.06.043" target="_blank">UCell algorithm</a>,
+  which uses a rank-based scoring method that is robust to differences in
+  library size and gene detection rates across spots.
+</p>
+
+<p>
+  Three built-in gene set collections are available:
+</p>
+
+<ul>
+  <li><strong>Hallmark</strong> &mdash; MSigDB Hallmark gene sets (50 pathways covering major biological processes)</li>
+  <li><strong>CancerCellState</strong> &mdash; Cancer cell state gene sets (EMT, proliferation, hypoxia, etc.)</li>
+  <li><strong>TLS</strong> &mdash; Tertiary lymphoid structure signature</li>
+</ul>
+
+<p>
+  Custom gene sets can also be provided as a Python dictionary or loaded from
+  a GMT file using <code>spacet.read_gmt()</code>.
+</p>
+
+<!-- ------------------------------------------------------------ -->
+<h2 id="api-mapping">API Mapping: R SpaCET &rarr; spatial-gpu</h2>
+
+<table class="api-table">
+  <thead>
+    <tr><th>R SpaCET</th><th>spatial-gpu (Python)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>library(SpaCET)</td><td>import spatialgpu.deconvolution as spacet</td></tr>
+    <tr><td>SpaCET.GeneSetScore()</td><td>spacet.gene_set_score()</td></tr>
+    <tr><td>read.gmt()</td><td>spacet.read_gmt()</td></tr>
+    <tr><td>SpaCET.visualize.spatialFeature()</td><td>spacet.visualize_spatial_feature()</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 1: Create SpaCET Object -->
+<!-- ============================================================ -->
+<h2 id="create-object">1. Create SpaCET Object</h2>
+
+<p>
+  We use the same Visium breast cancer dataset from the
+  <a href="visium_BC.html">Visium BC tutorial</a>. Load the data and run
+  quality control before computing gene set scores.
+</p>
+
+<pre><span class="kw">import</span> spatialgpu.deconvolution <span class="kw">as</span> spacet
+
+<span class="cm"># Load 10X Visium breast cancer data</span>
+visium_path <span class="op">=</span> <span class="st">"data/Visium_BC"</span>
+adata <span class="op">=</span> spacet.<span class="fn">create_spacet_object_10x</span>(visium_path)
+
+<span class="cm"># Quality control</span>
+adata <span class="op">=</span> spacet.<span class="fn">quality_control</span>(adata, min_genes<span class="op">=</span><span class="nb">100</span>)
+
+<span class="fn">print</span>(adata)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">AnnData object with n_obs x n_vars = 3813 x 33514
+    obs: 'barcode', 'pixel_row', 'pixel_col', 'array_row', 'array_col',
+         'coordinate_x_um', 'coordinate_y_um', 'UMI', 'Gene'
+    obsm: 'spatial'
+    uns: 'spacet_platform', 'spacet'</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: Hallmark Score -->
+<!-- ============================================================ -->
+<h2 id="hallmark">2. Hallmark Gene Set Score</h2>
+
+<p>
+  Calculate UCell scores for the 50 MSigDB Hallmark gene sets. Each score
+  quantifies the activity of a specific biological pathway at each spot,
+  ranging from 0 (low activity) to 1 (high activity).
+</p>
+
+<pre><span class="cm"># Calculate Hallmark gene set scores</span>
+adata <span class="op">=</span> spacet.<span class="fn">gene_set_score</span>(adata, gene_sets<span class="op">=</span><span class="st">"Hallmark"</span>)
+
+<span class="cm"># Access the scores</span>
+scores <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'GeneSetScore'</span>]
+<span class="fn">print</span>(<span class="st">f"Gene sets scored: </span>{scores.shape[<span class="nb">0</span>]}<span class="st">"</span>)
+<span class="fn">print</span>(scores.index.<span class="fn">tolist</span>()[:<span class="nb">5</span>])</pre>
+
+<div class="output-label">Output</div>
+<div class="output">Gene sets scored: 50
+['HALLMARK_ADIPOGENESIS', 'HALLMARK_ALLOGRAFT_REJECTION',
+ 'HALLMARK_ANDROGEN_RESPONSE', 'HALLMARK_ANGIOGENESIS',
+ 'HALLMARK_APICAL_JUNCTION']</div>
+
+<p>
+  Visualize selected Hallmark pathways spatially. Hypoxia and TGF-beta
+  signaling are key features of the tumor microenvironment.
+</p>
+
+<pre><span class="cm"># Visualize Hallmark pathway scores</span>
+<span class="cm"># Default color scale for GeneSetScore: #91bfdb → #fee090 → #d73027</span>
+spacet.<span class="fn">visualize_spatial_feature</span>(
+    adata,
+    spatial_type<span class="op">=</span><span class="st">"GeneSetScore"</span>,
+    spatial_features<span class="op">=</span>[<span class="st">"HALLMARK_HYPOXIA"</span>, <span class="st">"HALLMARK_TGF_BETA_SIGNALING"</span>],
+)</pre>
+
+<div class="figure">
+  <img src="figures/gs_hallmark.png" alt="Hallmark gene set scores">
+  <div class="caption">Spatial distribution of Hallmark pathway scores. Color scale: #91bfdb (low) &rarr; #fee090 (mid) &rarr; #d73027 (high). Hypoxia scores are elevated in the tumor core, while TGF-beta signaling marks the tumor-stroma interface.</div>
+</div>
+
+<div class="note">
+  <strong>Color scale:</strong>
+  The three-color gradient (#91bfdb &rarr; #fee090 &rarr; #d73027) provides a
+  diverging blue-yellow-red scale that highlights both low and high activity
+  regions. This is the recommended color scheme for gene set score visualization.
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: Cancer Cell State Score -->
+<!-- ============================================================ -->
+<h2 id="cancer-state">3. Cancer Cell State Score</h2>
+
+<p>
+  Score 16 cancer cell state gene sets from a pan-cancer single-cell study to
+  characterize the functional programs active in malignant cells. These include
+  cell cycle, epithelial-mesenchymal transition (EMT), hypoxia, stress, and
+  lineage-specific states.
+</p>
+
+<pre><span class="cm"># Calculate Cancer Cell State scores</span>
+adata <span class="op">=</span> spacet.<span class="fn">gene_set_score</span>(adata, gene_sets<span class="op">=</span><span class="st">"CancerCellState"</span>)
+
+<span class="cm"># Scores accumulate: GeneSetScore now contains Hallmark + CancerCellState</span>
+scores <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'GeneSetScore'</span>]
+<span class="fn">print</span>(<span class="st">f"Total gene sets: </span>{scores.shape[<span class="nb">0</span>]}<span class="st">"</span>)  <span class="cm"># 50 + 16 = 66</span>
+cancer_states <span class="op">=</span> [s <span class="kw">for</span> s <span class="kw">in</span> scores.index <span class="kw">if</span> s.<span class="fn">startswith</span>(<span class="st">"CancerCellState_"</span>)]
+<span class="fn">print</span>(cancer_states)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">['CancerCellState_AC', 'CancerCellState_Alveolar', 'CancerCellState_Basal',
+ 'CancerCellState_Ciliated', 'CancerCellState_Cycle', 'CancerCellState_Glandular',
+ 'CancerCellState_Hypoxia', 'CancerCellState_Interferon', 'CancerCellState_Metal',
+ 'CancerCellState_NPC', 'CancerCellState_OPC', 'CancerCellState_Oxphos',
+ 'CancerCellState_Squamous', 'CancerCellState_Stress',
+ 'CancerCellState_cEMT', 'CancerCellState_pEMT']</div>
+
+<pre><span class="cm"># Visualize cell cycle and cEMT scores</span>
+spacet.<span class="fn">visualize_spatial_feature</span>(
+    adata,
+    spatial_type<span class="op">=</span><span class="st">"GeneSetScore"</span>,
+    spatial_features<span class="op">=</span>[<span class="st">"CancerCellState_Cycle"</span>, <span class="st">"CancerCellState_cEMT"</span>],
+)</pre>
+
+<div class="figure">
+  <img src="figures/gs_cancer_state.png" alt="Cancer cell state scores">
+  <div class="caption">Spatial distribution of cancer cell state scores. CancerCellState_Cycle identifies proliferating tumor regions, while CancerCellState_cEMT highlights areas undergoing complete epithelial-mesenchymal transition.</div>
+</div>
+
+<div class="note">
+  <strong>EMT subtypes:</strong>
+  Two EMT-related gene sets are provided: <code>CancerCellState_cEMT</code>
+  (complete EMT) and <code>CancerCellState_pEMT</code> (partial EMT). Partial
+  EMT represents a hybrid state associated with collective cell migration and
+  is often found at the tumor invasive front.
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 4: TLS Score -->
+<!-- ============================================================ -->
+<h2 id="tls">4. TLS Score</h2>
+
+<p>
+  Calculate the tertiary lymphoid structure (TLS) signature score. TLS are
+  organized immune cell aggregates within the tumor that are associated with
+  favorable prognosis and response to immunotherapy. The TLS gene set includes
+  markers of B cell follicles, T cell zones, and follicular dendritic cells.
+</p>
+
+<pre><span class="cm"># Calculate TLS score</span>
+adata <span class="op">=</span> spacet.<span class="fn">gene_set_score</span>(adata, gene_sets<span class="op">=</span><span class="st">"TLS"</span>)
+
+<span class="cm"># Visualize TLS score</span>
+spacet.<span class="fn">visualize_spatial_feature</span>(
+    adata,
+    spatial_type<span class="op">=</span><span class="st">"GeneSetScore"</span>,
+    spatial_features<span class="op">=</span>[<span class="st">"TLS"</span>],
+)</pre>
+
+<div class="figure">
+  <img src="figures/gs_tls.png" alt="TLS gene set score">
+  <div class="caption">Spatial distribution of the TLS signature score. High TLS scores indicate regions with organized immune cell infiltrates resembling secondary lymphoid organs.</div>
+</div>
+
+<div class="note">
+  <strong>Clinical relevance:</strong>
+  TLS presence in the tumor microenvironment has been associated with improved
+  survival and response to immune checkpoint blockade in multiple cancer types.
+  Spatial mapping of TLS scores helps identify immune-active regions within the
+  tissue architecture.
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 5: Custom Gene Sets -->
+<!-- ============================================================ -->
+<h2 id="custom">5. Custom Gene Sets</h2>
+
+<p>
+  In addition to the built-in gene set collections, you can provide custom
+  gene sets using two methods: a Python dictionary or a GMT file.
+</p>
+
+<h3 id="custom-dict">5a. Dictionary input</h3>
+
+<p>
+  Provide gene sets as a Python dictionary where keys are gene set names and
+  values are lists of gene symbols.
+</p>
+
+<pre><span class="cm"># Define custom gene sets as a dictionary</span>
+custom_gene_sets <span class="op">=</span> {
+    <span class="st">"Tcell"</span>: [<span class="st">"CD2"</span>, <span class="st">"CD3E"</span>, <span class="st">"CD3D"</span>],
+    <span class="st">"Myeloid"</span>: [<span class="st">"SPI1"</span>, <span class="st">"FCER1G"</span>, <span class="st">"CSF1R"</span>],
+}
+
+<span class="cm"># Calculate custom gene set scores</span>
+adata <span class="op">=</span> spacet.<span class="fn">gene_set_score</span>(adata, gene_sets<span class="op">=</span>custom_gene_sets)
+
+<span class="cm"># Visualize custom scores</span>
+spacet.<span class="fn">visualize_spatial_feature</span>(
+    adata,
+    spatial_type<span class="op">=</span><span class="st">"GeneSetScore"</span>,
+    spatial_features<span class="op">=</span>[<span class="st">"Tcell"</span>, <span class="st">"Myeloid"</span>],
+)</pre>
+
+<div class="note">
+  <strong>Gene matching:</strong>
+  Genes in the custom set that are not found in <code>adata.var_names</code>
+  are silently skipped. A warning is issued if fewer than 3 genes from a set
+  are matched, as the UCell score may be unreliable with very few genes.
+</div>
+
+<h3 id="custom-gmt">5b. GMT file input</h3>
+
+<p>
+  Load gene sets from a GMT (Gene Matrix Transposed) file, the standard format
+  used by MSigDB and other gene set databases. Each line in the file contains:
+  gene set name, description, and tab-separated gene symbols.
+</p>
+
+<pre><span class="cm"># Load gene sets from a GMT file</span>
+gmt_gene_sets <span class="op">=</span> spacet.<span class="fn">read_gmt</span>(<span class="st">"path/to/custom_gene_sets.gmt"</span>)
+
+<span class="cm"># Inspect loaded gene sets</span>
+<span class="fn">print</span>(<span class="st">f"Loaded </span>{<span class="fn">len</span>(gmt_gene_sets)}<span class="st"> gene sets"</span>)
+<span class="kw">for</span> name, genes <span class="kw">in</span> <span class="fn">list</span>(gmt_gene_sets.<span class="fn">items</span>())[:<span class="nb">3</span>]:
+    <span class="fn">print</span>(<span class="st">f"  </span>{name}<span class="st">: </span>{<span class="fn">len</span>(genes)}<span class="st"> genes"</span>)
+
+<span class="cm"># Calculate scores using GMT gene sets</span>
+adata <span class="op">=</span> spacet.<span class="fn">gene_set_score</span>(adata, gene_sets<span class="op">=</span>gmt_gene_sets)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">Loaded 12 gene sets
+  PATHWAY_A: 45 genes
+  PATHWAY_B: 32 genes
+  PATHWAY_C: 67 genes</div>
+
+<div class="warning">
+  <strong>GMT format:</strong>
+  Each line in a GMT file follows the format:<br>
+  <code>GENE_SET_NAME\tDESCRIPTION\tGENE1\tGENE2\tGENE3\t...</code><br>
+  The description field must be present (use <code>NA</code> or an empty
+  string as a placeholder). Lines with fewer than 3 tab-separated fields
+  are silently skipped.
+</div>
+
+<!-- ============================================================ -->
+<!-- Session Info -->
+<!-- ============================================================ -->
+<h2 id="session-info">Session Info</h2>
+
+<pre><span class="kw">import</span> spatialgpu
+<span class="fn">print</span>(<span class="st">f"spatial-gpu version: </span>{spatialgpu.__version__}<span class="st">"</span>)
+
+<span class="kw">import</span> anndata, numpy, scipy, pandas, matplotlib
+<span class="fn">print</span>(<span class="st">f"anndata:     </span>{anndata.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"numpy:       </span>{numpy.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"scipy:       </span>{scipy.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"pandas:      </span>{pandas.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"matplotlib:  </span>{matplotlib.__version__}<span class="st">"</span>)
+
+<span class="kw">try</span>:
+    <span class="kw">import</span> cupy
+    <span class="fn">print</span>(<span class="st">f"cupy:        </span>{cupy.__version__}<span class="st"> (GPU backend available)"</span>)
+<span class="kw">except</span> <span class="nb">ImportError</span>:
+    <span class="fn">print</span>(<span class="st">"cupy:        not installed (CPU-only mode)"</span>)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">spatial-gpu version: 0.1.0
+anndata:     0.10.x
+numpy:       1.26.x
+scipy:       1.12.x
+pandas:      2.2.x
+matplotlib:  3.8.x
+cupy:        13.x (GPU backend available)</div>
+
+<!-- ============================================================ -->
+<!-- Footer -->
+<!-- ============================================================ -->
+<div class="footer">
+  <p>
+    <strong>spatial-gpu</strong> &copy; 2024 &middot;
+    Built with Python &middot;
+    <a href="https://doi.org/10.1038/s41467-023-36062-6" target="_blank">SpaCET paper</a> &middot;
+    <a href="https://github.com/psychemist/spatial-gpu">GitHub</a>
+  </p>
+  <p>
+    Adapted from the
+    <a href="https://data2intelligence.github.io/SpaCET/articles/GeneSetScore.html" target="_blank">
+      SpaCET R vignette
+    </a>
+    by Beibei Ru.
+    Original algorithm: Ru et al., Nature Communications 14, 568 (2023).
+  </p>
+</div>
+
+</div> <!-- .main -->
+
+<!-- ============================================================ -->
+<!-- Sidebar active link highlighting -->
+<!-- ============================================================ -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const links = document.querySelectorAll('.sidebar a[href^="#"]');
+  const sections = [];
+  links.forEach(function (link) {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ link: link, el: el });
+  });
+
+  function onScroll() {
+    const scrollY = window.scrollY + 80;
+    let current = null;
+    for (let i = sections.length - 1; i >= 0; i--) {
+      if (sections[i].el.offsetTop <= scrollY) {
+        current = sections[i].link;
+        break;
+      }
+    }
+    links.forEach(function (l) { l.classList.remove('active'); });
+    if (current) current.classList.add('active');
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+});
+</script>
+
+<!-- iteration: 4,11,18,25 | pass1: counts, colors. pass2: CancerCellState 16 sets, .fn, GMT. pass3: accumulation comment, pd.concat. pass4: 9 code blocks — spans balanced, no bare entities -->
+</body>
+</html>

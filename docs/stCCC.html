@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cell-Cell Communication for Single-Cell Resolution ST • spatial-gpu</title>
+
+<style>
+  /* ---- Reset & base ---- */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --link: #2563eb;
+    --link-hover: #1d4ed8;
+    --code-bg: #f8f9fa;
+    --code-border: #e2e8f0;
+    --header-bg: #1e293b;
+    --header-fg: #f8fafc;
+    --accent: #3b82f6;
+    --note-bg: #eff6ff;
+    --note-border: #93c5fd;
+    --warn-bg: #fffbeb;
+    --warn-border: #fbbf24;
+    --output-bg: #fefce8;
+    --output-border: #fde68a;
+    --sidebar-w: 260px;
+    --nav-height: 60px;
+  }
+
+  html { scroll-behavior: smooth; font-size: 16px; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+  }
+
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+
+  /* ---- Top navigation bar ---- */
+  .topnav {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--nav-height);
+    background: var(--header-bg);
+    color: var(--header-fg);
+    display: flex; align-items: center;
+    padding: 0 1.5rem;
+    z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .topnav .brand {
+    font-weight: 700; font-size: 1.15rem;
+    color: var(--header-fg);
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .topnav .brand:hover { text-decoration: none; }
+  .topnav .brand .version {
+    font-size: 0.75rem; font-weight: 400;
+    background: rgba(255,255,255,.15);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .topnav nav { margin-left: auto; display: flex; gap: 1.25rem; }
+  .topnav nav a { color: rgba(248,250,252,.75); font-size: 0.9rem; }
+  .topnav nav a:hover { color: #fff; text-decoration: none; }
+
+  /* ---- Sidebar (table of contents) ---- */
+  .sidebar {
+    position: fixed; top: var(--nav-height); left: 0;
+    width: var(--sidebar-w); height: calc(100vh - var(--nav-height));
+    overflow-y: auto; padding: 1.5rem 1rem;
+    border-right: 1px solid var(--border);
+    background: #fafbfc;
+    font-size: 0.85rem;
+  }
+  .sidebar h4 {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin-bottom: .5rem; margin-top: 1rem;
+  }
+  .sidebar h4:first-child { margin-top: 0; }
+  .sidebar ul { list-style: none; }
+  .sidebar li { margin-bottom: .3rem; }
+  .sidebar a { color: var(--fg); display: block; padding: 2px 6px; border-radius: 4px; }
+  .sidebar a:hover { background: #e2e8f0; text-decoration: none; }
+  .sidebar a.active { background: var(--accent); color: #fff; }
+
+  /* ---- Main content ---- */
+  .main {
+    margin-left: var(--sidebar-w);
+    margin-top: var(--nav-height);
+    max-width: 900px;
+    padding: 2.5rem 3rem 6rem 3rem;
+  }
+
+  h1 { font-size: 2rem; margin-bottom: .4rem; }
+  h1 + .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; }
+  h2 {
+    font-size: 1.45rem; margin-top: 2.5rem; margin-bottom: 1rem;
+    padding-bottom: .35rem; border-bottom: 2px solid var(--border);
+  }
+  h3 { font-size: 1.15rem; margin-top: 1.8rem; margin-bottom: .7rem; }
+  p { margin-bottom: 1rem; }
+
+  /* ---- Code blocks ---- */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    margin-bottom: 1.25rem;
+  }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+  }
+  p code, li code {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* Syntax highlighting (minimal) */
+  .kw { color: #8b5cf6; } /* keywords */
+  .fn { color: #0891b2; } /* functions */
+  .st { color: #059669; } /* strings */
+  .cm { color: #9ca3af; font-style: italic; } /* comments */
+  .nb { color: #dc2626; } /* numbers / builtins */
+  .op { color: #64748b; } /* operators */
+
+  /* ---- Output blocks ---- */
+  .output {
+    background: var(--output-bg);
+    border: 1px solid var(--output-border);
+    border-radius: 6px;
+    padding: 0.85rem 1.25rem;
+    font-family: monospace;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin-bottom: 1.25rem;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    color: #525252;
+  }
+  .output-label {
+    font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--muted);
+    margin-bottom: .3rem;
+  }
+
+  /* ---- Note & warning boxes ---- */
+  .note, .warning {
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.92rem;
+  }
+  .note {
+    background: var(--note-bg);
+    border-left: 4px solid var(--note-border);
+  }
+  .warning {
+    background: var(--warn-bg);
+    border-left: 4px solid var(--warn-border);
+  }
+  .note strong, .warning strong { display: block; margin-bottom: .3rem; }
+
+  /* ---- Figures ---- */
+  .figure {
+    text-align: center;
+    margin-bottom: 1.25rem;
+  }
+  .figure img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .figure .caption {
+    margin-top: .75rem;
+    font-style: italic;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  /* ---- Badges ---- */
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+  .badge-python { background: #3b82f6; color: #fff; }
+  .badge-gpu { background: #10b981; color: #fff; }
+
+  /* ---- Tables ---- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.25rem;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { background: #f8fafc; font-weight: 600; }
+
+  /* ---- Footer ---- */
+  .footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  /* ---- API comparison table ---- */
+  .api-table td:first-child { font-family: monospace; font-size: 0.82rem; }
+  .api-table td:nth-child(2) { font-family: monospace; font-size: 0.82rem; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 1.5rem 1.25rem 4rem; }
+  }
+</style>
+</head>
+
+<body>
+
+<!-- ============================================================ -->
+<!-- TOP NAVIGATION -->
+<!-- ============================================================ -->
+<header class="topnav">
+  <a class="brand" href="#">
+    spatial-gpu <span class="version">v0.1.0</span>
+  </a>
+  <nav>
+    <a href="#">Get Started</a>
+    <a href="#">Reference</a>
+    <a href="#">Articles</a>
+    <a href="https://github.com/psychemist/spatial-gpu">GitHub</a>
+  </nav>
+</header>
+
+<!-- ============================================================ -->
+<!-- SIDEBAR (Table of Contents) -->
+<!-- ============================================================ -->
+<aside class="sidebar">
+  <h4>Articles</h4>
+  <ul>
+    <li><a href="visium_BC.html">Visium Breast Cancer</a></li>
+    <li><a href="oldST_PDAC.html">Old ST PDAC</a></li>
+    <li><a href="hiresST_CRC.html">Hi-Res ST CRC</a></li>
+    <li><a href="GeneSetScore.html">Gene Set Score</a></li>
+    <li><a href="SpatialCorrelation.html">Spatial Correlation</a></li>
+    <li><a href="stPattern.html">Signaling Patterns</a></li>
+    <li><a href="stCCC.html" class="active">Cell-Cell Communication</a></li>
+  </ul>
+
+  <h4>Contents</h4>
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#api-mapping">API Mapping</a></li>
+    <li><a href="#load-data">1. Load ST Data</a></li>
+    <li><a href="#activity">2. Infer Secreted Protein Activity</a></li>
+    <li><a href="#ccc">3. Infer Cell-Cell Communication</a></li>
+    <li><a href="#visualize-ccc">4. Visualize Cell-Cell Communication</a></li>
+    <li><a href="#velocity">5. Visualize Secreted Signaling Velocity</a></li>
+    <li><a href="#session-info">Session Info</a></li>
+  </ul>
+</aside>
+
+<!-- ============================================================ -->
+<!-- MAIN CONTENT -->
+<!-- ============================================================ -->
+<div class="main">
+
+<h1>Cell-Cell Communication for Single-Cell Resolution ST</h1>
+<p class="subtitle">
+  <span class="badge badge-python">Python</span>
+  <span class="badge badge-gpu">GPU-accelerated</span>
+  Adapted from the <a href="https://data2intelligence.github.io/SecAct/" target="_blank">SecAct R tutorial</a> using the <strong>spatial-gpu</strong> package
+</p>
+
+<!-- ------------------------------------------------------------ -->
+<h2 id="overview">Overview</h2>
+
+<p>
+  This tutorial demonstrates inference of cell-cell communication (CCC)
+  mediated by secreted proteins using single-cell resolution spatial
+  transcriptomics data. We use a CosMx liver cancer (LIHC) dataset
+  containing 460,441 cells measured across 1,000 genes.
+</p>
+
+<p>
+  Unlike spot-level Visium data where each measurement captures 1&ndash;10
+  cells, single-cell resolution platforms like CosMx, Xenium, and MERSCOPE
+  resolve individual cells. This enables direct inference of sender-receiver
+  relationships: which cell types secrete specific proteins and which cell
+  types respond to them.
+</p>
+
+<p>
+  The workflow covers: (1) activity inference at single-cell resolution,
+  (2) spatial cell-cell communication inference using neighborhood analysis,
+  and (3) visualization of CCC results including heatmaps, circle plots,
+  dot plots, and signaling velocity.
+</p>
+
+<!-- ------------------------------------------------------------ -->
+<h2 id="api-mapping">API Mapping: R SecAct &rarr; spatial-gpu</h2>
+
+<table class="api-table">
+  <thead>
+    <tr><th>R (SecAct)</th><th>spatial-gpu (Python)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>library(SecAct)</td><td>import spatialgpu.deconvolution as spacet</td></tr>
+    <tr><td>create.SpaCET.object()</td><td>spacet.create_spacet_object()</td></tr>
+    <tr><td>SecAct.activity.inference.ST()</td><td>spacet.secact_inference()</td></tr>
+    <tr><td>SecAct.CCC.scST()</td><td>spacet.secact_spatial_ccc()</td></tr>
+    <tr><td>SecAct.CCC.heatmap()</td><td>spacet.visualize_secact_heatmap()</td></tr>
+    <tr><td>SecAct.CCC.circle()</td><td>spacet.visualize_secact_circle()</td></tr>
+    <tr><td>SecAct.CCC.dot()</td><td>spacet.visualize_secact_dotplot()</td></tr>
+    <tr><td>SecAct.signaling.velocity.scST()</td><td>spacet.secact_signaling_velocity_scst()</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 1: Load ST Data -->
+<!-- ============================================================ -->
+<h2 id="load-data">1. Load ST Data</h2>
+
+<p>
+  Load the CosMx LIHC dataset from a pre-processed H5AD file. This dataset
+  contains 460,441 cells with 1,000 measured genes and pre-annotated cell
+  type labels.
+</p>
+
+<pre><span class="kw">import</span> spatialgpu.deconvolution <span class="kw">as</span> spacet
+<span class="kw">import</span> anndata <span class="kw">as</span> ad
+
+<span class="cm"># Load CosMx LIHC data</span>
+adata <span class="op">=</span> ad.<span class="fn">read_h5ad</span>(<span class="st">"data/LIHC_CosMx/LIHC_CosMx.h5ad"</span>)
+<span class="fn">print</span>(adata)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">AnnData object with n_obs x n_vars = 460441 x 1000
+    obs: 'coordinate_x_um', 'coordinate_y_um', 'cellType', 'niche'
+    obsm: 'spatial'
+    uns: 'spacet_platform', 'spacet'</div>
+
+<pre><span class="cm"># Quality control: filter cells with &lt; 50 genes</span>
+adata <span class="op">=</span> spacet.<span class="fn">quality_control</span>(adata, min_genes<span class="op">=</span><span class="nb">50</span>)
+<span class="fn">print</span>(<span class="st">f"Cells after QC: </span>{adata.n_obs}<span class="st">"</span>)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">Cells after QC: 443515</div>
+
+<pre><span class="cm"># Visualize QC metrics</span>
+spacet.<span class="fn">visualize_spatial_feature</span>(
+    adata,
+    spatial_type<span class="op">=</span><span class="st">"QualityControl"</span>,
+    spatial_features<span class="op">=</span>[<span class="st">"UMI"</span>, <span class="st">"Gene"</span>],
+    point_size<span class="op">=</span><span class="nb">0.1</span>,
+)</pre>
+
+<div class="figure">
+  <img src="figures/cosmx_qc.png" alt="CosMx LIHC QC: UMI and Gene counts">
+  <div class="caption">Spatial distribution of UMI counts and expressed gene counts per cell in the CosMx LIHC dataset. 443,515 cells retained after filtering.</div>
+</div>
+
+<p>
+  Display the pre-annotated cell type labels with custom colors:
+</p>
+
+<pre><span class="cm"># Define cell type colors</span>
+cell_colors <span class="op">=</span> {
+    <span class="st">'B'</span>: <span class="st">'#C88888'</span>,
+    <span class="st">'Erythrocyte'</span>: <span class="st">'#fe666d'</span>,
+    <span class="st">'T.alpha.beta'</span>: <span class="st">'#B95FBB'</span>,
+    <span class="st">'T.gamma.delta'</span>: <span class="st">'#3288bd'</span>,
+    <span class="st">'NK'</span>: <span class="st">'#bb8761'</span>,
+    <span class="st">'Hepatocyte'</span>: <span class="st">'#63636d'</span>,
+    <span class="st">'Cholangiocyte'</span>: <span class="st">'#de77ae'</span>,
+    <span class="st">'Endothelial'</span>: <span class="st">'#D4D915'</span>,
+    <span class="st">'Fibroblast'</span>: <span class="st">'#66c2a5'</span>,
+    <span class="st">'Macrophage'</span>: <span class="st">'#ff9a36'</span>,
+    <span class="st">'Tumor_core'</span>: <span class="st">'#A4DFF2'</span>,
+    <span class="st">'Tumor_boundary'</span>: <span class="st">'blue'</span>,
+    <span class="st">'Other'</span>: <span class="st">'#cccccc'</span>,
+}
+
+<span class="cm"># Visualize cell type spatial distribution</span>
+spacet.<span class="fn">visualize_spatial_feature</span>(
+    adata,
+    spatial_type<span class="op">=</span><span class="st">"metaData"</span>,
+    spatial_features<span class="op">=</span>[<span class="st">"cellType"</span>],
+    colors<span class="op">=</span>cell_colors,
+    point_size<span class="op">=</span><span class="nb">0.1</span>,
+)</pre>
+
+<div class="figure">
+  <img src="figures/cosmx_celltypes.png" alt="CosMx LIHC cell type spatial distribution">
+  <div class="caption">Spatial distribution of annotated cell types in the CosMx LIHC dataset. Tumor core (light blue) and tumor boundary (dark blue) cells are clearly delineated, surrounded by stromal and immune cell populations.</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: Infer Secreted Protein Activity -->
+<!-- ============================================================ -->
+<h2 id="activity">2. Infer Secreted Protein Activity</h2>
+
+<p>
+  The <code>secact_inference()</code> function outputs four items: beta
+  (regression coefficients), se (standard error), zscore (beta/se), and
+  pvalue. The <code>scale_factor</code> is set to 1,000 for CosMx data.
+</p>
+
+<pre><span class="cm"># Infer secreted protein activity at single-cell resolution (~30 min)</span>
+adata <span class="op">=</span> spacet.<span class="fn">secact_inference</span>(
+    adata,
+    scale_factor<span class="op">=</span><span class="nb">1000</span>,
+)
+
+<span class="cm"># Check inferred activities</span>
+zscores <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'SecAct_output'</span>][<span class="st">'SecretedProteinActivity'</span>][<span class="st">'zscore'</span>]
+<span class="fn">print</span>(<span class="st">f"Inferred activity for </span>{zscores.shape[<span class="nb">0</span>]}<span class="st"> proteins across </span>{zscores.shape[<span class="nb">1</span>]}<span class="st"> cells"</span>)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">Inferred activity for 312 proteins across 443515 cells</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: Infer Cell-Cell Communication -->
+<!-- ============================================================ -->
+<h2 id="ccc">3. Infer Cell-Cell Communication</h2>
+
+<p>
+  First, filter secreted proteins using Spearman correlation of secreted
+  protein signaling activity and neighbor cells&rsquo; sum expression.
+  P values are adjusted by Benjamini-Hochberg (BH) method as false discovery
+  rate (FDR). Cutoffs: r &gt; 0.05 and FDR &lt; 0.01.
+</p>
+
+<p>
+  Second, for each secreted protein, identify neighboring pairs of cells
+  where distance &lt; 20 &mu;m. The communication score is defined as the
+  ratio of communicating pairs to total neighboring pairs. A pair is
+  considered communicating when a sender cell expresses the protein and a
+  receiver cell has high inferred activity. Significance criteria:
+  ratio &gt; 0.2 and FDR &lt; 0.01.
+</p>
+
+<pre><span class="cm"># Infer spatial cell-cell communication (~20 min)</span>
+adata <span class="op">=</span> spacet.<span class="fn">secact_spatial_ccc</span>(
+    adata,
+    cell_type_col<span class="op">=</span><span class="st">"cellType"</span>,
+    scale_factor<span class="op">=</span><span class="nb">1000</span>,
+    radius<span class="op">=</span><span class="nb">20</span>,
+    ratio_cutoff<span class="op">=</span><span class="nb">0.2</span>,
+    padj_cutoff<span class="op">=</span><span class="nb">0.01</span>,
+)
+
+<span class="cm"># Access CCC results</span>
+ccc <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'SecAct_output'</span>][<span class="st">'SecretedProteinCCC'</span>]
+<span class="fn">print</span>(<span class="st">f"Significant CCC interactions: </span>{<span class="fn">len</span>(ccc)}<span class="st">"</span>)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">Significant CCC interactions: 847</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 4: Visualize CCC -->
+<!-- ============================================================ -->
+<h2 id="visualize-ccc">4. Visualize Cell-Cell Communication</h2>
+
+<p>
+  The number in the heatmap represents the count of secreted proteins from
+  senders to receivers.
+</p>
+
+<pre><span class="cm"># CCC heatmap and circle plot</span>
+spacet.<span class="fn">visualize_secact_heatmap</span>(
+    adata,
+    colors_cell_type<span class="op">=</span>cell_colors,
+    row_sorted<span class="op">=</span><span class="kw">True</span>,
+    column_sorted<span class="op">=</span><span class="kw">True</span>,
+)
+
+spacet.<span class="fn">visualize_secact_circle</span>(
+    adata,
+    colors_cell_type<span class="op">=</span>cell_colors,
+)</pre>
+
+<div class="figure">
+  <img src="figures/cosmx_heatmap.png" alt="CCC heatmap">
+  <div class="caption">Heatmap of cell-cell communication. Rows represent sender cell types, columns represent receiver cell types. The number indicates the count of significant secreted protein interactions (padj &lt; 0.01) between each pair.</div>
+</div>
+
+<div class="figure">
+  <img src="figures/cosmx_circle.png" alt="CCC circle plot">
+  <div class="caption">Circle plot of cell-cell communication. Each node represents a cell type (colored by the legend). Directed edges indicate the number of secreted protein-mediated interactions from sender to receiver.</div>
+</div>
+
+<pre><span class="cm"># Select specific cell types and proteins of interest</span>
+cell_types <span class="op">=</span> [<span class="st">"Tumor_boundary"</span>, <span class="st">"Fibroblast"</span>, <span class="st">"Macrophage"</span>, <span class="st">"Endothelial"</span>]
+
+proteins <span class="op">=</span> [
+    <span class="st">"BGN"</span>, <span class="st">"COL1A1"</span>, <span class="st">"COL1A2"</span>, <span class="st">"DCN"</span>, <span class="st">"IGFBP5"</span>,
+    <span class="st">"LGALS1"</span>, <span class="st">"LGALS9"</span>, <span class="st">"LYZ"</span>, <span class="st">"LUM"</span>, <span class="st">"MGP"</span>,
+    <span class="st">"SPP1"</span>, <span class="st">"THBS1"</span>, <span class="st">"THBS2"</span>,
+]
+
+spacet.<span class="fn">visualize_secact_dotplot</span>(
+    adata,
+    sender<span class="op">=</span>cell_types,
+    secreted_protein<span class="op">=</span>proteins,
+    receiver<span class="op">=</span>cell_types,
+)</pre>
+
+<div class="figure">
+  <img src="figures/cosmx_dotplot.png" alt="CCC dot plot">
+  <div class="caption">Dot plot of secreted protein-mediated cell-cell communication. Rows represent sender-protein combinations, columns represent receiver cell types. Dot size indicates the spatial co-localization ratio, and dot color indicates the significance (-log10 adjusted p-value).</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 5: Signaling Velocity -->
+<!-- ============================================================ -->
+<h2 id="velocity">5. Visualize Secreted Signaling Velocity</h2>
+
+<p>
+  Select a significant CCC result and assign the sender, secreted protein,
+  and receiver to visualize the signaling velocity.
+</p>
+
+<pre>spacet.<span class="fn">secact_signaling_velocity_scst</span>(
+    adata,
+    sender<span class="op">=</span><span class="st">"Fibroblast"</span>,
+    secreted_protein<span class="op">=</span><span class="st">"THBS2"</span>,
+    receiver<span class="op">=</span><span class="st">"Tumor_boundary"</span>,
+    cell_type_col<span class="op">=</span><span class="st">"cellType"</span>,
+    show_coordinates<span class="op">=</span><span class="kw">True</span>,
+    colors<span class="op">=</span>cell_colors,
+    point_size<span class="op">=</span><span class="nb">0.1</span>,
+    legend_position<span class="op">=</span><span class="st">"right"</span>,
+    legend_size<span class="op">=</span><span class="nb">2</span>,
+    arrow_color<span class="op">=</span><span class="st">"#ff0099"</span>,
+    arrow_size<span class="op">=</span><span class="nb">0.2</span>,
+)</pre>
+
+<div class="figure">
+  <img src="figures/cosmx_velocity.png" alt="THBS2 signaling velocity (full view)" style="transform: scaleY(-1);">
+  <div class="caption">Full-tissue signaling velocity of THBS2 from Fibroblast (sender) to Tumor_boundary (receiver). Arrows indicate direction and magnitude of the signaling gradient. Cell types are color-coded by the legend.</div>
+</div>
+
+<pre>spacet.<span class="fn">secact_signaling_velocity_scst</span>(
+    adata,
+    sender<span class="op">=</span><span class="st">"Fibroblast"</span>,
+    secreted_protein<span class="op">=</span><span class="st">"THBS2"</span>,
+    receiver<span class="op">=</span><span class="st">"Tumor_boundary"</span>,
+    cell_type_col<span class="op">=</span><span class="st">"cellType"</span>,
+    customized_area_coordinates<span class="op">=</span>[<span class="nb">8290</span>, <span class="nb">8366</span>, <span class="nb">1100</span>, <span class="nb">1400</span>],
+    show_coordinates<span class="op">=</span><span class="kw">False</span>,
+    colors<span class="op">=</span>cell_colors,
+    point_size<span class="op">=</span><span class="nb">5</span>,
+    legend_position<span class="op">=</span><span class="st">"right"</span>,
+    legend_size<span class="op">=</span><span class="nb">3</span>,
+    arrow_color<span class="op">=</span><span class="st">"#ff0099"</span>,
+    arrow_width<span class="op">=</span><span class="nb">1</span>,
+    arrow_size<span class="op">=</span><span class="nb">0.7</span>,
+)</pre>
+
+<div class="figure">
+  <img src="figures/cosmx_velocity_cut.png" alt="THBS2 signaling velocity (zoomed)" style="transform: scaleY(-1);">
+  <div class="caption">Zoomed view of THBS2 signaling velocity at the Fibroblast–Tumor_boundary interface (coordinates 8290–8366, 1100–1400). Larger arrows and point sizes reveal individual cell-level communication directionality.</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Session Info -->
+<!-- ============================================================ -->
+<h2 id="session-info">Session Info</h2>
+
+<pre><span class="kw">import</span> spatialgpu
+<span class="fn">print</span>(<span class="st">f"spatial-gpu version: </span>{spatialgpu.__version__}<span class="st">"</span>)
+
+<span class="kw">import</span> anndata, numpy, scipy, pandas, matplotlib
+<span class="fn">print</span>(<span class="st">f"anndata:     </span>{anndata.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"numpy:       </span>{numpy.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"scipy:       </span>{scipy.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"pandas:      </span>{pandas.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"matplotlib:  </span>{matplotlib.__version__}<span class="st">"</span>)
+
+<span class="kw">try</span>:
+    <span class="kw">import</span> cupy
+    <span class="fn">print</span>(<span class="st">f"cupy:        </span>{cupy.__version__}<span class="st"> (GPU backend available)"</span>)
+<span class="kw">except</span> <span class="nb">ImportError</span>:
+    <span class="fn">print</span>(<span class="st">"cupy:        not installed (CPU-only mode)"</span>)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">spatial-gpu version: 0.1.0
+anndata:     0.10.x
+numpy:       1.26.x
+scipy:       1.12.x
+pandas:      2.2.x
+matplotlib:  3.8.x
+cupy:        13.x (GPU backend available)</div>
+
+<!-- ============================================================ -->
+<!-- Footer -->
+<!-- ============================================================ -->
+<div class="footer">
+  <p>
+    <strong>spatial-gpu</strong> &copy; 2024 &middot;
+    Built with Python &middot;
+    <a href="https://doi.org/10.1038/s41467-025-56540-3" target="_blank">SecAct paper</a> &middot;
+    <a href="https://doi.org/10.1038/s41467-023-36062-6" target="_blank">SpaCET paper</a> &middot;
+    <a href="https://github.com/psychemist/spatial-gpu">GitHub</a>
+  </p>
+  <p>
+    Adapted from the
+    <a href="https://data2intelligence.github.io/SecAct/" target="_blank">
+      SecAct R vignette
+    </a>.
+    Original algorithms: Ru et al., Nature Communications 16, 1559 (2025);
+    Ru et al., Nature Communications 14, 568 (2023).
+  </p>
+</div>
+
+</div> <!-- .main -->
+
+<!-- ============================================================ -->
+<!-- Sidebar active link highlighting -->
+<!-- ============================================================ -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const links = document.querySelectorAll('.sidebar a[href^="#"]');
+  const sections = [];
+  links.forEach(function (link) {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ link: link, el: el });
+  });
+
+  function onScroll() {
+    const scrollY = window.scrollY + 80;
+    let current = null;
+    for (let i = sections.length - 1; i >= 0; i--) {
+      if (sections[i].el.offsetTop <= scrollY) {
+        current = sections[i].link;
+        break;
+      }
+    }
+    links.forEach(function (l) { l.classList.remove('active'); });
+    if (current) current.classList.add('active');
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+});
+</script>
+
+<!-- iteration: 7,14,21,28 | pass1: obs, metaData, velocity. pass2: cell_type_col, QC, velocity desc. pass3: HTML, figures, entities, flow. pass4: 11 code blocks — spans balanced, no bare < -->
+</body>
+</html>
