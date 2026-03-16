@@ -427,9 +427,6 @@ def spatial_correlation(
 def _vst_normalize(adata: ad.AnnData) -> np.ndarray:
     """Variance-stabilizing normalization for spatial correlation.
 
-    Tries R's sctransform::vst via subprocess for exact equivalence with
-    SpaCET. Falls back to a Python approximation if R is unavailable.
-
     Parameters
     ----------
     adata : AnnData
@@ -440,90 +437,7 @@ def _vst_normalize(adata: ad.AnnData) -> np.ndarray:
     np.ndarray
         Dense matrix of shape (genes, spots) with VST-normalized values.
     """
-    try:
-        return _vst_normalize_via_r(adata)
-    except (FileNotFoundError, OSError, RuntimeError) as e:
-        import warnings
-
-        warnings.warn(
-            f"R/sctransform not available ({e}), using Python approximation. "
-            "Spatial correlation results may differ from SpaCET.",
-            stacklevel=2,
-        )
-        return _vst_normalize_python(adata)
-
-
-def _vst_normalize_via_r(adata: ad.AnnData) -> np.ndarray:
-    """Run sctransform::vst in R via subprocess for exact SpaCET match."""
-    import os
-    import shutil
-    import subprocess
-    import tempfile
-
-    from scipy.io import mmwrite
-
-    # Get counts as genes x spots sparse matrix
-    X = adata.X
-    if sparse.issparse(X):
-        counts = X.T.tocsc().astype(np.float64)
-    else:
-        counts = sparse.csc_matrix(X.T, dtype=np.float64)
-
-    gene_names = np.array(adata.var_names)
-    n_genes, n_spots = counts.shape
-
-    tmpdir = tempfile.mkdtemp()
-    input_mtx = os.path.join(tmpdir, "counts.mtx")
-    input_genes = os.path.join(tmpdir, "genes.csv")
-    output_mat = os.path.join(tmpdir, "vst_y.csv")
-
-    mmwrite(input_mtx, counts)
-    pd.DataFrame({"gene": gene_names}).to_csv(input_genes, index=False)
-
-    r_code = f"""
-    suppressPackageStartupMessages({{
-        library(Matrix)
-        library(sctransform)
-    }})
-    suppressWarnings({{
-        counts <- readMM("{input_mtx}")
-        counts <- as(counts, "CsparseMatrix")
-    }})
-    genes <- read.csv("{input_genes}")$gene
-    rownames(counts) <- genes
-    colnames(counts) <- paste0("spot_", seq_len(ncol(counts)))
-
-    vst_res <- sctransform::vst(counts, min_cells=5, verbosity=0)
-    write.csv(as.matrix(vst_res$y), "{output_mat}", row.names=TRUE)
-    """
-
-    try:
-        result = subprocess.run(
-            ["Rscript", "-e", r_code],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"R sctransform failed: {result.stderr}")
-
-        vst_df = pd.read_csv(output_mat, index_col=0)
-        mat = vst_df.values.astype(np.float64)  # genes x spots
-
-        # Reorder rows to match original gene order
-        vst_genes = np.array(vst_df.index)
-        if not np.array_equal(vst_genes, gene_names):
-            # VST may return a subset of genes; pad with zeros
-            full_mat = np.zeros((n_genes, n_spots), dtype=np.float64)
-            gene_to_idx = {g: i for i, g in enumerate(gene_names)}
-            for i, g in enumerate(vst_genes):
-                if g in gene_to_idx:
-                    full_mat[gene_to_idx[g], :] = mat[i, :]
-            mat = full_mat
-
-        return mat
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    return _vst_normalize_python(adata)
 
 
 def _vst_normalize_python(adata: ad.AnnData) -> np.ndarray:

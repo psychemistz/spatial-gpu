@@ -1,13 +1,7 @@
-"""MUDAN normalization and clustering — exact replication via R subprocess.
+"""MUDAN normalization and clustering.
 
-For exact numerical equivalence with SpaCET, the entire MUDAN pipeline
-(normalizeVariance + PCA + hclust + silhouette) is executed in R via
-subprocess. This is necessary because:
-  1. R's mgcv::gam uses thin plate regression splines (no Python equivalent)
-  2. R's pf/qchisq with log.p=TRUE has different precision than scipy
-  3. R's hclust(ward.D) merges differ from scipy's linkage at machine precision
-
-R, MUDAN, and cluster packages must be installed.
+Pure-Python implementation of the MUDAN pipeline
+(normalizeVariance + PCA + hclust + silhouette).
 
 Reference: Fan et al., MUDAN R package (used internally by SpaCET).
 """
@@ -53,110 +47,7 @@ def mudan_cluster(
     gsf : ndarray
         Gene scale factors (one per gene).
     """
-    try:
-        return _mudan_cluster_via_r(counts, n_pcs, gam_k, alpha)
-    except (FileNotFoundError, OSError, RuntimeError) as e:
-        import warnings
-
-        warnings.warn(
-            f"R/MUDAN not available ({e}), using Python approximation. "
-            "Results may differ from SpaCET.",
-            stacklevel=2,
-        )
-        return _mudan_cluster_python(counts, n_pcs, gam_k, alpha)
-
-
-def _mudan_cluster_via_r(
-    counts: sparse.spmatrix | np.ndarray,
-    n_pcs: int,
-    gam_k: int,
-    alpha: float,
-) -> tuple[pd.Series, np.ndarray, np.ndarray]:
-    """Run entire MUDAN pipeline in R via subprocess."""
-    import os
-    import shutil
-    import subprocess
-    import tempfile
-
-    from scipy.io import mmwrite
-
-    counts_sp = sparse.csc_matrix(counts, dtype=np.float64)
-
-    tmpdir = tempfile.mkdtemp()
-    input_mtx = os.path.join(tmpdir, "counts.mtx")
-    output_gsf = os.path.join(tmpdir, "gsf.csv")
-    output_ods = os.path.join(tmpdir, "ods.csv")
-    output_clust = os.path.join(tmpdir, "clustering.csv")
-
-    mmwrite(input_mtx, counts_sp)
-
-    r_code = f"""
-    suppressPackageStartupMessages({{
-        library(Matrix)
-        library(MUDAN)
-        library(cluster)
-    }})
-
-    set.seed(123)
-
-    # Read counts
-    counts <- readMM("{input_mtx}")
-    counts <- as(counts, "dgCMatrix")
-
-    # 1. normalizeVariance
-    info <- normalizeVariance(counts, gam.k = {gam_k}, alpha = {alpha},
-                              details = TRUE, verbose = FALSE)
-    gsf <- info$df$gsf
-    ods <- info$ods
-
-    write.csv(data.frame(gsf = gsf), "{output_gsf}", row.names = FALSE)
-    write.csv(data.frame(idx = as.integer(ods)), "{output_ods}", row.names = FALSE)
-
-    # 2. log10 transform + PCA
-    matnorm <- log10(info$mat + 1)
-    nPcs <- min({n_pcs}, length(ods) - 1, ncol(counts) - 1)
-    pcs <- getPcs(matnorm[ods, ], nGenes = length(ods), nPcs = nPcs, verbose = FALSE)
-
-    # 3. Hierarchical clustering (ward.D on correlation distance)
-    d <- as.dist(1 - cor(t(pcs)))
-    hc <- hclust(d, method = "ward.D")
-
-    # 4. Silhouette analysis for k=2:9
-    cluster_numbers <- 2:9
-    sil_values <- c()
-    for (k in cluster_numbers) {{
-        cl <- cutree(hc, k = k)
-        sil <- silhouette(cl, d, Fun = mean)
-        sil_values <- c(sil_values, mean(sil[, 3]))
-    }}
-
-    # 5. Optimal k (max silhouette decrease)
-    sil_diff <- sil_values[1:(length(sil_values) - 1)] - sil_values[2:length(sil_values)]
-    maxN <- which(sil_diff == max(sil_diff)) + 1
-    clustering <- cutree(hc, k = cluster_numbers[maxN])
-
-    write.csv(data.frame(cluster = as.integer(clustering)),
-              "{output_clust}", row.names = FALSE)
-    """
-
-    try:
-        result = subprocess.run(
-            ["Rscript", "-e", r_code],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"R MUDAN pipeline failed: {result.stderr}")
-
-        gsf = pd.read_csv(output_gsf)["gsf"].values
-        ods = pd.read_csv(output_ods)["idx"].values - 1  # R 1-indexed → 0-indexed
-        clustering = pd.read_csv(output_clust)["cluster"].values
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
-    clustering_series = pd.Series(clustering, dtype=int)
-    return clustering_series, ods, gsf
+    return _mudan_cluster_python(counts, n_pcs, gam_k, alpha)
 
 
 def _mudan_cluster_python(

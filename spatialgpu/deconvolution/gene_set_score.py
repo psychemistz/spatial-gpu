@@ -50,18 +50,8 @@ def gene_set_score(
     else:
         gmt = gene_sets
 
-    # Compute UCell scores: try R first, fall back to Python
-    try:
-        scores = _ucell_score_via_r(adata, gmt)
-    except (FileNotFoundError, OSError, RuntimeError) as e:
-        import warnings
-
-        warnings.warn(
-            f"R/UCell not available ({e}), using Python approximation. "
-            "Gene set scores may differ from SpaCET.",
-            stacklevel=2,
-        )
-        scores = _ucell_score(adata, gmt)
+    # Compute UCell scores
+    scores = _ucell_score(adata, gmt)
 
     # Store results
     if "spacet" not in adata.uns:
@@ -73,82 +63,6 @@ def gene_set_score(
         adata.uns["spacet"]["GeneSetScore"] = pd.concat([existing, scores])
 
     return adata
-
-
-def _ucell_score_via_r(
-    adata: ad.AnnData,
-    gene_sets: dict[str, list[str]],
-) -> pd.DataFrame:
-    """Run UCell::ScoreSignatures_UCell in R for exact SpaCET match."""
-    import json
-    import os
-    import shutil
-    import subprocess
-    import tempfile
-
-    from scipy.io import mmwrite
-
-    # Get counts as genes x spots sparse matrix
-    X = adata.X
-    if sparse.issparse(X):
-        counts = X.T.tocsc().astype(np.float64)
-    else:
-        counts = sparse.csc_matrix(X.T, dtype=np.float64)
-
-    gene_names = np.array(adata.var_names)
-    spot_names = np.array(adata.obs_names)
-
-    tmpdir = tempfile.mkdtemp()
-    input_mtx = os.path.join(tmpdir, "counts.mtx")
-    input_genes = os.path.join(tmpdir, "genes.csv")
-    input_spots = os.path.join(tmpdir, "spots.csv")
-    input_gmt = os.path.join(tmpdir, "gene_sets.json")
-    output_scores = os.path.join(tmpdir, "scores.csv")
-
-    mmwrite(input_mtx, counts)
-    pd.DataFrame({"gene": gene_names}).to_csv(input_genes, index=False)
-    pd.DataFrame({"spot": spot_names}).to_csv(input_spots, index=False)
-
-    # Convert gene sets to JSON for R
-    with open(input_gmt, "w") as f:
-        json.dump(gene_sets, f)
-
-    r_code = f"""
-    suppressPackageStartupMessages({{
-        library(Matrix)
-        library(UCell)
-        library(jsonlite)
-    }})
-    suppressWarnings({{
-        counts <- readMM("{input_mtx}")
-        counts <- as(counts, "CsparseMatrix")
-    }})
-    genes <- read.csv("{input_genes}")$gene
-    spots <- read.csv("{input_spots}")$spot
-    rownames(counts) <- genes
-    colnames(counts) <- spots
-
-    gmt <- fromJSON("{input_gmt}")
-
-    res <- t(UCell::ScoreSignatures_UCell(counts, gmt, name=""))
-    write.csv(as.matrix(res), "{output_scores}", row.names=TRUE)
-    """
-
-    try:
-        result = subprocess.run(
-            ["Rscript", "-e", r_code],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"R UCell failed: {result.stderr}")
-
-        scores_df = pd.read_csv(output_scores, index_col=0)
-        scores_df.columns = spot_names
-        return scores_df.astype(np.float64)
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _ucell_score(

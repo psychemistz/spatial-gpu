@@ -65,13 +65,9 @@ def deconvolution(
         adata.obsm['spacet_propMat'] : cell fraction matrix (spots x cell_types)
         adata.uns['spacet'] : dict with malRes, Ref, etc.
     """
-    try:
-        prop_mat, mal_res = _deconvolution_via_r(adata, cancer_type, adjacent_normal)
-    except (FileNotFoundError, OSError, RuntimeError) as e:
-        logger.warning("R SpaCET unavailable (%s), using Python fallback", e)
-        prop_mat, mal_res = _deconvolution_python(
-            adata, cancer_type, signature_type, adjacent_normal, n_jobs
-        )
+    prop_mat, mal_res = _deconvolution_python(
+        adata, cancer_type, signature_type, adjacent_normal, n_jobs
+    )
 
     # Store results in AnnData
     adata.obsm["spacet_propMat"] = prop_mat.T.reindex(adata.obs_names).values
@@ -91,114 +87,6 @@ def deconvolution(
         logger.warning("Could not load combined reference for CCI.")
 
     return adata
-
-
-def _deconvolution_via_r(
-    adata: ad.AnnData,
-    cancer_type: str,
-    adjacent_normal: bool = False,
-) -> tuple[pd.DataFrame, dict]:
-    """Run full SpaCET deconvolution in R for exact numerical equivalence."""
-    import os
-    import shutil
-    import subprocess
-    import tempfile
-
-    from scipy.io import mmwrite
-
-    counts = _get_counts_genes_by_spots(adata)
-    gene_names = np.array(adata.var_names)
-    spot_names = np.array(adata.obs_names)
-
-    tmpdir = tempfile.mkdtemp()
-    try:
-        counts_sp = sparse.csc_matrix(counts, dtype=np.float64)
-        mmwrite(os.path.join(tmpdir, "counts.mtx"), counts_sp)
-        pd.DataFrame({"gene": gene_names}).to_csv(
-            os.path.join(tmpdir, "genes.csv"), index=False
-        )
-        pd.DataFrame({"spot": spot_names}).to_csv(
-            os.path.join(tmpdir, "spots.csv"), index=False
-        )
-
-        r_adj = "TRUE" if adjacent_normal else "FALSE"
-
-        r_code = f"""
-        suppressPackageStartupMessages({{
-            library(Matrix)
-            library(SpaCET)
-        }})
-
-        # Read counts
-        ST <- readMM("{tmpdir}/counts.mtx")
-        ST <- as(ST, "dgCMatrix")
-        genes <- read.csv("{tmpdir}/genes.csv")$gene
-        spots <- read.csv("{tmpdir}/spots.csv")$spot
-        rownames(ST) <- genes
-        colnames(ST) <- spots
-
-        # Create SpaCET object
-        SpaCET_obj <- new("SpaCET")
-        SpaCET_obj@input$counts <- ST
-
-        # Run deconvolution
-        SpaCET_obj <- SpaCET.deconvolution(
-            SpaCET_obj,
-            cancerType = "{cancer_type}",
-            adjacentNormal = {r_adj},
-            coreNo = 1
-        )
-
-        # Save results
-        propMat <- SpaCET_obj@results$deconvolution$propMat
-        write.csv(propMat, "{tmpdir}/propMat.csv")
-
-        malProp <- SpaCET_obj@results$deconvolution$malRes$malProp
-        write.csv(
-            data.frame(spot=names(malProp), malProp=malProp),
-            "{tmpdir}/malProp.csv", row.names=FALSE
-        )
-
-        malRef <- SpaCET_obj@results$deconvolution$malRes$malRef
-        if (!is.null(malRef)) {{
-            write.csv(
-                data.frame(gene=names(malRef), malRef=malRef),
-                "{tmpdir}/malRef.csv", row.names=FALSE
-            )
-        }}
-        """
-
-        result = subprocess.run(
-            ["Rscript", "-e", r_code],
-            capture_output=True,
-            text=True,
-            timeout=3600,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"R SpaCET.deconvolution failed: {result.stderr[:500]}")
-
-        # Read results
-        prop_mat = pd.read_csv(os.path.join(tmpdir, "propMat.csv"), index_col=0)
-
-        mal_prop_df = pd.read_csv(os.path.join(tmpdir, "malProp.csv"))
-        mal_prop = pd.Series(
-            mal_prop_df["malProp"].values, index=mal_prop_df["spot"].values
-        )
-
-        mal_ref_path = os.path.join(tmpdir, "malRef.csv")
-        if os.path.exists(mal_ref_path):
-            mal_ref_df = pd.read_csv(mal_ref_path)
-            mal_ref = pd.Series(
-                mal_ref_df["malRef"].values, index=mal_ref_df["gene"].values
-            )
-        else:
-            mal_ref = None
-
-        mal_res = {"malRef": mal_ref, "malProp": mal_prop}
-        return prop_mat, mal_res
-
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _deconvolution_python(
@@ -732,167 +620,23 @@ def _spatial_deconv(
     """Hierarchical constrained least-squares deconvolution.
 
     Equivalent to SpaCET's SpatialDeconv() function.
-    Tries R subprocess first for exact numerical equivalence,
-    falls back to Python implementation.
 
     Returns
     -------
     pd.DataFrame : cell_types x spots proportion matrix
     """
-    try:
-        return _spatial_deconv_via_r(
-            ST,
-            gene_names,
-            spot_names,
-            mal_prop,
-            mal_ref,
-            mode,
-            unidentifiable,
-            macrophage_other,
-        )
-    except (FileNotFoundError, OSError, RuntimeError) as e:
-        logger.warning("R SpatialDeconv unavailable (%s), using Python fallback", e)
-        return _spatial_deconv_python(
-            ST,
-            gene_names,
-            spot_names,
-            ref,
-            mal_prop,
-            mal_ref,
-            mode,
-            unidentifiable,
-            macrophage_other,
-            n_jobs,
-        )
-
-
-def _spatial_deconv_via_r(
-    ST: sparse.spmatrix | np.ndarray,
-    gene_names: np.ndarray,
-    spot_names: np.ndarray,
-    mal_prop: pd.Series,
-    mal_ref: pd.Series | None,
-    mode: str = "standard",
-    unidentifiable: bool = True,
-    macrophage_other: bool = True,
-) -> pd.DataFrame:
-    """Run SpatialDeconv entirely in R via subprocess.
-
-    Uses SpaCET's bundled reference data and R's constrOptim for
-    exact numerical equivalence with R's SpaCET package.
-    """
-    import os
-    import shutil
-    import subprocess
-    import tempfile
-
-    from scipy.io import mmwrite
-
-    tmpdir = tempfile.mkdtemp()
-    try:
-        # Write counts as MatrixMarket
-        st_sp = sparse.csc_matrix(ST, dtype=np.float64)
-        mmwrite(os.path.join(tmpdir, "ST.mtx"), st_sp)
-
-        # Write gene names and spot names
-        pd.DataFrame({"gene": gene_names}).to_csv(
-            os.path.join(tmpdir, "gene_names.csv"), index=False
-        )
-        pd.DataFrame({"spot": spot_names}).to_csv(
-            os.path.join(tmpdir, "spot_names.csv"), index=False
-        )
-
-        # Write malProp (may be a Series or DataFrame)
-        if isinstance(mal_prop, pd.DataFrame):
-            mal_prop.to_csv(os.path.join(tmpdir, "malProp.csv"), index=True)
-        else:
-            pd.DataFrame({"malProp": mal_prop.values}, index=mal_prop.index).to_csv(
-                os.path.join(tmpdir, "malProp.csv"), index=True
-            )
-
-        # Write malRef (may be a DataFrame with multiple columns)
-        if mal_ref is not None:
-            if isinstance(mal_ref, pd.DataFrame):
-                mal_ref.to_csv(os.path.join(tmpdir, "malRef.csv"), index=True)
-            else:
-                pd.DataFrame({"malRef": mal_ref.values}, index=mal_ref.index).to_csv(
-                    os.path.join(tmpdir, "malRef.csv"), index=True
-                )
-            has_mal_ref = "TRUE"
-        else:
-            has_mal_ref = "FALSE"
-
-        r_unid = "TRUE" if unidentifiable else "FALSE"
-        r_mac_other = "TRUE" if macrophage_other else "FALSE"
-
-        r_code = f"""
-        suppressPackageStartupMessages(library(Matrix))
-        suppressPackageStartupMessages(library(SpaCET))
-
-        # Load inputs
-        ST <- readMM("{tmpdir}/ST.mtx")
-        ST <- as(ST, "dgCMatrix")
-        gene_names <- read.csv("{tmpdir}/gene_names.csv")$gene
-        spot_names <- read.csv("{tmpdir}/spot_names.csv")$spot
-        rownames(ST) <- gene_names
-        colnames(ST) <- spot_names
-
-        malProp_df <- read.csv("{tmpdir}/malProp.csv", row.names=1)
-        if (ncol(malProp_df) == 1) {{
-            malProp <- malProp_df[,1]
-            names(malProp) <- rownames(malProp_df)
-        }} else {{
-            malProp <- as.matrix(malProp_df)
-        }}
-
-        has_malRef <- {has_mal_ref}
-        if (has_malRef) {{
-            malRef_df <- read.csv("{tmpdir}/malRef.csv", row.names=1)
-            if (ncol(malRef_df) == 1) {{
-                malRef <- malRef_df[,1]
-                names(malRef) <- rownames(malRef_df)
-            }} else {{
-                malRef <- as.matrix(malRef_df)
-            }}
-        }} else {{
-            malRef <- NULL
-        }}
-
-        # Load SpaCET reference
-        load(system.file("extdata", "combRef_0.5.rda", package = "SpaCET"))
-
-        # Run SpatialDeconv
-        propMat <- SpaCET:::SpatialDeconv(
-            ST = ST,
-            Ref = Ref,
-            malProp = malProp,
-            malRef = malRef,
-            mode = "{mode}",
-            Unidentifiable = {r_unid},
-            MacrophageOther = {r_mac_other},
-            coreNo = 1
-        )
-
-        write.csv(propMat, "{tmpdir}/propMat.csv")
-        """
-
-        result = subprocess.run(
-            ["Rscript", "-e", r_code],
-            capture_output=True,
-            text=True,
-            timeout=3600,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"R SpatialDeconv failed: {result.stderr[:500]}")
-
-        prop_mat = pd.read_csv(
-            os.path.join(tmpdir, "propMat.csv"),
-            index_col=0,
-        )
-        return prop_mat
-
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    return _spatial_deconv_python(
+        ST,
+        gene_names,
+        spot_names,
+        ref,
+        mal_prop,
+        mal_ref,
+        mode,
+        unidentifiable,
+        macrophage_other,
+        n_jobs,
+    )
 
 
 def _spatial_deconv_python(
@@ -1164,108 +908,10 @@ def _solve_constrained_batch(
     Two-pass optimization matching R's SpaCET:
     1. Unweighted least squares
     2. Weighted by 1/(fitted + 1)
-
-    Tries R's constrOptim via subprocess first for exact numerical
-    equivalence, falls back to Python implementation.
     """
-    try:
-        return _solve_constrained_batch_via_r(
-            A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr
-        )
-    except (FileNotFoundError, OSError, RuntimeError) as e:
-        logger.warning("R constrOptim unavailable (%s), using Python fallback", e)
-        return _solve_constrained_batch_python(
-            A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr, n_jobs
-        )
-
-
-def _solve_constrained_batch_via_r(
-    A: np.ndarray,
-    B: np.ndarray,
-    n_cell: int,
-    theta_sum: np.ndarray,
-    pp_min_arr: np.ndarray,
-    pp_max_arr: np.ndarray,
-) -> np.ndarray:
-    """Run batch constrOptim in R via subprocess for exact equivalence."""
-    import os
-    import shutil
-    import subprocess
-    import tempfile
-
-    tmpdir = tempfile.mkdtemp()
-    try:
-        # Write inputs
-        np.savetxt(os.path.join(tmpdir, "A.csv"), A, delimiter=",")
-        np.savetxt(os.path.join(tmpdir, "B.csv"), B, delimiter=",")
-        np.savetxt(
-            os.path.join(tmpdir, "params.csv"),
-            np.column_stack([theta_sum, pp_min_arr, pp_max_arr]),
-            delimiter=",",
-            header="theta_sum,pp_min,pp_max",
-            comments="",
-        )
-
-        r_code = f"""
-        A <- as.matrix(read.csv("{tmpdir}/A.csv", header=FALSE))
-        B <- as.matrix(read.csv("{tmpdir}/B.csv", header=FALSE))
-        params <- read.csv("{tmpdir}/params.csv")
-
-        n_cell <- {n_cell}
-        n_spots <- ncol(B)
-
-        result <- matrix(0, nrow=n_cell, ncol=n_spots)
-
-        for (i in 1:n_spots) {{
-            ts <- params$theta_sum[i]
-            if (ts <= 0.01) {{
-                result[, i] <- max(ts, 0) / n_cell
-                next
-            }}
-
-            theta0 <- rep(ts / n_cell, n_cell)
-            b <- B[, i]
-            ppmin <- params$pp_min[i]
-            ppmax <- params$pp_max[i]
-
-            ui <- rbind(diag(n_cell), rep(1, n_cell), rep(-1, n_cell))
-            ci <- c(rep(0, n_cell), ppmin, -ppmax)
-
-            f0 <- function(theta) {{ sum((A %*% theta - b)^2) }}
-
-            prop <- tryCatch({{
-                res <- constrOptim(theta0, f0, grad=NULL, ui=ui, ci=ci)
-                res$par
-            }}, error = function(e) {{ theta0 }})
-
-            bhat <- A %*% prop
-
-            f_weighted <- function(theta) {{ sum((A %*% theta - b)^2 / (bhat + 1)) }}
-
-            prop <- tryCatch({{
-                res <- constrOptim(theta0, f_weighted, grad=NULL, ui=ui, ci=ci)
-                res$par
-            }}, error = function(e) {{ prop }})
-
-            result[, i] <- prop
-        }}
-
-        write.csv(result, "{tmpdir}/result.csv", row.names=FALSE)
-        """
-
-        result = subprocess.run(
-            ["Rscript", "-e", r_code],
-            capture_output=True,
-            text=True,
-            timeout=3600,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"R constrOptim failed: {result.stderr}")
-
-        prop_mat = pd.read_csv(os.path.join(tmpdir, "result.csv")).values
-        return prop_mat
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    return _solve_constrained_batch_python(
+        A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr, n_jobs
+    )
 
 
 def _solve_constrained_batch_python(
@@ -1339,78 +985,17 @@ def _compute_mal_ref(
     gene_names: np.ndarray,
     spot_mal_idx: np.ndarray,
 ) -> pd.Series:
-    """Compute malignant reference (mean CPM of malignant spots).
-
-    Uses R subprocess for exact equivalence with SpaCET's rowMeans
-    computation, falling back to Python.
-    """
-    try:
-        return _compute_mal_ref_via_r(counts, gene_names, spot_mal_idx)
-    except (FileNotFoundError, OSError, RuntimeError):
-        mal_counts = counts[:, spot_mal_idx]
-        if sparse.issparse(mal_counts):
-            mal_col_sums = np.asarray(mal_counts.sum(axis=0)).ravel()
-            mal_cpm = mal_counts.toarray().astype(np.float64)
-            mal_cpm = mal_cpm / mal_col_sums[np.newaxis, :] * 1e6
-        else:
-            mal_col_sums = mal_counts.sum(axis=0)
-            mal_cpm = mal_counts.astype(np.float64) / mal_col_sums[np.newaxis, :] * 1e6
-        mal_ref = np.nanmean(mal_cpm, axis=1)
-        return pd.Series(mal_ref, index=gene_names)
-
-
-def _compute_mal_ref_via_r(
-    counts: sparse.spmatrix | np.ndarray,
-    gene_names: np.ndarray,
-    spot_mal_idx: np.ndarray,
-) -> pd.Series:
-    """Compute malRef in R for exact floating-point equivalence."""
-    import os
-    import shutil
-    import subprocess
-    import tempfile
-
-    from scipy.io import mmwrite
-
-    tmpdir = tempfile.mkdtemp()
-    try:
-        counts_sp = sparse.csc_matrix(counts, dtype=np.float64)
-        mmwrite(os.path.join(tmpdir, "counts.mtx"), counts_sp)
-
-        # R uses 1-based indexing
-        r_indices = spot_mal_idx + 1
-        np.savetxt(
-            os.path.join(tmpdir, "spot_idx.csv"),
-            r_indices.reshape(-1, 1),
-            fmt="%d",
-            delimiter=",",
-            header="idx",
-            comments="",
-        )
-
-        r_code = f"""
-        library(Matrix)
-        counts <- readMM("{tmpdir}/counts.mtx")
-        counts <- as(counts, "dgCMatrix")
-        spot_idx <- read.csv("{tmpdir}/spot_idx.csv")$idx
-        malCount <- counts[, spot_idx]
-        malRef <- rowMeans(Matrix::t(Matrix::t(malCount) * 1e6 / Matrix::colSums(malCount)))
-        write.csv(data.frame(malRef=malRef), "{tmpdir}/malRef.csv", row.names=FALSE)
-        """
-
-        result = subprocess.run(
-            ["Rscript", "-e", r_code],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"R malRef failed: {result.stderr}")
-
-        mal_ref = pd.read_csv(os.path.join(tmpdir, "malRef.csv"))["malRef"].values
-        return pd.Series(mal_ref, index=gene_names)
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    """Compute malignant reference (mean CPM of malignant spots)."""
+    mal_counts = counts[:, spot_mal_idx]
+    if sparse.issparse(mal_counts):
+        mal_col_sums = np.asarray(mal_counts.sum(axis=0)).ravel()
+        mal_cpm = mal_counts.toarray().astype(np.float64)
+        mal_cpm = mal_cpm / mal_col_sums[np.newaxis, :] * 1e6
+    else:
+        mal_col_sums = mal_counts.sum(axis=0)
+        mal_cpm = mal_counts.astype(np.float64) / mal_col_sums[np.newaxis, :] * 1e6
+    mal_ref = np.nanmean(mal_cpm, axis=1)
+    return pd.Series(mal_ref, index=gene_names)
 
 
 # ---------------------------------------------------------------------------

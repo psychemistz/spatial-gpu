@@ -705,11 +705,7 @@ def _de_ttest(
     logfc_cutoff: float = 0.25,
     fdr_cutoff: float = 0.01,
 ) -> list[str]:
-    """Differential expression: try limma via R, fall back to t-test.
-
-    SpaCET uses limma (empirical Bayes moderated t-test) for DE analysis.
-    This function tries R/limma first for exact equivalence, falling back
-    to Welch's t-test if R is unavailable.
+    """Differential expression via Welch's t-test.
 
     Parameters
     ----------
@@ -733,96 +729,15 @@ def _de_ttest(
     list[str]
         Gene names passing both logFC and FDR filters among the top n_top.
     """
-    try:
-        return _de_limma_via_r(
-            log_expr,
-            gene_names,
-            group1_mask,
-            group2_mask,
-            n_top,
-            logfc_cutoff,
-            fdr_cutoff,
-        )
-    except (FileNotFoundError, OSError, RuntimeError):
-        return _de_ttest_python(
-            log_expr,
-            gene_names,
-            group1_mask,
-            group2_mask,
-            n_top,
-            logfc_cutoff,
-            fdr_cutoff,
-        )
-
-
-def _de_limma_via_r(
-    log_expr: np.ndarray,
-    gene_names: np.ndarray,
-    group1_mask: np.ndarray,
-    group2_mask: np.ndarray,
-    n_top: int = 500,
-    logfc_cutoff: float = 0.25,
-    fdr_cutoff: float = 0.01,
-) -> list[str]:
-    """Run limma DE analysis in R for exact SpaCET match."""
-    import os
-    import shutil
-    import subprocess
-    import tempfile
-
-    # Subset to the two groups
-    col_idx = np.where(group1_mask | group2_mask)[0]
-    sub_expr = log_expr[:, col_idx]
-    sub_groups = np.where(group1_mask[col_idx], "A", "B")
-
-    tmpdir = tempfile.mkdtemp()
-    input_expr = os.path.join(tmpdir, "expr.csv")
-    input_groups = os.path.join(tmpdir, "groups.csv")
-    output_genes = os.path.join(tmpdir, "de_genes.csv")
-
-    # Write expression matrix
-    expr_df = pd.DataFrame(sub_expr, index=gene_names)
-    expr_df.to_csv(input_expr)
-    pd.DataFrame({"group": sub_groups}).to_csv(input_groups, index=False)
-
-    r_code = f"""
-    suppressPackageStartupMessages({{
-        library(limma)
-    }})
-
-    expr <- as.matrix(read.csv("{input_expr}", row.names=1, check.names=FALSE))
-    groups <- read.csv("{input_groups}")$group
-
-    design <- model.matrix(~ 0 + factor(groups))
-    colnames(design) <- c("A", "B")
-
-    fit <- lmFit(expr, design)
-    contrast.matrix <- makeContrasts(A - B, levels=design)
-    fit2 <- contrasts.fit(fit, contrast.matrix)
-    fit2 <- eBayes(fit2)
-
-    tt <- topTable(fit2, number={n_top}, sort.by="t")
-    sig <- tt[tt$logFC > {logfc_cutoff} & tt$adj.P.Val < {fdr_cutoff}, ]
-
-    write.csv(data.frame(gene=rownames(sig)), "{output_genes}", row.names=FALSE)
-    """
-
-    try:
-        result = subprocess.run(
-            ["Rscript", "-e", r_code],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"R limma failed: {result.stderr}")
-
-        if os.path.getsize(output_genes) > 0:
-            de_df = pd.read_csv(output_genes)
-            return list(de_df["gene"].values)
-        return []
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+    return _de_ttest_python(
+        log_expr,
+        gene_names,
+        group1_mask,
+        group2_mask,
+        n_top,
+        logfc_cutoff,
+        fdr_cutoff,
+    )
 
 
 def _de_ttest_python(
