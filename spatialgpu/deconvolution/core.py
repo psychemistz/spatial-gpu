@@ -922,31 +922,20 @@ def _solve_constrained_batch_python(
     pp_max_arr: np.ndarray,
     n_jobs: int = 1,
 ) -> np.ndarray:
-    """Constrained batch optimization via trust-constr.
+    """Constrained batch optimization via NNLS.
 
     Two-pass optimization matching R's SpaCET:
-    1. Unweighted least squares: min ||A @ theta - b||^2
-    2. Weighted by 1/(fitted + 1)
+    1. Unweighted least squares: min ||A @ theta - b||^2, theta >= 0
+    2. Weighted by 1/sqrt(fitted + 1)
 
-    Uses scipy trust-constr with exact Hessian for deterministic
-    convergence to the global minimum of these convex quadratic
-    objectives. Bounds and linear sum constraints are handled natively.
+    Uses scipy.optimize.nnls for non-negative least squares (fast,
+    deterministic, exact global minimum for convex QP). The sum
+    constraint (sum(theta) <= ppmax) is enforced by post-hoc scaling.
     """
     from joblib import Parallel, delayed
-    from scipy.optimize import Bounds, LinearConstraint, minimize
+    from scipy.optimize import nnls
 
     n_spots = B.shape[1]
-
-    # Precompute A^T A for the quadratic objective
-    AtA = A.T @ A
-    At = A.T
-    two_AtA = 2.0 * AtA
-
-    # Shared bounds (theta_i >= 0)
-    bnds = Bounds(lb=np.zeros(n_cell), ub=np.full(n_cell, np.inf))
-
-    # Sum constraint coefficient (shared across spots)
-    sum_row = np.ones((1, n_cell))
 
     def solve_single(i: int) -> np.ndarray:
         ts = theta_sum[i]
@@ -955,73 +944,29 @@ def _solve_constrained_batch_python(
 
         b = B[:, i]
 
-        ppmin = (
-            float(pp_min_arr[i])
-            if hasattr(pp_min_arr, "__getitem__")
-            else float(pp_min_arr)
-        )
         ppmax = (
             float(pp_max_arr[i])
             if hasattr(pp_max_arr, "__getitem__")
             else float(pp_max_arr)
         )
 
-        theta0 = np.full(n_cell, 0.5 * ts / n_cell)
-        lc = LinearConstraint(sum_row, lb=ppmin, ub=ppmax)
+        # Pass 1: min ||A @ theta - b||^2, theta >= 0
+        prop, _ = nnls(A, b)
+        s = np.sum(prop)
+        if s > ppmax and s > 0:
+            prop = prop * (ppmax / s)
 
-        # Pass 1: unweighted ||A @ theta - b||^2
-        Atb = At @ b
-
-        def f0(th):
-            return float(th @ AtA @ th - 2.0 * Atb @ th)
-
-        def g0(th):
-            return 2.0 * (AtA @ th - Atb)
-
-        def h0(th):
-            return two_AtA
-
-        res1 = minimize(
-            f0,
-            theta0,
-            jac=g0,
-            hess=h0,
-            method="trust-constr",
-            bounds=bnds,
-            constraints=lc,
-            options={"maxiter": 500, "gtol": 1e-15},
-        )
-        prop = np.clip(res1.x, 0.0, None)
-
-        # Pass 2: weighted ||A @ theta - b||^2 / (bhat + 1)
+        # Pass 2: weighted by 1/sqrt(fitted + 1)
         bhat = A @ prop
-        w = 1.0 / (bhat + 1.0)
-        Aw = A * np.sqrt(w[:, np.newaxis])
-        bw = b * np.sqrt(w)
-        AtwAw = Aw.T @ Aw
-        Atwbw = Aw.T @ bw
-        two_AtwAw = 2.0 * AtwAw
+        w = 1.0 / np.sqrt(bhat + 1.0)
+        Aw = A * w[:, np.newaxis]
+        bw = b * w
+        prop2, _ = nnls(Aw, bw)
+        s2 = np.sum(prop2)
+        if s2 > ppmax and s2 > 0:
+            prop2 = prop2 * (ppmax / s2)
 
-        def fw(th):
-            return float(th @ AtwAw @ th - 2.0 * Atwbw @ th)
-
-        def gw(th):
-            return 2.0 * (AtwAw @ th - Atwbw)
-
-        def hw(th):
-            return two_AtwAw
-
-        res2 = minimize(
-            fw,
-            theta0,
-            jac=gw,
-            hess=hw,
-            method="trust-constr",
-            bounds=bnds,
-            constraints=lc,
-            options={"maxiter": 500, "gtol": 1e-15},
-        )
-        return np.clip(res2.x, 0.0, None)
+        return prop2
 
     if n_jobs == 1:
         results = [solve_single(i) for i in range(n_spots)]
