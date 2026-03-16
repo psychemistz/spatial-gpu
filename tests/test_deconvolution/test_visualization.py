@@ -347,10 +347,10 @@ class TestColorMaps:
 
         assert len(_COLORMAPS["LRNetworkScore"]) == 7
 
-    def test_secreted_protein_activity_5_stops(self):
+    def test_secreted_protein_activity_7_stops(self):
         from spatialgpu.deconvolution.visualization import _COLORMAPS
 
-        assert len(_COLORMAPS["SecretedProteinActivity"]) == 5
+        assert len(_COLORMAPS["SecretedProteinActivity"]) == 7
 
     def test_interface_discrete_colors(self):
         from spatialgpu.deconvolution.visualization import _DISCRETE_COLORS
