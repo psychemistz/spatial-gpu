@@ -933,7 +933,6 @@ def _solve_constrained_batch_python(
         if ts <= 0.01:
             return np.full(n_cell, max(ts, 0) / n_cell)
 
-        theta0 = np.full(n_cell, ts / n_cell)
         b = B[:, i]
 
         ppmin = (
@@ -946,6 +945,11 @@ def _solve_constrained_batch_python(
             if hasattr(pp_max_arr, "__getitem__")
             else float(pp_max_arr)
         )
+
+        # Scale theta0 to 0.99*ts so it's strictly interior to the
+        # upper bound constraint (R's float division achieves this
+        # naturally; Python needs an explicit nudge).
+        theta0 = np.full(n_cell, 0.99 * ts / n_cell)
 
         ui = np.vstack([np.eye(n_cell), np.ones((1, n_cell)), -np.ones((1, n_cell))])
         ci = np.concatenate([np.zeros(n_cell), [ppmin], [-ppmax]])
