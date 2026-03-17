@@ -2054,6 +2054,8 @@ def visualize_secact_velocity(
     adata: ad.AnnData,
     gene: str,
     signal_mode: str = "receiving",
+    contour_map: bool = False,
+    animated: bool = False,
     arrow_color: str = "black",
     figsize: tuple[float, float] = (8, 8),
     save: str | None = None,
@@ -2072,18 +2074,24 @@ def visualize_secact_velocity(
         Gene symbol.
     signal_mode : str
         "receiving" or "sending".
+    contour_map : bool
+        If True, display as a smoothed contour flow field instead of
+        individual arrows. Default: False.
+    animated : bool
+        If True, return a matplotlib FuncAnimation showing velocity
+        arrows growing over time. Default: False.
     arrow_color : str
         Arrow color. Default: "black".
     figsize : tuple
         Figure size.
     save : str, optional
-        Path to save.
+        Path to save. For animated=True, use a .gif path.
     dpi : int
         Resolution.
 
     Returns
     -------
-    matplotlib Figure
+    matplotlib Figure (or FuncAnimation if animated=True)
     """
     spacet = adata.uns.get("spacet", {})
     secact_out = spacet.get("SecAct_output", {})
@@ -2097,6 +2105,18 @@ def visualize_secact_velocity(
 
     arrow_df = vel["arrows"]
     points_df = vel["points"]
+
+    if animated:
+        return _velocity_animated(
+            arrow_df,
+            points_df,
+            gene,
+            signal_mode,
+            arrow_color,
+            figsize,
+            save,
+            dpi,
+        )
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -2112,8 +2132,9 @@ def visualize_secact_velocity(
     )
     fig.colorbar(sc, ax=ax, shrink=0.6)
 
-    # Arrows
-    if len(arrow_df) > 0:
+    if contour_map and len(arrow_df) > 0:
+        _velocity_contour(ax, arrow_df, points_df)
+    elif len(arrow_df) > 0:
         for _, row in arrow_df.iterrows():
             ax.annotate(
                 "",
@@ -2135,6 +2156,129 @@ def visualize_secact_velocity(
     if save:
         fig.savefig(save, dpi=dpi, bbox_inches="tight")
     return fig
+
+
+def _velocity_contour(
+    ax: plt.Axes,
+    arrow_df: pd.DataFrame,
+    points_df: pd.DataFrame,
+) -> None:
+    """Overlay smoothed contour flow field on velocity plot."""
+    x = arrow_df["x_start"].values
+    y = arrow_df["y_start"].values
+    dx = arrow_df["x_end"].values - x
+    dy = arrow_df["y_end"].values - y
+
+    # Create regular grid for streamplot
+    n_grid = 30
+    xi = np.linspace(points_df["x"].min(), points_df["x"].max(), n_grid)
+    yi = np.linspace(points_df["y"].min(), points_df["y"].max(), n_grid)
+    XI, YI = np.meshgrid(xi, yi)
+
+    # Interpolate velocity onto grid using RBF
+    from scipy.interpolate import RBFInterpolator
+
+    pts = np.column_stack([x, y])
+    grid_pts = np.column_stack([XI.ravel(), YI.ravel()])
+
+    rbf_dx = RBFInterpolator(pts, dx, kernel="thin_plate_spline", smoothing=1.0)
+    rbf_dy = RBFInterpolator(pts, dy, kernel="thin_plate_spline", smoothing=1.0)
+
+    DX = rbf_dx(grid_pts).reshape(n_grid, n_grid)
+    DY = rbf_dy(grid_pts).reshape(n_grid, n_grid)
+
+    speed = np.sqrt(DX**2 + DY**2)
+    lw = 2 * speed / (speed.max() + 1e-10)
+
+    ax.streamplot(
+        xi,
+        yi,
+        DX,
+        DY,
+        color=speed,
+        cmap="coolwarm",
+        linewidth=lw,
+        density=1.5,
+        arrowsize=1.2,
+        zorder=2,
+    )
+
+
+def _velocity_animated(
+    arrow_df: pd.DataFrame,
+    points_df: pd.DataFrame,
+    gene: str,
+    signal_mode: str,
+    arrow_color: str,
+    figsize: tuple[float, float],
+    save: str | None,
+    dpi: int,
+):
+    """Create animated velocity plot with arrows growing over time."""
+    from matplotlib.animation import FuncAnimation
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    cmap = LinearSegmentedColormap.from_list("vel_cmap", _SECACT_VELOCITY_COLORS)
+    ax.scatter(
+        points_df["x"],
+        points_df["y"],
+        c=points_df["value"],
+        cmap=cmap,
+        s=10,
+        zorder=1,
+    )
+
+    ax.set_title(f"{gene} ({signal_mode})", fontsize=12)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    if len(arrow_df) == 0:
+        return fig
+
+    # Sort arrows by magnitude for progressive reveal
+    magnitudes = arrow_df["vec_len"].values
+    order = np.argsort(magnitudes)
+    n_arrows = len(order)
+    n_frames = 30
+    arrows_per_frame = max(1, n_arrows // n_frames)
+
+    quiver_obj = [None]
+
+    def update(frame):
+        if quiver_obj[0] is not None:
+            quiver_obj[0].remove()
+
+        n_show = min((frame + 1) * arrows_per_frame, n_arrows)
+        idx = order[:n_show]
+        sub = arrow_df.iloc[idx]
+
+        x = sub["x_start"].values
+        y = sub["y_start"].values
+        dx = sub["x_end"].values - x
+        dy = sub["y_end"].values - y
+
+        quiver_obj[0] = ax.quiver(
+            x,
+            y,
+            dx,
+            dy,
+            sub["vec_len"].values,
+            cmap="coolwarm",
+            scale_units="xy",
+            scale=1,
+            width=0.003,
+            alpha=0.7,
+            zorder=2,
+        )
+        return (quiver_obj[0],)
+
+    anim = FuncAnimation(fig, update, frames=n_frames, interval=200, blit=False)
+
+    if save:
+        anim.save(save, writer="pillow", dpi=dpi)
+
+    return anim
 
 
 def visualize_secact_survival(

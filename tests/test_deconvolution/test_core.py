@@ -120,7 +120,6 @@ class TestConstrainedOptimization:
         # Mixture: 2 genes x 3 spots
         B = np.array([[0.5, 0.3, 0.7], [0.5, 0.7, 0.3]])
         theta_sum = np.array([1.0, 1.0, 1.0]) - 1e-5
-        pp_min = np.zeros(3)
         pp_max = np.ones(3)
 
         result = _solve_constrained_batch(A, B, 2, theta_sum, pp_max)
