@@ -449,19 +449,25 @@ ANGPT2  0.000521  0.198432  0.001347                 2</div>
   direction and strength of secreted signaling. Let's take SPARC as an example.
 </p>
 
-<pre>spacet.<span class="fn">secact_signaling_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>, contour_map<span class="op">=</span><span class="kw">True</span>)</pre>
+<pre><span class="cm"># Compute signaling velocity for SPARC</span>
+velocity <span class="op">=</span> spacet.<span class="fn">secact_signaling_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>)
+
+<span class="cm"># Show SPARC signaling velocity as contour map</span>
+spacet.<span class="fn">visualize_secact_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>, contour_map<span class="op">=</span><span class="kw">True</span>)</pre>
 
 <div class="figure">
   <img src="figures/hcc_velocity_contour.png" alt="SPARC signaling velocity contour map">
 </div>
 
-<pre>spacet.<span class="fn">secact_signaling_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>, contour_map<span class="op">=</span><span class="kw">False</span>)</pre>
+<pre><span class="cm"># Show SPARC signaling velocity at spot level</span>
+spacet.<span class="fn">visualize_secact_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>, contour_map<span class="op">=</span><span class="kw">False</span>)</pre>
 
 <div class="figure">
   <img src="figures/hcc_velocity.png" alt="SPARC signaling velocity spot level">
 </div>
 
-<pre>anim <span class="op">=</span> spacet.<span class="fn">secact_signaling_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>, animated<span class="op">=</span><span class="kw">True</span>)
+<pre><span class="cm"># Show animated SPARC signaling velocity</span>
+anim <span class="op">=</span> spacet.<span class="fn">visualize_secact_velocity</span>(adata, gene<span class="op">=</span><span class="st">"SPARC"</span>, animated<span class="op">=</span><span class="kw">True</span>)
 
 <span class="cm"># anim.save("my_animation.gif", writer="pillow")</span></pre>
 
