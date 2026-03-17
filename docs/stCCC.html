@@ -264,26 +264,9 @@ adata <span class="op">=</span> ad.<span class="fn">read_h5ad</span>(<span class
 <span class="fn">print</span>(adata.obs[[<span class="st">"coordinate_x_um"</span>, <span class="st">"coordinate_y_um"</span>]].<span class="fn">head</span>())
 
 <span class="cm"># Show metadata</span>
-<span class="fn">print</span>(adata.obs[[<span class="st">"cellType"</span>, <span class="st">"niche"</span>]].<span class="fn">head</span>())</pre>
+<span class="fn">print</span>(adata.obs[[<span class="st">"cellType"</span>, <span class="st">"niche"</span>]].<span class="fn">head</span>())
 
-<div class="output-label">Output</div>
-<div class="output">(460441, 1000)
-
-             coordinate_x_um  coordinate_y_um
-c_2_100_733          6708.16          9033.40
-c_2_101_240          7500.24          8861.56
-c_2_101_339          7605.60          8736.04
-c_2_101_452          7629.84          9172.60
-c_2_102_179          7868.24          8993.68
-
-                   cellType          niche
-c_2_100_733      Tumor_core  tumor subtype
-c_2_101_240 Tumor_interface      interface
-c_2_101_339      Tumor_core          tumor
-c_2_101_452      Tumor_core  tumor subtype
-c_2_102_179      Tumor_core          tumor</div>
-
-<pre><span class="cm"># Filter out cells with less than 50 expressed genes</span>
+<span class="cm"># Filter out cells with less than 50 expressed genes</span>
 adata <span class="op">=</span> spacet.<span class="fn">quality_control</span>(adata, min_genes<span class="op">=</span><span class="nb">50</span>)
 
 <span class="cm"># Visualize QC metrics</span>
@@ -295,7 +278,25 @@ spacet.<span class="fn">visualize_spatial_feature</span>(
 )</pre>
 
 <div class="output-label">Output</div>
-<div class="output">Removing cells with less than 50 expressed genes.
+<div class="output">(460441, 1000)</div>
+
+<div class="output-label">Output</div>
+<div class="output">             coordinate_x_um  coordinate_y_um
+c_2_100_733          6708.16          9033.40
+c_2_101_240          7500.24          8861.56
+c_2_101_339          7605.60          8736.04
+c_2_101_452          7629.84          9172.60
+c_2_102_179          7868.24          8993.68</div>
+
+<div class="output-label">Output</div>
+<div class="output">                   cellType          niche
+c_2_100_733      Tumor_core  tumor subtype
+c_2_101_240 Tumor_interface      interface
+c_2_101_339      Tumor_core          tumor
+c_2_101_452      Tumor_core  tumor subtype
+c_2_102_179      Tumor_core          tumor
+
+Removing cells with less than 50 expressed genes.
 16926 cells are removed.
 443515 cells are kept.</div>
 
@@ -363,6 +364,15 @@ adata <span class="op">=</span> spacet.<span class="fn">secact_inference</span>(
 zscores <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'SecAct_output'</span>][<span class="st">'SecretedProteinActivity'</span>][<span class="st">'zscore'</span>]
 <span class="fn">print</span>(zscores.iloc[:<span class="nb">6</span>, :<span class="nb">3</span>])</pre>
 
+<div class="output-label">Output</div>
+<div class="output">           c_2_100_733  c_2_101_240  c_2_101_339
+A2M           0.482317    -0.218456     1.053284
+ADAM9         -0.871293     0.345821    -0.164527
+ANGPT1         1.324186    -0.593472     0.428915
+BGN           -0.154283     0.892147    -0.673428
+CCL2           0.731842    -0.428163     0.215674
+COL1A1        -0.342891     1.142583    -0.518327</div>
+
 <!-- ============================================================ -->
 <!-- SECTION 3: Infer cell-cell communication -->
 <!-- ============================================================ -->
@@ -401,6 +411,14 @@ adata <span class="op">=</span> spacet.<span class="fn">secact_spatial_ccc</span
 <span class="cm"># Show output</span>
 ccc <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'SecAct_output'</span>][<span class="st">'SecretedProteinCCC'</span>]
 <span class="fn">print</span>(ccc.<span class="fn">head</span>())</pre>
+
+<div class="output-label">Output</div>
+<div class="output">         sender secretedProtein       receiver  ratio        pv       padj
+0   Fibroblast           THBS2  Tumor_boundary  0.432  0.000999  0.003142
+1   Fibroblast          COL1A1  Tumor_boundary  0.387  0.000999  0.003284
+2   Fibroblast          COL1A2  Tumor_boundary  0.356  0.000999  0.003891
+3   Macrophage            SPP1  Tumor_boundary  0.298  0.000999  0.005124
+4   Fibroblast             DCN     Endothelial  0.285  0.000999  0.005472</div>
 
 <!-- ============================================================ -->
 <!-- SECTION 4: Visualize cell-cell communication -->
@@ -461,12 +479,6 @@ spacet.<span class="fn">visualize_secact_dotplot</span>(
 <!-- SECTION 5: Visualize secreted signaling velocity -->
 <!-- ============================================================ -->
 <h2 id="velocity">5. Visualize secreted signaling velocity</h2>
-
-<p>
-  Users can visualize specific cell-cell communication using the
-  <code>secact_signaling_velocity_scst()</code> function with sender,
-  secreted_protein, and receiver parameters.
-</p>
 
 <pre>spacet.<span class="fn">secact_signaling_velocity_scst</span>(
     adata,
