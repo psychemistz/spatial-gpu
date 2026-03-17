@@ -1302,13 +1302,13 @@ _SECACT_LOLLIPOP_COLOR = "#619CFF"
 _SECACT_DOT_CMAP_COLORS = ["#fbbf45", "#ed0345"]
 _SECACT_VELOCITY_COLORS = ["#b8e186", "#de77ae", "#c51b7d"]
 _SECACT_VELOCITY_CONTOUR_COLORS = [
-    "#f7fcf5",
-    "#c7e9c0",
-    "#74c476",
-    "#238b45",
-    "#00441b",
-    "#4a1400",
-    "#8b0000",
+    "#f0fff0",
+    "#b2e2b2",
+    "#66cc66",
+    "#ffcc99",
+    "#ff9966",
+    "#ff6633",
+    "#cc3300",
 ]
 
 
@@ -2151,7 +2151,7 @@ def visualize_secact_velocity(
                 arrow_df["y_change"].values,
                 color=arrow_color,
                 scale_units="xy",
-                scale=0.5,
+                scale=0.3,
                 width=0.003,
                 headwidth=4,
                 headlength=5,
