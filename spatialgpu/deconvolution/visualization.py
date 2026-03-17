@@ -1301,6 +1301,9 @@ _SECACT_BAR_COLORS = ["#91bfdb", "#fc8d59"]
 _SECACT_LOLLIPOP_COLOR = "#619CFF"
 _SECACT_DOT_CMAP_COLORS = ["#fbbf45", "#ed0345"]
 _SECACT_VELOCITY_COLORS = ["#b8e186", "#de77ae", "#c51b7d"]
+_SECACT_VELOCITY_CONTOUR_COLORS = [
+    "#f7fcf5", "#c7e9c0", "#74c476", "#238b45", "#00441b",
+]
 
 
 def visualize_secact_heatmap(
@@ -2120,32 +2123,34 @@ def visualize_secact_velocity(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Background points
-    cmap = LinearSegmentedColormap.from_list("vel_cmap", _SECACT_VELOCITY_COLORS)
-    sc = ax.scatter(
-        points_df["x"],
-        points_df["y"],
-        c=points_df["value"],
-        cmap=cmap,
-        s=10,
-        zorder=1,
-    )
-    fig.colorbar(sc, ax=ax, shrink=0.6)
-
     if contour_map and len(arrow_df) > 0:
-        _velocity_contour(ax, arrow_df, points_df)
-    elif len(arrow_df) > 0:
-        for _, row in arrow_df.iterrows():
-            ax.annotate(
-                "",
-                xy=(row["x_end"], row["y_end"]),
-                xytext=(row["x_start"], row["y_start"]),
-                arrowprops={
-                    "arrowstyle": "->",
-                    "color": arrow_color,
-                    "lw": 0.5,
-                    "mutation_scale": row["vec_len"] * 100,
-                },
+        cf = _velocity_contour(ax, arrow_df, points_df)
+        fig.colorbar(cf, ax=ax, shrink=0.6, label="level")
+    else:
+        cmap = LinearSegmentedColormap.from_list("vel_cmap", _SECACT_VELOCITY_COLORS)
+        sc = ax.scatter(
+            points_df["x"],
+            points_df["y"],
+            c=points_df["value"],
+            cmap=cmap,
+            s=10,
+            zorder=1,
+        )
+        fig.colorbar(sc, ax=ax, shrink=0.6)
+        if len(arrow_df) > 0:
+            ax.quiver(
+                arrow_df["x_start"].values,
+                arrow_df["y_start"].values,
+                arrow_df["x_change"].values,
+                arrow_df["y_change"].values,
+                color=arrow_color,
+                scale_units="xy",
+                scale=1,
+                width=0.002,
+                headwidth=4,
+                headlength=5,
+                alpha=0.7,
+                zorder=2,
             )
 
     ax.set_title(f"{gene} ({signal_mode})", fontsize=12)
@@ -2162,46 +2167,60 @@ def _velocity_contour(
     ax: plt.Axes,
     arrow_df: pd.DataFrame,
     points_df: pd.DataFrame,
-) -> None:
-    """Overlay smoothed contour flow field on velocity plot."""
-    x = arrow_df["x_start"].values
-    y = arrow_df["y_start"].values
-    dx = arrow_df["x_end"].values - x
-    dy = arrow_df["y_end"].values - y
+    n_levels: int = 11,
+) -> "plt.cm.ScalarMappable":
+    """Filled contour of velocity magnitude with spot overlay.
 
-    # Create regular grid for streamplot
-    n_grid = 30
-    xi = np.linspace(points_df["x"].min(), points_df["x"].max(), n_grid)
-    yi = np.linspace(points_df["y"].min(), points_df["y"].max(), n_grid)
-    XI, YI = np.meshgrid(xi, yi)
+    Matches R's SecAct.signaling.velocity.spotST(contourMap=TRUE):
+    green sequential filled contour with black dots for spot positions.
 
-    # Interpolate velocity onto grid using RBF
+    Returns the contourf mappable for colorbar creation by caller.
+    """
     from scipy.interpolate import RBFInterpolator
 
-    pts = np.column_stack([x, y])
+    x = arrow_df["x_start"].values
+    y = arrow_df["y_start"].values
+    speed = arrow_df["vec_len"].values
+
+    x_min, x_max = points_df["x"].min(), points_df["x"].max()
+    y_min, y_max = points_df["y"].min(), points_df["y"].max()
+
+    # Regular grid for contour interpolation
+    n_grid = 80
+    xi = np.linspace(x_min, x_max, n_grid)
+    yi = np.linspace(y_min, y_max, n_grid)
+    XI, YI = np.meshgrid(xi, yi)
     grid_pts = np.column_stack([XI.ravel(), YI.ravel()])
 
-    rbf_dx = RBFInterpolator(pts, dx, kernel="thin_plate_spline", smoothing=1.0)
-    rbf_dy = RBFInterpolator(pts, dy, kernel="thin_plate_spline", smoothing=1.0)
-
-    DX = rbf_dx(grid_pts).reshape(n_grid, n_grid)
-    DY = rbf_dy(grid_pts).reshape(n_grid, n_grid)
-
-    speed = np.sqrt(DX**2 + DY**2)
-    lw = 2 * speed / (speed.max() + 1e-10)
-
-    ax.streamplot(
-        xi,
-        yi,
-        DX,
-        DY,
-        color=speed,
-        cmap="coolwarm",
-        linewidth=lw,
-        density=1.5,
-        arrowsize=1.2,
-        zorder=2,
+    # Interpolate velocity magnitude onto grid
+    pts = np.column_stack([x, y])
+    domain_scale = max(x_max - x_min, y_max - y_min)
+    rbf = RBFInterpolator(
+        pts, speed, kernel="thin_plate_spline", smoothing=domain_scale * 0.05
     )
+    Z = rbf(grid_pts).reshape(n_grid, n_grid)
+    Z = np.clip(Z, 0, None)
+
+    greens = LinearSegmentedColormap.from_list(
+        "vel_greens", _SECACT_VELOCITY_CONTOUR_COLORS
+    )
+
+    # Filled contour
+    levels = np.linspace(0, Z.max(), n_levels)
+    cf = ax.contourf(XI, YI, Z, levels=levels, cmap=greens, zorder=1)
+    ax.contour(XI, YI, Z, levels=levels, colors="white", linewidths=0.3, zorder=2)
+
+    # Spot positions as black dots
+    ax.scatter(
+        points_df["x"].values,
+        points_df["y"].values,
+        s=3,
+        c="black",
+        alpha=0.5,
+        zorder=3,
+        edgecolors="none",
+    )
+    return cf
 
 
 def _velocity_animated(
