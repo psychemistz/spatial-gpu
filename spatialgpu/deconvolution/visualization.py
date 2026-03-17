@@ -1307,6 +1307,8 @@ _SECACT_VELOCITY_CONTOUR_COLORS = [
     "#74c476",
     "#238b45",
     "#00441b",
+    "#4a1400",
+    "#8b0000",
 ]
 
 
@@ -2149,8 +2151,8 @@ def visualize_secact_velocity(
                 arrow_df["y_change"].values,
                 color=arrow_color,
                 scale_units="xy",
-                scale=1,
-                width=0.002,
+                scale=0.5,
+                width=0.003,
                 headwidth=4,
                 headlength=5,
                 alpha=0.7,
