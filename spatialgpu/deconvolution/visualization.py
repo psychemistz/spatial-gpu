@@ -2150,8 +2150,6 @@ def visualize_secact_velocity(
                 arrow_df["x_change"].values,
                 arrow_df["y_change"].values,
                 color=arrow_color,
-                scale_units="xy",
-                scale=0.3,
                 width=0.003,
                 headwidth=4,
                 headlength=5,
