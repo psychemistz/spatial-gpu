@@ -18,10 +18,23 @@ RTOL = 1e-10
 ATOL = 1e-12
 
 DATASETS = {
-    # min_genes=0 matches R validation data (no QC filtering applied)
-    "vst1": {"path": "data/Visium_BC", "cancer": "BRCA", "min_genes": 0},
-    "vst2": {"path": "data/Visium_HCC", "cancer": "LIHC", "min_genes": 0},
-    "vst3": {"path": "data/hiresST_CRC/hiresST_CRC.h5ad", "cancer": "CRC", "min_genes": 0},
+    # min_genes=0 for vst1 matches R validation (no QC filtering)
+    # vst2/vst3 use _matched.csv files regenerated from same input data
+    "vst1": {
+        "path": "data/Visium_BC", "cancer": "BRCA", "min_genes": 0,
+        "r_propmat": "validation/vst1_propMat.csv",
+        "r_malprop": "validation/vst1_malProp.csv",
+    },
+    "vst2": {
+        "path": "data/Visium_HCC", "cancer": "LIHC", "min_genes": 1000,
+        "r_propmat": "validation/vst2_propMat_matched.csv",
+        "r_malprop": "validation/vst2_malProp_matched.csv",
+    },
+    "vst3": {
+        "path": "data/hiresST_CRC/hiresST_CRC.h5ad", "cancer": "CRC", "min_genes": 1000,
+        "r_propmat": "validation/vst3_propMat_matched.csv",
+        "r_malprop": "validation/vst3_malProp_matched.csv",
+    },
 }
 
 
@@ -65,8 +78,8 @@ def validate_dataset(name, cfg):
     py_malprop = adata.uns["spacet"]["deconvolution"]["malRes"]["malProp"]
 
     # Load R reference
-    r_propmat = pd.read_csv(f"validation/{name}_propMat.csv", index_col=0)
-    r_malprop = pd.read_csv(f"validation/{name}_malProp.csv", index_col=0)
+    r_propmat = pd.read_csv(cfg["r_propmat"], index_col=0)
+    r_malprop = pd.read_csv(cfg["r_malprop"], index_col=0)
 
     # Align
     common_types = sorted(set(r_propmat.index) & set(py_propmat.index))
