@@ -21,17 +21,23 @@ DATASETS = {
     # min_genes=0 for vst1 matches R validation (no QC filtering)
     # vst2/vst3 use _matched.csv files regenerated from same input data
     "vst1": {
-        "path": "data/Visium_BC", "cancer": "BRCA", "min_genes": 0,
+        "path": "data/Visium_BC",
+        "cancer": "BRCA",
+        "min_genes": 0,
         "r_propmat": "validation/vst1_propMat.csv",
         "r_malprop": "validation/vst1_malProp.csv",
     },
     "vst2": {
-        "path": "data/Visium_HCC", "cancer": "LIHC", "min_genes": 1000,
+        "path": "data/Visium_HCC",
+        "cancer": "LIHC",
+        "min_genes": 1000,
         "r_propmat": "validation/vst2_propMat_matched.csv",
         "r_malprop": "validation/vst2_malProp_matched.csv",
     },
     "vst3": {
-        "path": "data/hiresST_CRC/hiresST_CRC.h5ad", "cancer": "CRC", "min_genes": 1000,
+        "path": "data/hiresST_CRC/hiresST_CRC.h5ad",
+        "cancer": "CRC",
+        "min_genes": 1000,
         "r_propmat": "validation/vst3_propMat_matched.csv",
         "r_malprop": "validation/vst3_malProp_matched.csv",
     },
@@ -53,20 +59,11 @@ def validate_dataset(name, cfg):
         adata = ad.read_h5ad(cfg["path"])
     else:
         adata = spacet.create_spacet_object_10x(cfg["path"])
-    if cfg["min_genes"] > 0:
-        adata = spacet.quality_control(adata, min_genes=cfg["min_genes"])
-    else:
-        # Add QC columns without filtering (match R validation data)
-        from scipy import sparse as sp
-
-        X = adata.X
-        if sp.issparse(X):
-            adata.obs["UMI"] = np.asarray(X.sum(axis=1)).ravel()
-            adata.obs["Gene"] = np.asarray((X > 0).sum(axis=1)).ravel()
-        else:
-            adata.obs["UMI"] = X.sum(axis=1)
-            adata.obs["Gene"] = (X > 0).sum(axis=1)
-    print(f"  Loaded: {adata.shape[0]} spots x {adata.shape[1]} genes ({time.time()-t0:.1f}s)")
+    # min_genes=0 adds QC columns without filtering (matches R validation)
+    adata = spacet.quality_control(adata, min_genes=max(cfg["min_genes"], 0))
+    print(
+        f"  Loaded: {adata.shape[0]} spots x {adata.shape[1]} genes ({time.time()-t0:.1f}s)"
+    )
 
     # Run Python deconvolution
     t1 = time.time()
@@ -85,8 +82,12 @@ def validate_dataset(name, cfg):
     common_types = sorted(set(r_propmat.index) & set(py_propmat.index))
     common_spots = sorted(set(r_propmat.columns) & set(py_propmat.columns))
 
-    print(f"\n  Cell types: R={r_propmat.shape[0]}, Py={py_propmat.shape[0]}, common={len(common_types)}")
-    print(f"  Spots: R={r_propmat.shape[1]}, Py={py_propmat.shape[1]}, common={len(common_spots)}")
+    print(
+        f"\n  Cell types: R={r_propmat.shape[0]}, Py={py_propmat.shape[0]}, common={len(common_types)}"
+    )
+    print(
+        f"  Spots: R={r_propmat.shape[1]}, Py={py_propmat.shape[1]}, common={len(common_spots)}"
+    )
 
     if not common_types or not common_spots:
         print("  ERROR: No common types/spots!")
@@ -133,7 +134,9 @@ def validate_dataset(name, cfg):
     else:
         py_mal = np.array(py_malprop)
 
-    r_mal_col = r_malprop.iloc[:, 0].values if r_malprop.shape[1] > 0 else r_malprop.values
+    r_mal_col = (
+        r_malprop.iloc[:, 0].values if r_malprop.shape[1] > 0 else r_malprop.values
+    )
     if len(py_mal) == len(r_mal_col):
         mal_diff = np.max(np.abs(py_mal - r_mal_col))
         mal_corr = np.corrcoef(py_mal, r_mal_col)[0, 1]

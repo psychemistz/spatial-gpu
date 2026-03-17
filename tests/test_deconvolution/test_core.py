@@ -123,7 +123,7 @@ class TestConstrainedOptimization:
         pp_min = np.zeros(3)
         pp_max = np.ones(3)
 
-        result = _solve_constrained_batch(A, B, 2, theta_sum, pp_min, pp_max)
+        result = _solve_constrained_batch(A, B, 2, theta_sum, pp_max)
         assert result.shape == (2, 3)
         # Fractions should be close to the mixture values
         np.testing.assert_allclose(result[:, 0], [0.5, 0.5], atol=0.1)
@@ -134,10 +134,9 @@ class TestConstrainedOptimization:
         A = np.random.rand(20, 5).astype(np.float64)
         B = np.random.rand(20, 10).astype(np.float64)
         theta_sum = np.full(10, 0.8)
-        pp_min = np.zeros(10)
         pp_max = np.ones(10)
 
-        result = _solve_constrained_batch(A, B, 5, theta_sum, pp_min, pp_max)
+        result = _solve_constrained_batch(A, B, 5, theta_sum, pp_max)
         assert np.all(result >= -1e-10)
 
     def test_sum_constraint(self):
@@ -147,10 +146,9 @@ class TestConstrainedOptimization:
         B = np.random.rand(20, 5).astype(np.float64)
         mal_prop = np.array([0.3, 0.2, 0.5, 0.1, 0.4])
         theta_sum = (1 - mal_prop) - 1e-5
-        pp_min = np.zeros(5)
         pp_max = 1 - mal_prop
 
-        result = _solve_constrained_batch(A, B, 3, theta_sum, pp_min, pp_max)
+        result = _solve_constrained_batch(A, B, 3, theta_sum, pp_max)
         row_sums = result.sum(axis=0)
         assert np.all(row_sums <= pp_max + 1e-6)
 
@@ -159,10 +157,9 @@ class TestConstrainedOptimization:
         A = np.random.rand(10, 3).astype(np.float64)
         B = np.random.rand(10, 2).astype(np.float64)
         theta_sum = np.array([0.005, 0.001])
-        pp_min = np.zeros(2)
         pp_max = np.ones(2)
 
-        result = _solve_constrained_batch(A, B, 3, theta_sum, pp_min, pp_max)
+        result = _solve_constrained_batch(A, B, 3, theta_sum, pp_max)
         # Should return equal fractions
         for j in range(2):
             np.testing.assert_allclose(result[:, j], theta_sum[j] / 3, atol=1e-10)

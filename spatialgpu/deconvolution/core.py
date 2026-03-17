@@ -752,7 +752,6 @@ def _spatial_deconv_python(
             :, [list(reference.columns).index(t) for t in level1_types]
         ]
 
-        n_spot = mixture_l1.shape[1]
         n_cell = ref_l1.shape[1]
 
         theta_sum = (1 - mal_prop_arr) - 1e-5
@@ -762,9 +761,6 @@ def _spatial_deconv_python(
             mixture_l1,
             n_cell,
             theta_sum,
-            pp_min_arr=(
-                np.zeros(n_spot) if unidentifiable else (1 - mal_prop_arr - 2e-5)
-            ),
             pp_max_arr=1 - mal_prop_arr,
             n_jobs=n_jobs,
         )
@@ -859,11 +855,6 @@ def _spatial_deconv_python(
         n_cell_l2 = ref_l2.shape[1]
         theta_sum_l2 = prop_mat_l1.loc[cell_spe].values - 1e-5
 
-        if cell_spe == "Macrophage" and macrophage_other:
-            pp_min_l2 = np.zeros(len(valid_spots))
-        else:
-            pp_min_l2 = prop_mat_l1.loc[cell_spe].values - 2e-5
-
         pp_max_l2 = prop_mat_l1.loc[cell_spe].values
 
         prop_l2 = _solve_constrained_batch(
@@ -871,7 +862,6 @@ def _spatial_deconv_python(
             mix_l2,
             n_cell_l2,
             theta_sum_l2,
-            pp_min_arr=pp_min_l2,
             pp_max_arr=pp_max_l2,
             n_jobs=n_jobs,
         )
@@ -898,7 +888,6 @@ def _solve_constrained_batch(
     B: np.ndarray,
     n_cell: int,
     theta_sum: np.ndarray,
-    pp_min_arr: np.ndarray,
     pp_max_arr: np.ndarray,
     n_jobs: int = 1,
 ) -> np.ndarray:
@@ -908,9 +897,7 @@ def _solve_constrained_batch(
     1. Unweighted least squares
     2. Weighted by 1/(fitted + 1)
     """
-    return _solve_constrained_batch_python(
-        A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr, n_jobs
-    )
+    return _solve_constrained_batch_python(A, B, n_cell, theta_sum, pp_max_arr, n_jobs)
 
 
 def _solve_constrained_batch_python(
@@ -918,7 +905,6 @@ def _solve_constrained_batch_python(
     B: np.ndarray,
     n_cell: int,
     theta_sum: np.ndarray,
-    pp_min_arr: np.ndarray,
     pp_max_arr: np.ndarray,
     n_jobs: int = 1,
 ) -> np.ndarray:
@@ -943,12 +929,7 @@ def _solve_constrained_batch_python(
             return np.full(n_cell, max(ts, 0) / n_cell)
 
         b = B[:, i]
-
-        ppmax = (
-            float(pp_max_arr[i])
-            if hasattr(pp_max_arr, "__getitem__")
-            else float(pp_max_arr)
-        )
+        ppmax = float(pp_max_arr[i])
 
         # Pass 1: min ||A @ theta - b||^2, theta >= 0
         prop, _ = nnls(A, b)
