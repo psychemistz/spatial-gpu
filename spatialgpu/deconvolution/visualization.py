@@ -2120,17 +2120,14 @@ def visualize_secact_velocity(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Background points (dim for contour mode so streamlines stand out)
+    # Background points
     cmap = LinearSegmentedColormap.from_list("vel_cmap", _SECACT_VELOCITY_COLORS)
-    bg_alpha = 0.25 if contour_map else 1.0
-    bg_size = 5 if contour_map else 10
     sc = ax.scatter(
         points_df["x"],
         points_df["y"],
         c=points_df["value"],
         cmap=cmap,
-        s=bg_size,
-        alpha=bg_alpha,
+        s=10,
         zorder=1,
     )
     fig.colorbar(sc, ax=ax, shrink=0.6)
@@ -2172,13 +2169,10 @@ def _velocity_contour(
     dx = arrow_df["x_end"].values - x
     dy = arrow_df["y_end"].values - y
 
-    x_min, x_max = points_df["x"].min(), points_df["x"].max()
-    y_min, y_max = points_df["y"].min(), points_df["y"].max()
-
-    # Fine grid for smooth streamlines
-    n_grid = 60
-    xi = np.linspace(x_min, x_max, n_grid)
-    yi = np.linspace(y_min, y_max, n_grid)
+    # Create regular grid for streamplot
+    n_grid = 30
+    xi = np.linspace(points_df["x"].min(), points_df["x"].max(), n_grid)
+    yi = np.linspace(points_df["y"].min(), points_df["y"].max(), n_grid)
     XI, YI = np.meshgrid(xi, yi)
 
     # Interpolate velocity onto grid using RBF
@@ -2187,18 +2181,14 @@ def _velocity_contour(
     pts = np.column_stack([x, y])
     grid_pts = np.column_stack([XI.ravel(), YI.ravel()])
 
-    # Scale smoothing relative to domain size for stable interpolation
-    domain_scale = max(x_max - x_min, y_max - y_min)
-    smoothing = domain_scale * 0.01
-
-    rbf_dx = RBFInterpolator(pts, dx, kernel="thin_plate_spline", smoothing=smoothing)
-    rbf_dy = RBFInterpolator(pts, dy, kernel="thin_plate_spline", smoothing=smoothing)
+    rbf_dx = RBFInterpolator(pts, dx, kernel="thin_plate_spline", smoothing=1.0)
+    rbf_dy = RBFInterpolator(pts, dy, kernel="thin_plate_spline", smoothing=1.0)
 
     DX = rbf_dx(grid_pts).reshape(n_grid, n_grid)
     DY = rbf_dy(grid_pts).reshape(n_grid, n_grid)
 
     speed = np.sqrt(DX**2 + DY**2)
-    lw = 1.0 + 3.0 * speed / (speed.max() + 1e-10)
+    lw = 2 * speed / (speed.max() + 1e-10)
 
     ax.streamplot(
         xi,
@@ -2206,12 +2196,11 @@ def _velocity_contour(
         DX,
         DY,
         color=speed,
-        cmap="RdYlBu_r",
+        cmap="coolwarm",
         linewidth=lw,
-        density=2.0,
-        arrowsize=1.5,
-        arrowstyle="->",
-        zorder=3,
+        density=1.5,
+        arrowsize=1.2,
+        zorder=2,
     )
 
 
@@ -2254,17 +2243,6 @@ def _velocity_animated(
     n_frames = 30
     arrows_per_frame = max(1, n_arrows // n_frames)
 
-    # Compute a reasonable arrow scale from data extent
-    x_range = points_df["x"].max() - points_df["x"].min()
-    y_range = points_df["y"].max() - points_df["y"].min()
-    data_extent = max(x_range, y_range)
-    max_arrow_len = np.sqrt(
-        (arrow_df["x_end"].values - arrow_df["x_start"].values) ** 2
-        + (arrow_df["y_end"].values - arrow_df["y_start"].values) ** 2
-    ).max()
-    # Scale so the longest arrow is ~8% of data extent
-    arrow_scale = max_arrow_len / (0.08 * data_extent) if max_arrow_len > 0 else 1.0
-
     quiver_obj = [None]
 
     def update(frame):
@@ -2287,11 +2265,10 @@ def _velocity_animated(
             dy,
             sub["vec_len"].values,
             cmap="coolwarm",
-            scale=arrow_scale,
-            width=0.004,
-            headwidth=4,
-            headlength=5,
-            alpha=0.8,
+            scale_units="xy",
+            scale=1,
+            width=0.003,
+            alpha=0.7,
             zorder=2,
         )
         return (quiver_obj[0],)
