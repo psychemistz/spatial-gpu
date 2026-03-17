@@ -1302,7 +1302,11 @@ _SECACT_LOLLIPOP_COLOR = "#619CFF"
 _SECACT_DOT_CMAP_COLORS = ["#fbbf45", "#ed0345"]
 _SECACT_VELOCITY_COLORS = ["#b8e186", "#de77ae", "#c51b7d"]
 _SECACT_VELOCITY_CONTOUR_COLORS = [
-    "#f7fcf5", "#c7e9c0", "#74c476", "#238b45", "#00441b",
+    "#f7fcf5",
+    "#c7e9c0",
+    "#74c476",
+    "#238b45",
+    "#00441b",
 ]
 
 
@@ -2168,7 +2172,7 @@ def _velocity_contour(
     arrow_df: pd.DataFrame,
     points_df: pd.DataFrame,
     n_levels: int = 11,
-) -> "plt.cm.ScalarMappable":
+) -> plt.cm.ScalarMappable:
     """Filled contour of velocity magnitude with spot overlay.
 
     Matches R's SecAct.signaling.velocity.spotST(contourMap=TRUE):
@@ -2178,12 +2182,14 @@ def _velocity_contour(
     """
     from scipy.interpolate import RBFInterpolator
 
-    x = arrow_df["x_start"].values
-    y = arrow_df["y_start"].values
-    speed = arrow_df["vec_len"].values
+    # Use ALL spots and their expression x activity product values
+    # (matches R's contourMap which interpolates the product field)
+    x = points_df["x"].values
+    y = points_df["y"].values
+    values = points_df["value"].values
 
-    x_min, x_max = points_df["x"].min(), points_df["x"].max()
-    y_min, y_max = points_df["y"].min(), points_df["y"].max()
+    x_min, x_max = x.min(), x.max()
+    y_min, y_max = y.min(), y.max()
 
     # Regular grid for contour interpolation
     n_grid = 80
@@ -2192,11 +2198,11 @@ def _velocity_contour(
     XI, YI = np.meshgrid(xi, yi)
     grid_pts = np.column_stack([XI.ravel(), YI.ravel()])
 
-    # Interpolate velocity magnitude onto grid
+    # Interpolate expression x activity product onto grid
     pts = np.column_stack([x, y])
     domain_scale = max(x_max - x_min, y_max - y_min)
     rbf = RBFInterpolator(
-        pts, speed, kernel="thin_plate_spline", smoothing=domain_scale * 0.05
+        pts, values, kernel="thin_plate_spline", smoothing=domain_scale * 0.05
     )
     Z = rbf(grid_pts).reshape(n_grid, n_grid)
     Z = np.clip(Z, 0, None)
