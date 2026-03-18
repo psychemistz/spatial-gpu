@@ -1015,8 +1015,13 @@ def _solve_trust_constr(
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             res1 = minimize(
-                f0, theta0, jac=g0, hess=h0, method="trust-constr",
-                bounds=bnds, constraints=lc,
+                f0,
+                theta0,
+                jac=g0,
+                hess=h0,
+                method="trust-constr",
+                bounds=bnds,
+                constraints=lc,
                 options={"maxiter": 500, "gtol": 1e-15},
             )
         prop = np.clip(res1.x, 0.0, None)
@@ -1041,8 +1046,13 @@ def _solve_trust_constr(
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             res2 = minimize(
-                fw, theta0, jac=gw, hess=hw, method="trust-constr",
-                bounds=bnds, constraints=lc,
+                fw,
+                theta0,
+                jac=gw,
+                hess=hw,
+                method="trust-constr",
+                bounds=bnds,
+                constraints=lc,
                 options={"maxiter": 500, "gtol": 1e-15},
             )
         return np.clip(res2.x, 0.0, None)
