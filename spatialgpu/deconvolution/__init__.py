@@ -43,6 +43,7 @@ from spatialgpu.deconvolution.secact import (
     secact_pattern_genes,
     secact_signaling_patterns,
     secact_signaling_velocity,
+    secact_signaling_velocity_scst,
     secact_spatial_ccc,
     secact_survival_data,
 )
@@ -63,6 +64,7 @@ from spatialgpu.deconvolution.visualization import (
     visualize_secact_sankey,
     visualize_secact_survival,
     visualize_secact_velocity,
+    visualize_secact_velocity_scst,
     visualize_spatial_feature,
 )
 
@@ -98,6 +100,7 @@ __all__ = [
     "secact_signaling_patterns",
     "secact_pattern_genes",
     "secact_signaling_velocity",
+    "secact_signaling_velocity_scst",
     "secact_spatial_ccc",
     "secact_coxph_regression",
     "secact_survival_data",
@@ -115,6 +118,7 @@ __all__ = [
     "visualize_secact_bar",
     "visualize_secact_lollipop",
     "visualize_secact_velocity",
+    "visualize_secact_velocity_scst",
     "visualize_secact_survival",
     # I/O
     "create_spacet_object",

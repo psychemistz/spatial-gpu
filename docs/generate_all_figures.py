@@ -241,25 +241,28 @@ def generate_stpattern():
         save(fig, "hcc_patterns.png")
 
         print("  Signaling velocity...")
-        velocity = spacet.secact_signaling_velocity(adata, gene="SPARC")
-        # Create a simple velocity plot
-        fig, ax = plt.subplots(figsize=(8, 7))
-        arrows = velocity["arrows"]
-        coords_x = adata.obs["coordinate_x_um"].values
-        coords_y = adata.obs["coordinate_y_um"].values
-        ax.scatter(coords_x, coords_y, s=0.5, c="lightgrey", alpha=0.3)
-        if len(arrows) > 0:
-            ax.quiver(
-                arrows["x_start"].values, arrows["y_start"].values,
-                arrows["x_change"].values, arrows["y_change"].values,
-                arrows["vec_len"].values, cmap="coolwarm", scale=None,
-                width=0.003, alpha=0.7,
-            )
-        ax.set_title("SPARC Signaling Velocity")
-        ax.set_xlabel("X (µm)")
-        ax.set_ylabel("Y (µm)")
-        ax.set_aspect("equal")
+        spacet.secact_signaling_velocity(adata, gene="SPARC")
+
+        # Contour map
+        fig = spacet.visualize_secact_velocity(
+            adata, gene="SPARC", contour_map=True,
+        )
+        save(fig, "hcc_velocity_contour.png")
+
+        # Spot-level
+        fig = spacet.visualize_secact_velocity(
+            adata, gene="SPARC", contour_map=False,
+        )
         save(fig, "hcc_velocity.png")
+
+        # Animated GIF
+        anim = spacet.visualize_secact_velocity(
+            adata, gene="SPARC", animated=True,
+            save=os.path.join(FIGURES_DIR, "hcc_velocity_animated.gif"),
+            dpi=150,
+        )
+        plt.close(anim._fig)
+        print(f"  Saved {os.path.join(FIGURES_DIR, 'hcc_velocity_animated.gif')}")
 
     except ImportError:
         print("  Skipping SecAct figures (secactpy not installed)")
@@ -295,9 +298,37 @@ def generate_stccc():
     )
     save(fig, "cosmx_celltypes.png")
 
-    # SecAct CCC figures require long computation — skip for now
-    print("  SecAct CCC figures require ~50 min computation — skipping")
-    print("  (heatmap, circle, dotplot, velocity will be placeholders)")
+    # SecAct + CCC + velocity
+    try:
+        print("  SecAct inference (scale_factor=1000)...")
+        adata = spacet.secact_inference(adata, scale_factor=1000, is_filter_sig=True)
+
+        print("  scST velocity (Fibroblast -> THBS2 -> Tumor_boundary)...")
+        vel = spacet.secact_signaling_velocity_scst(
+            adata, sender="Fibroblast", secreted_protein="THBS2",
+            receiver="Tumor_boundary", cell_type_col="cellType",
+            scale_factor=1e5, radius=20,
+        )
+
+        # Full view
+        fig = spacet.visualize_secact_velocity_scst(
+            vel, show_coordinates=True, colors=cell_colors,
+            point_size=0.1, legend_position="right", legend_size=2,
+            arrow_color="#ff0099", arrow_size=0.2,
+        )
+        save(fig, "cosmx_velocity.png")
+
+        # Zoomed view
+        fig = spacet.visualize_secact_velocity_scst(
+            vel, customized_area=[8290, 8366, 1100, 1400],
+            show_coordinates=False, colors=cell_colors,
+            point_size=5, legend_position="right", legend_size=3,
+            arrow_color="#ff0099", arrow_width=1, arrow_size=0.7,
+        )
+        save(fig, "cosmx_velocity_cut.png")
+
+    except ImportError:
+        print("  Skipping SecAct figures (secactpy not installed)")
 
 
 if __name__ == "__main__":

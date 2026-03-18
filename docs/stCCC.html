@@ -480,12 +480,18 @@ spacet.<span class="fn">visualize_secact_dotplot</span>(
 <!-- ============================================================ -->
 <h2 id="velocity">5. Visualize secreted signaling velocity</h2>
 
-<pre>spacet.<span class="fn">secact_signaling_velocity_scst</span>(
+<pre><span class="cm"># Compute single-cell resolution velocity</span>
+vel <span class="op">=</span> spacet.<span class="fn">secact_signaling_velocity_scst</span>(
     adata,
     sender<span class="op">=</span><span class="st">"Fibroblast"</span>,
     secreted_protein<span class="op">=</span><span class="st">"THBS2"</span>,
     receiver<span class="op">=</span><span class="st">"Tumor_boundary"</span>,
     cell_type_col<span class="op">=</span><span class="st">"cellType"</span>,
+)
+
+<span class="cm"># Full view</span>
+spacet.<span class="fn">visualize_secact_velocity_scst</span>(
+    vel,
     show_coordinates<span class="op">=</span><span class="kw">True</span>,
     colors<span class="op">=</span>cell_colors,
     point_size<span class="op">=</span><span class="nb">0.1</span>,
@@ -496,16 +502,13 @@ spacet.<span class="fn">visualize_secact_dotplot</span>(
 )</pre>
 
 <div class="figure">
-  <img src="figures/cosmx_velocity.png" alt="THBS2 signaling velocity (full view)" style="transform: scaleY(-1);">
+  <img src="figures/cosmx_velocity.png" alt="THBS2 signaling velocity (full view)">
 </div>
 
-<pre>spacet.<span class="fn">secact_signaling_velocity_scst</span>(
-    adata,
-    sender<span class="op">=</span><span class="st">"Fibroblast"</span>,
-    secreted_protein<span class="op">=</span><span class="st">"THBS2"</span>,
-    receiver<span class="op">=</span><span class="st">"Tumor_boundary"</span>,
-    cell_type_col<span class="op">=</span><span class="st">"cellType"</span>,
-    customized_area_coordinates<span class="op">=</span>[<span class="nb">8290</span>, <span class="nb">8366</span>, <span class="nb">1100</span>, <span class="nb">1400</span>],
+<pre><span class="cm"># Zoomed view</span>
+spacet.<span class="fn">visualize_secact_velocity_scst</span>(
+    vel,
+    customized_area<span class="op">=</span>[<span class="nb">8290</span>, <span class="nb">8366</span>, <span class="nb">1100</span>, <span class="nb">1400</span>],
     show_coordinates<span class="op">=</span><span class="kw">False</span>,
     colors<span class="op">=</span>cell_colors,
     point_size<span class="op">=</span><span class="nb">5</span>,
@@ -517,7 +520,7 @@ spacet.<span class="fn">visualize_secact_dotplot</span>(
 )</pre>
 
 <div class="figure">
-  <img src="figures/cosmx_velocity_cut.png" alt="THBS2 signaling velocity (zoomed)" style="transform: scaleY(-1);">
+  <img src="figures/cosmx_velocity_cut.png" alt="THBS2 signaling velocity (zoomed)">
 </div>
 
 <!-- Footer -->

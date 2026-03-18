@@ -52,11 +52,13 @@ _COLORMAPS = {
         "#D7191C",
     ],
     "SignalingPattern": [
-        "#000004",
-        "#1A1042",
-        "#4A1079",
-        "#D9466B",
-        "#FCFDBF",
+        "#1A9850",
+        "#1A9850",
+        "#1A9850",
+        "#1A9850",
+        "#FDAE61",
+        "#FC8D59",
+        "#D7191C",
     ],
 }
 
@@ -2132,6 +2134,11 @@ def visualize_secact_velocity(
     if contour_map and len(arrow_df) > 0:
         cf = _velocity_contour(ax, arrow_df, points_df)
         fig.colorbar(cf, ax=ax, shrink=0.6, label="level")
+        # Overlay direction arrows on contour, scaled by field intensity
+        intensities = _get_arrow_intensities(arrow_df, points_df)
+        _draw_velocity_arrows(
+            ax, arrow_df, points_df, arrow_color, intensities=intensities
+        )
     else:
         cmap = LinearSegmentedColormap.from_list("vel_cmap", _SECACT_VELOCITY_COLORS)
         sc = ax.scatter(
@@ -2144,17 +2151,9 @@ def visualize_secact_velocity(
         )
         fig.colorbar(sc, ax=ax, shrink=0.6)
         if len(arrow_df) > 0:
-            ax.quiver(
-                arrow_df["x_start"].values,
-                arrow_df["y_start"].values,
-                arrow_df["x_change"].values,
-                arrow_df["y_change"].values,
-                color=arrow_color,
-                width=0.003,
-                headwidth=4,
-                headlength=5,
-                alpha=0.7,
-                zorder=2,
+            intensities = _get_arrow_intensities(arrow_df, points_df)
+            _draw_velocity_arrows(
+                ax, arrow_df, points_df, arrow_color, intensities=intensities
             )
 
     ax.set_title(f"{gene} ({signal_mode})", fontsize=12)
@@ -2165,6 +2164,94 @@ def visualize_secact_velocity(
     if save:
         fig.savefig(save, dpi=dpi, bbox_inches="tight")
     return fig
+
+
+def _get_arrow_intensities(
+    arrow_df: pd.DataFrame, points_df: pd.DataFrame
+) -> np.ndarray:
+    """Look up the field intensity at each arrow's start position."""
+    from scipy.spatial import cKDTree
+
+    tree = cKDTree(np.column_stack([points_df["x"].values, points_df["y"].values]))
+    arrow_pts = np.column_stack(
+        [arrow_df["x_start"].values, arrow_df["y_start"].values]
+    )
+    _, idx = tree.query(arrow_pts)
+    return points_df["value"].values[idx]
+
+
+def _draw_velocity_arrows(
+    ax: plt.Axes,
+    arrow_df: pd.DataFrame,
+    points_df: pd.DataFrame,
+    color: str = "black",
+    intensities: np.ndarray | None = None,
+) -> None:
+    """Draw arrowhead-only direction markers at each spot.
+
+    Renders small filled triangles rotated to match velocity direction.
+
+    When *intensities* is provided, each arrow is sized and alpha-scaled
+    continuously by field intensity: high-intensity spots get large, fully
+    opaque black arrows while low-intensity spots get small,
+    semi-transparent black arrows.
+    """
+    from matplotlib.markers import MarkerStyle
+
+    dx = arrow_df["x_change"].values
+    dy = arrow_df["y_change"].values
+    vec_len = arrow_df["vec_len"].values
+    angles = np.degrees(np.arctan2(dy, dx))
+
+    if intensities is not None:
+        # Normalise intensities to [0, 1]
+        imin, imax = float(intensities.min()), float(intensities.max())
+        if imax > imin:
+            norm_int = (intensities - imin) / (imax - imin)
+        else:
+            norm_int = np.full(len(intensities), 0.5)
+
+        x_arr = arrow_df["x_start"].values
+        y_arr = arrow_df["y_start"].values
+        for i in range(len(arrow_df)):
+            t = norm_int[i]
+            base = 55 if vec_len[i] >= 0.1 else 20
+            size = base * (0.6 + 1.4 * t)  # 0.6× – 2× base size
+            alpha = 0.45 + 0.45 * t  # 0.45 – 0.9
+
+            m = MarkerStyle("^")
+            m._transform = m.get_transform().rotate_deg(angles[i] - 90)
+            ax.scatter(
+                x_arr[i],
+                y_arr[i],
+                marker=m,
+                s=size,
+                c="black",
+                alpha=alpha,
+                zorder=4,
+                edgecolors="none",
+            )
+    else:
+        strong = vec_len >= 0.1
+        for mask, size in [(strong, 40), (~strong, 12)]:
+            if not mask.any():
+                continue
+            sub_x = arrow_df["x_start"].values[mask]
+            sub_y = arrow_df["y_start"].values[mask]
+            sub_ang = angles[mask]
+            for xi, yi, ang in zip(sub_x, sub_y, sub_ang):
+                m = MarkerStyle("^")
+                m._transform = m.get_transform().rotate_deg(ang - 90)
+                ax.scatter(
+                    xi,
+                    yi,
+                    marker=m,
+                    s=size,
+                    c=color,
+                    alpha=0.7,
+                    zorder=4,
+                    edgecolors="none",
+                )
 
 
 def _velocity_contour(
@@ -2239,8 +2326,18 @@ def _velocity_animated(
     save: str | None,
     dpi: int,
 ):
-    """Create animated velocity plot with arrows growing over time."""
+    """Animated velocity plot where all arrows grow simultaneously.
+
+    Every arrow starts at frame 0.  High-intensity spots have larger final
+    markers and therefore take more frames to reach full size, making them
+    appear to "grow longer".  Low-intensity arrows finish early and stay at
+    their (smaller) final size for the remaining frames.
+
+    Arrows are coloured by field intensity (grey → orange-red), matching the
+    static intensity-based styling.
+    """
     from matplotlib.animation import FuncAnimation
+    from matplotlib.markers import MarkerStyle
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -2261,42 +2358,62 @@ def _velocity_animated(
     if len(arrow_df) == 0:
         return fig
 
-    # Sort arrows by magnitude for progressive reveal
-    magnitudes = arrow_df["vec_len"].values
-    order = np.argsort(magnitudes)
-    n_arrows = len(order)
-    n_frames = 30
-    arrows_per_frame = max(1, n_arrows // n_frames)
+    # -- precompute per-arrow properties --
+    dx_all = arrow_df["x_change"].values
+    dy_all = arrow_df["y_change"].values
+    vec_len = arrow_df["vec_len"].values
+    angles = np.degrees(np.arctan2(dy_all, dx_all))
+    x_all = arrow_df["x_start"].values
+    y_all = arrow_df["y_start"].values
 
-    quiver_obj = [None]
+    # Intensity-based sizing (same as static plots, black arrows)
+    intensities = _get_arrow_intensities(arrow_df, points_df)
+    imin, imax = float(intensities.min()), float(intensities.max())
+    if imax > imin:
+        norm_int = (intensities - imin) / (imax - imin)
+    else:
+        norm_int = np.full(len(intensities), 0.5)
+
+    n_arrows = len(arrow_df)
+    n_frames = 30
+
+    # Final marker sizes (same formula as static)
+    base_sizes = np.where(vec_len >= 0.1, 55.0, 20.0)
+    final_sizes = base_sizes * (0.6 + 1.4 * norm_int)
+    final_alphas = 0.45 + 0.45 * norm_int  # 0.45 – 0.9
+
+    # Frame at which each arrow reaches full size:
+    # low intensity → finishes at 30% of frames, high → 100%
+    target_frames = (0.3 + 0.7 * norm_int) * n_frames
+    target_frames = np.clip(target_frames, 1, n_frames)
+
+    arrow_artists: list = []
 
     def update(frame):
-        if quiver_obj[0] is not None:
-            quiver_obj[0].remove()
+        for a in arrow_artists:
+            a.remove()
+        arrow_artists.clear()
 
-        n_show = min((frame + 1) * arrows_per_frame, n_arrows)
-        idx = order[:n_show]
-        sub = arrow_df.iloc[idx]
+        frac = frame + 1  # 1-based frame count
+        for i in range(n_arrows):
+            progress = min(1.0, frac / target_frames[i])
+            cur_size = final_sizes[i] * progress
+            cur_alpha = 0.15 + (final_alphas[i] - 0.15) * progress
 
-        x = sub["x_start"].values
-        y = sub["y_start"].values
-        dx = sub["x_end"].values - x
-        dy = sub["y_end"].values - y
-
-        quiver_obj[0] = ax.quiver(
-            x,
-            y,
-            dx,
-            dy,
-            sub["vec_len"].values,
-            cmap="coolwarm",
-            scale_units="xy",
-            scale=1,
-            width=0.003,
-            alpha=0.7,
-            zorder=2,
-        )
-        return (quiver_obj[0],)
+            m = MarkerStyle("^")
+            m._transform = m.get_transform().rotate_deg(angles[i] - 90)
+            sc = ax.scatter(
+                x_all[i],
+                y_all[i],
+                marker=m,
+                s=cur_size,
+                c="black",
+                alpha=cur_alpha,
+                zorder=2,
+                edgecolors="none",
+            )
+            arrow_artists.append(sc)
+        return arrow_artists
 
     anim = FuncAnimation(fig, update, frames=n_frames, interval=200, blit=False)
 
@@ -2304,6 +2421,168 @@ def _velocity_animated(
         anim.save(save, writer="pillow", dpi=dpi)
 
     return anim
+
+
+def visualize_secact_velocity_scst(
+    velocity_result: dict,
+    *,
+    customized_area: list[float] | None = None,
+    show_coordinates: bool = True,
+    colors: dict[str, str] | None = None,
+    point_size: float = 1.0,
+    point_alpha: float = 1.0,
+    arrow_color: str = "#ff0099",
+    arrow_size: float = 0.3,
+    arrow_width: float = 1.0,
+    legend_position: str = "right",
+    legend_size: float = 3.0,
+    figsize: tuple[float, float] = (10, 8),
+    save: str | None = None,
+    dpi: int = 300,
+) -> plt.Figure:
+    """Single-cell resolution signaling velocity plot.
+
+    Equivalent to ``SecAct.signaling.velocity.scST()`` in R.  Draws
+    cell-type scatter coloured by annotation with arrows from sender to
+    receiver cells overlaid.
+
+    Parameters
+    ----------
+    velocity_result : dict
+        Output of ``secact_signaling_velocity_scst()``.
+    customized_area : list, optional
+        ``[x_left, x_right, y_bottom, y_top]`` to zoom into a subregion.
+    show_coordinates : bool
+        If True, show axis ticks / frame. Default: True.
+    colors : dict, optional
+        ``{cell_type: color}`` mapping.
+    point_size, point_alpha : float
+        Scatter aesthetics.
+    arrow_color : str
+        Arrow colour. Default: ``"#ff0099"``.
+    arrow_size : float
+        Arrowhead length in data-coordinate fraction. Default: 0.3.
+    arrow_width : float
+        Arrow line width. Default: 1.0.
+    legend_position : str
+        "right", "left", or "none".
+    legend_size : float
+        Legend marker size.
+    figsize, save, dpi : standard plotting params.
+
+    Returns
+    -------
+    matplotlib Figure
+    """
+    arrows = velocity_result["arrows"]
+    cell_df = velocity_result["cell_types"]
+
+    # Optional zoom
+    if customized_area is not None:
+        x_left, x_right, y_bottom, y_top = customized_area
+        mask = (
+            (cell_df["x"] > x_left)
+            & (cell_df["x"] < x_right)
+            & (cell_df["y"] > y_bottom)
+            & (cell_df["y"] < y_top)
+        )
+        cell_df = cell_df[mask].copy()
+        if len(arrows) > 0:
+            a_mask = (
+                (arrows["x_start"] > x_left)
+                & (arrows["x_start"] < x_right)
+                & (arrows["x_end"] > x_left)
+                & (arrows["x_end"] < x_right)
+                & (arrows["y_start"] > y_bottom)
+                & (arrows["y_start"] < y_top)
+                & (arrows["y_end"] > y_bottom)
+                & (arrows["y_end"] < y_top)
+            )
+            arrows = arrows[a_mask].copy()
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Draw cells coloured by type
+    unique_types = cell_df["cell_type"].unique()
+    for ct in unique_types:
+        sub = cell_df[cell_df["cell_type"] == ct]
+        c = colors.get(ct, "#cccccc") if colors else None
+        ax.scatter(
+            sub["x"],
+            sub["y"],
+            s=point_size,
+            c=c,
+            alpha=point_alpha,
+            label=ct,
+            edgecolors="none",
+            zorder=1,
+        )
+
+    # Draw arrows (vectorised) — matches R geom_segment + arrow()
+    if len(arrows) > 0:
+        from matplotlib.collections import LineCollection
+
+        x0 = arrows["x_start"].values
+        y0 = arrows["y_start"].values
+        x1 = arrows["x_end"].values
+        y1 = arrows["y_end"].values
+
+        # Line segments
+        segments = np.column_stack([x0, y0, x1, y1]).reshape(-1, 2, 2)
+        lc = LineCollection(
+            segments,
+            colors=arrow_color,
+            linewidths=arrow_width,
+            alpha=0.7,
+            zorder=2,
+        )
+        ax.add_collection(lc)
+
+        # Arrowheads via quiver (just the head, no shaft)
+        dx = x1 - x0
+        dy = y1 - y0
+        ax.quiver(
+            x1,
+            y1,
+            dx,
+            dy,
+            color=arrow_color,
+            scale=1,
+            scale_units="xy",
+            width=0.001,
+            headwidth=6,
+            headlength=8,
+            headaxislength=8,
+            alpha=0.7,
+            zorder=3,
+        )
+
+    ax.set_aspect("equal")
+
+    if not show_coordinates:
+        ax.axis("off")
+    else:
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    # Legend
+    if legend_position != "none":
+        loc = "center left" if legend_position == "right" else "center right"
+        bbox = (1.02, 0.5) if legend_position == "right" else (-0.02, 0.5)
+        ax.legend(
+            loc=loc,
+            bbox_to_anchor=bbox,
+            markerscale=legend_size,
+            frameon=False,
+            fontsize=8,
+        )
+    else:
+        ax.legend().remove()
+
+    fig.tight_layout()
+    if save:
+        fig.savefig(save, dpi=dpi, bbox_inches="tight")
+    return fig
 
 
 def visualize_secact_survival(

@@ -624,6 +624,147 @@ def secact_signaling_velocity(
     }
 
 
+def secact_signaling_velocity_scst(
+    adata: ad.AnnData,
+    sender: str,
+    secreted_protein: str,
+    receiver: str,
+    cell_type_col: str,
+    scale_factor: float = 1e5,
+    radius: float = 20.0,
+) -> dict:
+    """Compute single-cell resolution signaling velocity arrows.
+
+    Equivalent to ``SecAct.signaling.velocity.scST()`` in R.
+
+    Draws arrows from each sender cell to neighbouring receiver cells
+    where the sender expresses the protein (count > 0) and the receiver
+    has positive signalling activity (zscore > 0).
+
+    Parameters
+    ----------
+    adata : AnnData
+        Must have SecAct activity results and cell type annotations.
+    sender : str
+        Sender cell type name.
+    secreted_protein : str
+        Gene symbol of the secreted protein.
+    receiver : str
+        Receiver cell type name.
+    cell_type_col : str
+        Column in ``adata.obs`` with cell type labels.
+    scale_factor : float
+        TPM normalisation scale factor. Default: 1e5.
+    radius : float
+        Neighbour radius in micrometers. Default: 20.
+
+    Returns
+    -------
+    dict with keys:
+        - 'arrows': DataFrame (x_start, y_start, x_end, y_end, vec_len)
+        - 'cell_types': DataFrame (x, y, cell_type) for all cells
+        - 'sender', 'receiver', 'secreted_protein': str
+    """
+    secact_out = _ensure_secact(adata)
+    if "SecretedProteinActivity" not in secact_out:
+        raise ValueError("Run secact_inference() first.")
+
+    act = secact_out["SecretedProteinActivity"]["zscore"].copy()
+    act = act.clip(lower=0)
+
+    expr = _get_expression_matrix(adata)
+    expr.index = _transfer_symbol(expr.index.tolist())
+    expr = _rm_duplicates(expr)
+
+    coords = np.column_stack(
+        [adata.obs["coordinate_x_um"].values, adata.obs["coordinate_y_um"].values]
+    )
+    cell_types = adata.obs[cell_type_col].values
+
+    sender_mask = cell_types == sender
+    receiver_mask = cell_types == receiver
+    sender_idx = np.where(sender_mask)[0]
+    receiver_idx = np.where(receiver_mask)[0]
+
+    empty_arrows = pd.DataFrame(
+        columns=["x_start", "y_start", "x_end", "y_end", "vec_len"]
+    )
+
+    if (
+        len(sender_idx) == 0
+        or len(receiver_idx) == 0
+        or secreted_protein not in expr.index
+        or secreted_protein not in act.index
+    ):
+        arrows = empty_arrows
+    else:
+        # Vectorised: query sender coords against receiver coords
+        sender_tree = KDTree(coords[sender_idx])
+        receiver_tree = KDTree(coords[receiver_idx])
+        pairs_sr = sender_tree.query_ball_tree(receiver_tree, r=radius)
+
+        # Build index arrays
+        s_list, r_list = [], []
+        for si, receivers in enumerate(pairs_sr):
+            if receivers:
+                s_list.extend([si] * len(receivers))
+                r_list.extend(receivers)
+
+        if not s_list:
+            arrows = empty_arrows
+        else:
+            s_arr = np.array(s_list)  # indices into sender_idx
+            r_arr = np.array(r_list)  # indices into receiver_idx
+
+            # Map to global cell indices
+            s_global = sender_idx[s_arr]
+            r_global = receiver_idx[r_arr]
+
+            # Vectorised expression / activity check
+            cell_names = adata.obs_names
+            expr_vals = expr.loc[secreted_protein, cell_names[s_global]].values
+            act_vals = act.loc[secreted_protein, cell_names[r_global]].values
+            valid = (expr_vals > 0) & (act_vals > 0)
+
+            if valid.sum() == 0:
+                arrows = empty_arrows
+            else:
+                s_valid = s_global[valid]
+                r_valid = r_global[valid]
+                arrows = pd.DataFrame(
+                    {
+                        "x_start": coords[s_valid, 0],
+                        "y_start": coords[s_valid, 1],
+                        "x_end": coords[r_valid, 0],
+                        "y_end": coords[r_valid, 1],
+                        "vec_len": 1.0,
+                    }
+                )
+
+    # Cell type DataFrame for plotting (collapse non-sender/receiver to "Other")
+    ct_display = np.array(
+        [ct if ct in (sender, receiver) else "Other" for ct in cell_types]
+    )
+    cell_df = pd.DataFrame(
+        {"x": coords[:, 0], "y": coords[:, 1], "cell_type": ct_display}
+    )
+
+    result = {
+        "arrows": arrows,
+        "cell_types": cell_df,
+        "sender": sender,
+        "receiver": receiver,
+        "secreted_protein": secreted_protein,
+    }
+
+    # Store in adata
+    secact_out.setdefault("velocity_scst", {})[
+        f"{sender}_{secreted_protein}_{receiver}"
+    ] = result
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # 4. Spatial Cell-Cell Communication (scST)
 # ---------------------------------------------------------------------------
