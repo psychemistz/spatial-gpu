@@ -135,22 +135,7 @@ def _normalize_variance_python(
         coeffs = np.polyfit(m_vi, v_vi, deg=1)
         fitted_vi = np.polyval(coeffs, m_vi)
     else:
-        try:
-            from pygam import LinearGAM, s
-
-            # n_splines=15 and lam=5.0 best approximate R's mgcv::gam
-            # thin-plate regression splines (validated: 99% gene overlap
-            # with R's overdispersed gene selection on Visium BC data).
-            gam = LinearGAM(
-                s(0, n_splines=max(gam_k, 15), spline_order=3, lam=5.0)
-            ).fit(m_vi.reshape(-1, 1), v_vi)
-            fitted_vi = gam.predict(m_vi.reshape(-1, 1))
-        except ImportError:
-            from scipy.interpolate import UnivariateSpline
-
-            order = np.argsort(m_vi)
-            spl = UnivariateSpline(m_vi[order], v_vi[order], k=3)
-            fitted_vi = spl(m_vi)
+        fitted_vi = _tprs_1d_reml(m_vi, v_vi, k=max(gam_k, 10))
 
     residuals = np.full(n_genes, -np.inf)
     residuals[vi] = v_vi - fitted_vi
@@ -217,3 +202,80 @@ def _bh_adjust_log(log_p: np.ndarray) -> np.ndarray:
     unsorted[order] = a
     result[finite_mask] = unsorted
     return result
+
+
+def _tprs_1d_reml(
+    x: np.ndarray,
+    y: np.ndarray,
+    k: int = 10,
+    max_knots: int = 2000,
+) -> np.ndarray:
+    """1D thin-plate regression spline with REML smoothing parameter.
+
+    Matches R's mgcv::gam(y ~ s(x, k=k)) for 1D data:
+    - Builds full energy matrix on a subsample of max_knots points
+    - QR-projects out the null space {1, x}
+    - Eigendecomposes to get the top (k-2) penalized basis functions
+    - Selects smoothing parameter by REML
+    """
+    from scipy.optimize import minimize_scalar
+
+    n = len(x)
+    M = 2  # null space dimension {1, x} for m=2, d=1
+    n_pen = k - M
+
+    # Subsample for basis construction (mgcv default: max.knots=2000)
+    if n > max_knots:
+        rng = np.random.RandomState(0)
+        sub_idx = np.sort(rng.choice(n, max_knots, replace=False))
+        xu = x[sub_idx]
+    else:
+        xu = x.copy()
+    nk = len(xu)
+
+    # Energy matrix at subsample: E_ij = |xu_i - xu_j|^3
+    E = np.abs(xu[:, None] - xu[None, :]) ** 3
+
+    # QR decomposition of null space → project out {1, x}
+    T = np.column_stack([np.ones(nk), xu])
+    Q, _ = np.linalg.qr(T, mode="complete")
+    Q_perp = Q[:, M:]
+
+    # Eigendecompose projected energy matrix
+    E_proj = Q_perp.T @ E @ Q_perp
+    eigvals, eigvecs = np.linalg.eigh(E_proj)
+    idx = np.argsort(np.abs(eigvals))[::-1]
+    Dz = eigvals[idx][:n_pen]
+    UZ = Q_perp @ eigvecs[:, idx][:, :n_pen]
+
+    # Evaluate basis at all data points
+    E_xk = np.abs(x[:, None] - xu[None, :]) ** 3
+    Z = E_xk @ UZ / np.sqrt(np.abs(Dz))[None, :]
+    T_data = np.column_stack([np.ones(n), x])
+    X = np.column_stack([T_data, Z])
+
+    # Penalty on penalized coefficients only
+    S = np.zeros((k, k))
+    S[M:, M:] = np.eye(n_pen)
+
+    # REML smoothing parameter selection
+    XtX = X.T @ X
+    Xty = X.T @ y
+
+    def neg_reml(log_lam):
+        lam = np.exp(log_lam)
+        B = XtX + lam * S
+        try:
+            L = np.linalg.cholesky(B)
+        except np.linalg.LinAlgError:
+            return 1e20
+        beta = np.linalg.solve(B, Xty)
+        rss = np.sum((y - X @ beta) ** 2)
+        log_det_B = 2.0 * np.sum(np.log(np.diag(L)))
+        n_eff = n - M
+        return 0.5 * (n_eff * np.log(rss / n_eff) + log_det_B - n_pen * log_lam)
+
+    result = minimize_scalar(neg_reml, bounds=(-15, 25), method="bounded")
+    lam = np.exp(result.x)
+    beta = np.linalg.solve(XtX + lam * S, Xty)
+    return X @ beta
