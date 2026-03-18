@@ -756,11 +756,15 @@ def _spatial_deconv_python(
 
         theta_sum = (1 - mal_prop_arr) - 1e-5
 
+        n_spot = mixture_l1.shape[1]
         prop_l1 = _solve_constrained_batch(
             ref_l1,
             mixture_l1,
             n_cell,
             theta_sum,
+            pp_min_arr=(
+                np.zeros(n_spot) if unidentifiable else (1 - mal_prop_arr - 2e-5)
+            ),
             pp_max_arr=1 - mal_prop_arr,
             n_jobs=n_jobs,
         )
@@ -855,6 +859,11 @@ def _spatial_deconv_python(
         n_cell_l2 = ref_l2.shape[1]
         theta_sum_l2 = prop_mat_l1.loc[cell_spe].values - 1e-5
 
+        if cell_spe == "Macrophage" and macrophage_other:
+            pp_min_l2 = np.zeros(len(valid_spots))
+        else:
+            pp_min_l2 = prop_mat_l1.loc[cell_spe].values - 2e-5
+
         pp_max_l2 = prop_mat_l1.loc[cell_spe].values
 
         prop_l2 = _solve_constrained_batch(
@@ -862,6 +871,7 @@ def _spatial_deconv_python(
             mix_l2,
             n_cell_l2,
             theta_sum_l2,
+            pp_min_arr=pp_min_l2,
             pp_max_arr=pp_max_l2,
             n_jobs=n_jobs,
         )
@@ -888,6 +898,7 @@ def _solve_constrained_batch(
     B: np.ndarray,
     n_cell: int,
     theta_sum: np.ndarray,
+    pp_min_arr: np.ndarray,
     pp_max_arr: np.ndarray,
     n_jobs: int = 1,
 ) -> np.ndarray:
@@ -896,11 +907,18 @@ def _solve_constrained_batch(
     Two-pass optimization matching R's SpaCET:
     1. Unweighted least squares
     2. Weighted by 1/(fitted + 1)
+
+    Uses NNLS when ppmin=0 (Level 1), trust-constr when ppmin>0 (Level 2).
     """
-    return _solve_constrained_batch_python(A, B, n_cell, theta_sum, pp_max_arr, n_jobs)
+    has_lower_bound = np.any(pp_min_arr > 1e-10)
+    if has_lower_bound:
+        return _solve_trust_constr(
+            A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr, n_jobs
+        )
+    return _solve_nnls(A, B, n_cell, theta_sum, pp_max_arr, n_jobs)
 
 
-def _solve_constrained_batch_python(
+def _solve_nnls(
     A: np.ndarray,
     B: np.ndarray,
     n_cell: int,
@@ -908,16 +926,7 @@ def _solve_constrained_batch_python(
     pp_max_arr: np.ndarray,
     n_jobs: int = 1,
 ) -> np.ndarray:
-    """Constrained batch optimization via NNLS.
-
-    Two-pass optimization matching R's SpaCET:
-    1. Unweighted least squares: min ||A @ theta - b||^2, theta >= 0
-    2. Weighted by 1/sqrt(fitted + 1)
-
-    Uses scipy.optimize.nnls for non-negative least squares (fast,
-    deterministic, exact global minimum for convex QP). The sum
-    constraint (sum(theta) <= ppmax) is enforced by post-hoc scaling.
-    """
+    """Fast NNLS solver for Level 1 (ppmin=0)."""
     from joblib import Parallel, delayed
     from scipy.optimize import nnls
 
@@ -931,13 +940,11 @@ def _solve_constrained_batch_python(
         b = B[:, i]
         ppmax = float(pp_max_arr[i])
 
-        # Pass 1: min ||A @ theta - b||^2, theta >= 0
         prop, _ = nnls(A, b)
         s = np.sum(prop)
         if s > ppmax and s > 0:
             prop = prop * (ppmax / s)
 
-        # Pass 2: weighted by 1/sqrt(fitted + 1)
         bhat = A @ prop
         w = 1.0 / np.sqrt(bhat + 1.0)
         Aw = A * w[:, np.newaxis]
@@ -948,6 +955,97 @@ def _solve_constrained_batch_python(
             prop2 = prop2 * (ppmax / s2)
 
         return prop2
+
+    if n_jobs == 1:
+        results = [solve_single(i) for i in range(n_spots)]
+    else:
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(solve_single)(i) for i in range(n_spots)
+        )
+
+    return np.column_stack(results)
+
+
+def _solve_trust_constr(
+    A: np.ndarray,
+    B: np.ndarray,
+    n_cell: int,
+    theta_sum: np.ndarray,
+    pp_min_arr: np.ndarray,
+    pp_max_arr: np.ndarray,
+    n_jobs: int = 1,
+) -> np.ndarray:
+    """Trust-constr solver for Level 2 (ppmin>0, needs both bounds)."""
+    import warnings
+
+    from joblib import Parallel, delayed
+    from scipy.optimize import Bounds, LinearConstraint, minimize
+
+    n_spots = B.shape[1]
+
+    AtA = A.T @ A
+    At = A.T
+    two_AtA = 2.0 * AtA
+    bnds = Bounds(lb=np.zeros(n_cell), ub=np.full(n_cell, np.inf))
+    sum_row = np.ones((1, n_cell))
+
+    def solve_single(i: int) -> np.ndarray:
+        ts = theta_sum[i]
+        if ts <= 0.01:
+            return np.full(n_cell, max(ts, 0) / n_cell)
+
+        b = B[:, i]
+        ppmin = float(pp_min_arr[i])
+        ppmax = float(pp_max_arr[i])
+
+        theta0 = np.full(n_cell, 0.5 * ts / n_cell)
+        lc = LinearConstraint(sum_row, lb=ppmin, ub=ppmax)
+
+        Atb = At @ b
+
+        def f0(th):
+            return float(th @ AtA @ th - 2.0 * Atb @ th)
+
+        def g0(th):
+            return 2.0 * (AtA @ th - Atb)
+
+        def h0(th):
+            return two_AtA
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res1 = minimize(
+                f0, theta0, jac=g0, hess=h0, method="trust-constr",
+                bounds=bnds, constraints=lc,
+                options={"maxiter": 500, "gtol": 1e-15},
+            )
+        prop = np.clip(res1.x, 0.0, None)
+
+        bhat = A @ prop
+        w = 1.0 / (bhat + 1.0)
+        Aw = A * np.sqrt(w[:, np.newaxis])
+        bw = b * np.sqrt(w)
+        AtwAw = Aw.T @ Aw
+        Atwbw = Aw.T @ bw
+        two_AtwAw = 2.0 * AtwAw
+
+        def fw(th):
+            return float(th @ AtwAw @ th - 2.0 * Atwbw @ th)
+
+        def gw(th):
+            return 2.0 * (AtwAw @ th - Atwbw)
+
+        def hw(th):
+            return two_AtwAw
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res2 = minimize(
+                fw, theta0, jac=gw, hess=hw, method="trust-constr",
+                bounds=bnds, constraints=lc,
+                options={"maxiter": 500, "gtol": 1e-15},
+            )
+        return np.clip(res2.x, 0.0, None)
 
     if n_jobs == 1:
         results = [solve_single(i) for i in range(n_spots)]

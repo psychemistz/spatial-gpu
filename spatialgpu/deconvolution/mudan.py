@@ -178,8 +178,6 @@ def _get_pcs(
     n_pcs: int = 30,
 ) -> np.ndarray:
     """PCA matching R's MUDAN::getPcs() + fastPca()."""
-    from scipy.sparse.linalg import eigsh
-
     if sparse.issparse(mat):
         m = mat.T.toarray().astype(np.float64)
     else:
@@ -191,9 +189,12 @@ def _get_pcs(
 
     cov_mat = m.T @ m / (n - 1)
     n_pcs_actual = min(n_pcs, cov_mat.shape[0] - 1)
-    eigenvalues, eigenvectors = eigsh(cov_mat, k=n_pcs_actual)
 
-    idx = np.argsort(eigenvalues)[::-1]
+    # Use dense eigh — exact, robust, no ARPACK convergence issues
+    eigenvalues, eigenvectors = np.linalg.eigh(cov_mat)
+
+    # eigh returns ascending order; take top n_pcs_actual
+    idx = np.argsort(eigenvalues)[::-1][:n_pcs_actual]
     eigenvectors = eigenvectors[:, idx]
     return m @ eigenvectors
 
