@@ -8,7 +8,7 @@ in tumor spatial transcriptomics data.
 
 from __future__ import annotations
 
-from spatialgpu.deconvolution.core import cormat, deconvolution
+from spatialgpu.deconvolution.core import cormat, deconvolution, deconvolution_bulk
 from spatialgpu.deconvolution.extensions import (
     deconvolution_malignant,
     deconvolution_malignant_custom_scrnaseq,
@@ -71,6 +71,7 @@ from spatialgpu.deconvolution.visualization import (
 __all__ = [
     # Core deconvolution
     "deconvolution",
+    "deconvolution_bulk",
     "deconvolution_malignant",
     "deconvolution_matched_scrnaseq",
     "deconvolution_malignant_custom_scrnaseq",

@@ -88,6 +88,205 @@ def deconvolution(
     return adata
 
 
+def deconvolution_bulk(
+    adata: ad.AnnData,
+    cancer_type: str,
+    mal_prop: pd.Series | np.ndarray | None = None,
+    signature_type: str | None = None,
+    n_jobs: int = 1,
+) -> ad.AnnData:
+    """Cell type deconvolution for bulk RNA-seq cohorts.
+
+    Adapts the SpaCET hierarchical deconvolution for bulk data:
+    - Stage 1: Estimates malignant fraction per sample by correlating
+      with established CNA/expression signatures (no spatial clustering).
+      Skipped if ``mal_prop`` is provided externally (e.g., from ABSOLUTE).
+    - Stage 2: Hierarchical constrained deconvolution (identical to spatial).
+
+    Parameters
+    ----------
+    adata : AnnData
+        Bulk RNA-seq data. X = raw counts, obs = samples, var = genes.
+    cancer_type : str
+        Cancer type code (e.g., 'BRCA', 'LIHC', 'PANCAN').
+        Use 'normal' to skip malignant inference (adjacent normal tissue).
+    mal_prop : Series, array, or None
+        External malignant/tumor purity estimates per sample (values in [0, 1]).
+        If None, estimated from CNA/expression signatures.
+    signature_type : str or None
+        Force signature type: 'CNA', 'expr'. None for auto.
+    n_jobs : int
+        Number of parallel jobs for the solver.
+
+    Returns
+    -------
+    AnnData with results in:
+        adata.obsm['deconv_propMat'] : cell fraction matrix (samples x cell_types)
+        adata.uns['deconv'] : dict with propMat, malProp, etc.
+    """
+    counts = _get_counts_genes_by_spots(adata)
+    gene_names = np.array(adata.var_names)
+    sample_names = np.array(adata.obs_names)
+
+    # Filter zero-sum genes
+    if sparse.issparse(counts):
+        gene_sums = np.asarray(counts.sum(axis=1)).ravel()
+    else:
+        gene_sums = counts.sum(axis=1)
+    nonzero_mask = gene_sums > 0
+    counts = counts[nonzero_mask]
+    gene_names = gene_names[nonzero_mask]
+
+    ref = load_comb_ref()
+    if cancer_type in ("LIHC", "CHOL"):
+        ref_normal = load_ref_normal_lihc()
+        ref = _merge_references(ref, ref_normal)
+
+    # Stage 1: Malignant fraction
+    if cancer_type == "normal":
+        mal_prop_s = pd.Series(0.0, index=sample_names)
+        mal_ref = None
+        logger.info("Bulk deconvolution: normal tissue (no malignant cells).")
+    elif mal_prop is not None:
+        # External purity estimates
+        if isinstance(mal_prop, np.ndarray):
+            mal_prop_s = pd.Series(mal_prop, index=sample_names)
+        else:
+            mal_prop_s = mal_prop.reindex(sample_names, fill_value=0.0)
+        mal_prop_s = mal_prop_s.clip(0, 1)
+        # Compute malignant reference from top-purity samples
+        top_idx = np.where(mal_prop_s.values >= np.percentile(mal_prop_s.values, 95))[0]
+        if len(top_idx) == 0:
+            top_idx = np.array([mal_prop_s.values.argmax()])
+        mal_ref = _compute_mal_ref(counts, gene_names, top_idx)
+        logger.info(
+            "Bulk deconvolution: external mal_prop (mean=%.3f).", mal_prop_s.mean()
+        )
+    else:
+        # Estimate from signatures (cohort-level)
+        logger.info(
+            "Bulk deconvolution: estimating malignant fraction from signatures."
+        )
+        mal_prop_s, mal_ref = _infer_mal_bulk(
+            counts, gene_names, sample_names, cancer_type, signature_type
+        )
+
+    # Stage 2: Hierarchical deconvolution (same as spatial)
+    logger.info("Bulk deconvolution: hierarchical cell type inference.")
+    prop_mat = _spatial_deconv(
+        ST=counts,
+        gene_names=gene_names,
+        spot_names=sample_names,
+        ref=ref,
+        mal_prop=mal_prop_s,
+        mal_ref=mal_ref,
+        mode="standard",
+        n_jobs=n_jobs,
+    )
+
+    # Store results
+    adata.obsm["deconv_propMat"] = prop_mat.T.reindex(adata.obs_names).values
+    adata.uns["deconv"] = {
+        "propMat": prop_mat,
+        "malProp": mal_prop_s,
+        "cancer_type": cancer_type,
+    }
+    adata.uns.setdefault("spacet", {})["deconvolution"] = {
+        "propMat": prop_mat,
+        "malRes": {"malProp": mal_prop_s, "malRef": mal_ref},
+    }
+
+    try:
+        adata.uns["spacet"]["deconvolution"]["Ref"] = load_comb_ref()
+    except Exception:
+        pass
+
+    return adata
+
+
+def _infer_mal_bulk(
+    counts: sparse.spmatrix | np.ndarray,
+    gene_names: np.ndarray,
+    sample_names: np.ndarray,
+    cancer_type: str,
+    signature_type: str | None,
+) -> tuple[pd.Series, pd.Series]:
+    """Estimate malignant fraction for bulk RNA-seq cohort.
+
+    Like _infer_mal_cor but without spatial clustering — directly
+    correlates each sample with cancer signatures.
+    """
+    n_samples = counts.shape[1]
+    centered = _cpm_log2_center(counts)
+
+    # Try signatures in order: CNA → expr → PANCAN
+    sig = None
+    if signature_type is not None:
+        _, sig = get_cancer_signature(cancer_type, signature_type)
+    else:
+        for sig_type, ct in [
+            ("CNA", cancer_type),
+            ("expr", cancer_type),
+            ("expr", "PANCAN"),
+        ]:
+            try:
+                _, sig = get_cancer_signature(ct, sig_type)
+                if sig is not None and len(sig) > 0:
+                    logger.info("  Using %s signature: %s.", sig_type, ct)
+                    break
+            except ValueError:
+                continue
+
+    if sig is None or len(sig) == 0:
+        logger.warning("  No signature found; setting malignant fraction to 0.")
+        return pd.Series(0.0, index=sample_names), None
+
+    # Correlate each sample with signature
+    olp = np.intersect1d(gene_names, sig.index)
+    if len(olp) == 0:
+        return pd.Series(0.0, index=sample_names), None
+
+    gene_idx = np.array([np.where(gene_names == g)[0][0] for g in olp])
+    sig_vals = sig.reindex(olp).values.reshape(-1, 1)
+    cor_sig = cormat(centered[gene_idx, :], sig_vals)
+    cor_sig.index = sample_names
+
+    # Identify high-purity tumor samples (top quartile with positive correlation)
+    top5p = max(1, round(n_samples * 0.05))
+    positive_mask = cor_sig["cor_r"].values > 0
+    significant_mask = cor_sig["cor_padj"].values < 0.25
+    tumor_mask = positive_mask & significant_mask
+
+    if tumor_mask.sum() >= top5p:
+        spot_mal_idx = np.where(tumor_mask)[0]
+        # Use top correlated samples as malignant reference
+        sorted_idx = np.argsort(cor_sig["cor_r"].values)[::-1]
+        spot_mal_idx = sorted_idx[: max(top5p, tumor_mask.sum())]
+    else:
+        # Fallback: top 5% by correlation
+        sorted_idx = np.argsort(cor_sig["cor_r"].values)[::-1]
+        spot_mal_idx = sorted_idx[:top5p]
+
+    mal_ref = _compute_mal_ref(counts, gene_names, spot_mal_idx)
+
+    # Compute malignant fraction via correlation with mal_ref signature
+    sig_from_mal = centered[:, spot_mal_idx].mean(axis=1).reshape(-1, 1)
+    cor_mal = cormat(centered, sig_from_mal)
+    mal_prop = cor_mal["cor_r"].values.copy()
+
+    # Clip to 5th-95th percentile, normalize to [0, 1]
+    sorted_prop = np.sort(mal_prop)
+    p5 = sorted_prop[top5p - 1]
+    p95 = sorted_prop[len(sorted_prop) - top5p]
+    mal_prop = np.clip(mal_prop, p5, p95)
+    if (mal_prop.max() - mal_prop.min()) > 0:
+        mal_prop = (mal_prop - mal_prop.min()) / (mal_prop.max() - mal_prop.min())
+    else:
+        mal_prop = np.zeros_like(mal_prop)
+
+    return pd.Series(mal_prop, index=sample_names), mal_ref
+
+
 def _deconvolution_python(
     adata: ad.AnnData,
     cancer_type: str,
