@@ -14,9 +14,12 @@ spatial-gpu provides **10-100x speedup** for spatial transcriptomics and spatial
 
 - **Drop-in Squidpy replacement**: Same API, just faster
 - **GPU-accelerated operations**: Spatial graphs, neighborhood analysis, Ripley's statistics
+- **Cell type deconvolution**: Pure-Python SpaCET replication (r=0.999 with R)
+- **Secreted protein activity**: SecAct activity inference, signaling patterns, cell-cell communication
 - **Memory-efficient**: Handle 100M+ cell datasets with chunked processing
 - **Multi-backend**: Seamless CPU/GPU switching
 - **Cell segmentation**: GPU-accelerated Cellpose and StarDist integration
+- **Interactive visualization**: Plotly-based zoomable plots for large datasets
 
 ## Installation
 
@@ -55,6 +58,58 @@ sp.graph.nhood_enrichment(adata, cluster_key="cell_type")
 # Visualize results
 sp.viz.nhood_enrichment_plot(adata, cluster_key="cell_type")
 ```
+
+### Cell Type Deconvolution (SpaCET)
+
+```python
+import spatialgpu.deconvolution as spacet
+
+# Load 10x Visium data
+adata = spacet.create_spacet_object_10x("path/to/visium/")
+adata = spacet.quality_control(adata, min_genes=100)
+
+# Deconvolution
+adata = spacet.deconvolution(adata, cancer_type="LIHC")
+
+# Visualize cell fractions
+spacet.visualize_spatial_feature(
+    adata, spatial_type="CellFraction",
+    spatial_features=["Malignant", "CAF", "Macrophage"],
+)
+```
+
+### Secreted Protein Activity (SecAct)
+
+```python
+# Infer secreted protein activity
+adata = spacet.secact_inference(adata, scale_factor=1000)
+
+# Cell-cell communication
+adata = spacet.secact_spatial_ccc(adata, cell_type_col="cellType", radius=20)
+
+# Visualize CCC
+spacet.visualize_secact_heatmap(adata, row_sorted=True, column_sorted=True)
+spacet.visualize_secact_circle(adata)
+
+# Signaling velocity (interactive plotly)
+vel = spacet.secact_signaling_velocity_scst(
+    adata, sender="Fibroblast", secreted_protein="THBS2",
+    receiver="Tumor_boundary", cell_type_col="cellType",
+)
+spacet.visualize_secact_velocity_scst(vel, interactive=True)
+```
+
+## Tutorials
+
+| Tutorial | Description |
+|----------|-------------|
+| [Visium Breast Cancer](docs/visium_BC.html) | Full deconvolution + cell-cell interaction workflow |
+| [Old ST PDAC](docs/oldST_PDAC.html) | Matched scRNA-seq deconvolution |
+| [Hi-Res ST CRC](docs/hiresST_CRC.html) | High-resolution spatial deconvolution |
+| [Gene Set Score](docs/GeneSetScore.html) | Hallmark, CancerCellState, TLS scoring |
+| [Spatial Correlation](docs/SpatialCorrelation.html) | Moran's I spatial autocorrelation |
+| [Signaling Patterns](docs/stPattern.html) | SecAct activity, NMF patterns, velocity |
+| [Cell-Cell Communication](docs/stCCC.html) | Single-cell resolution CCC (CosMx 443K cells) |
 
 ## Performance Benchmarks
 
@@ -239,6 +294,26 @@ print(f"GPU speedup: {comparison['speedup']:.1f}x")
 | `read_merscope` | Read Vizgen MERSCOPE data |
 | `export_to_spatialdata` | Export to SpatialData format |
 
+### Deconvolution Module (`spatialgpu.deconvolution`)
+
+| Function | Description |
+|----------|-------------|
+| `deconvolution` | Cell type deconvolution (SpaCET) |
+| `deconvolution_matched_scrnaseq` | Deconvolution with matched scRNA-seq |
+| `quality_control` | QC filtering |
+| `gene_set_score` | Gene set scoring (Hallmark, CancerCellState, TLS) |
+| `spatial_correlation` | Moran's I spatial autocorrelation |
+| `secact_inference` | Secreted protein activity inference |
+| `secact_signaling_patterns` | NMF signaling pattern discovery |
+| `secact_signaling_velocity` | Spot-level signaling velocity |
+| `secact_signaling_velocity_scst` | Single-cell resolution velocity |
+| `secact_spatial_ccc` | Cell-cell communication inference |
+| `visualize_spatial_feature` | Spatial feature visualization |
+| `visualize_secact_heatmap` | CCC heatmap |
+| `visualize_secact_circle` | CCC chord diagram |
+| `visualize_secact_dotplot` | CCC dot plot |
+| `visualize_secact_velocity_scst` | Velocity plot (matplotlib/plotly) |
+
 ## Comparison with Squidpy
 
 spatial-gpu is designed as a GPU-accelerated alternative to Squidpy with API compatibility:
@@ -261,7 +336,7 @@ We welcome contributions! Please see our [contributing guidelines](CONTRIBUTING.
 
 ```bash
 # Clone repository
-git clone https://github.com/spatial-gpu/spatial-gpu.git
+git clone https://github.com/psychemistz/spatial-gpu.git
 cd spatial-gpu
 
 # Install development dependencies
@@ -282,8 +357,8 @@ If you use spatial-gpu in your research, please cite:
 @software{spatialgpu2025,
   title={spatial-gpu: GPU-accelerated spatial omics analysis},
   author={spatial-gpu contributors},
-  year={2025},
-  url={https://github.com/spatial-gpu/spatial-gpu}
+  year={2026},
+  url={https://github.com/psychemistz/spatial-gpu}
 }
 ```
 
