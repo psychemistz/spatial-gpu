@@ -1511,8 +1511,8 @@ def visualize_secact_circle(
         mat,
         space=3,
         cmap=sector_colors,
-        label_kws=dict(fontsize=8),
-        link_kws=dict(direction=1, ec="white", lw=0.3),
+        label_kws={"fontsize": 8},
+        link_kws={"direction": 1, "ec": "white", "lw": 0.3},
     )
 
     fig = circos.plotfig(figsize=figsize)
@@ -2569,11 +2569,11 @@ def _velocity_scst_plotly(
                 x=sub["x"].values,
                 y=sub["y"].values,
                 mode="markers",
-                marker=dict(
-                    size=max(2, point_size),
-                    color=c,
-                    opacity=point_alpha,
-                ),
+                marker={
+                    "size": max(2, point_size),
+                    "color": c,
+                    "opacity": point_alpha,
+                },
                 name=ct,
                 hoverinfo="text",
                 text=[f"{ct}" for _ in range(len(sub))],
@@ -2611,7 +2611,7 @@ def _velocity_scst_plotly(
                 x=x_lines,
                 y=y_lines,
                 mode="lines",
-                line=dict(color=arrow_color, width=max(1, arrow_width)),
+                line={"color": arrow_color, "width": max(1, arrow_width)},
                 showlegend=False,
                 hoverinfo="skip",
             )
@@ -2648,7 +2648,7 @@ def _velocity_scst_plotly(
                 mode="lines",
                 fill="toself",
                 fillcolor=arrow_color,
-                line=dict(color=arrow_color, width=0.5),
+                line={"color": arrow_color, "width": 0.5},
                 opacity=0.7,
                 showlegend=False,
                 hoverinfo="skip",
@@ -2658,11 +2658,11 @@ def _velocity_scst_plotly(
     fig.update_layout(
         width=int(figsize[0] * 100),
         height=int(figsize[1] * 100),
-        xaxis=dict(scaleanchor="y", scaleratio=1, showgrid=False),
-        yaxis=dict(showgrid=False),
+        xaxis={"scaleanchor": "y", "scaleratio": 1, "showgrid": False},
+        yaxis={"showgrid": False},
         plot_bgcolor="white",
-        legend=dict(itemsizing="constant"),
-        margin=dict(l=40, r=40, t=40, b=40),
+        legend={"itemsizing": "constant"},
+        margin={"l": 40, "r": 40, "t": 40, "b": 40},
     )
 
     if save:
