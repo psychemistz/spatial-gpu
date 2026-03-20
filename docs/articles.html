@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Articles &bull; spatial-gpu</title>
+
+<style>
+  /* ---- Reset & base ---- */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --link: #2563eb;
+    --link-hover: #1d4ed8;
+    --code-bg: #f8f9fa;
+    --code-border: #e2e8f0;
+    --header-bg: #1e293b;
+    --header-fg: #f8fafc;
+    --accent: #3b82f6;
+    --output-bg: #fefce8;
+    --output-border: #fde68a;
+    --sidebar-w: 260px;
+    --nav-height: 60px;
+  }
+
+  html { scroll-behavior: smooth; font-size: 16px; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+  }
+
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+
+  /* ---- Top navigation bar ---- */
+  .topnav {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--nav-height);
+    background: var(--header-bg);
+    color: var(--header-fg);
+    display: flex; align-items: center;
+    padding: 0 1.5rem;
+    z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .topnav .brand {
+    font-weight: 700; font-size: 1.15rem;
+    color: var(--header-fg);
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .topnav .brand:hover { text-decoration: none; }
+  .topnav .brand .version {
+    font-size: 0.75rem; font-weight: 400;
+    background: rgba(255,255,255,.15);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .topnav nav { margin-left: auto; display: flex; gap: 1.25rem; }
+  .topnav nav a { color: rgba(248,250,252,.75); font-size: 0.9rem; }
+  .topnav nav a:hover { color: #fff; text-decoration: none; }
+
+  /* ---- Sidebar (table of contents) ---- */
+  .sidebar {
+    position: fixed; top: var(--nav-height); left: 0;
+    width: var(--sidebar-w); height: calc(100vh - var(--nav-height));
+    overflow-y: auto; padding: 1.5rem 1rem;
+    border-right: 1px solid var(--border);
+    background: #fafbfc;
+    font-size: 0.85rem;
+  }
+  .sidebar h4 {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin-bottom: .5rem; margin-top: 1rem;
+  }
+  .sidebar h4:first-child { margin-top: 0; }
+  .sidebar ul { list-style: none; }
+  .sidebar li { margin-bottom: .3rem; }
+  .sidebar a { color: var(--fg); display: block; padding: 2px 6px; border-radius: 4px; }
+  .sidebar a:hover { background: #e2e8f0; text-decoration: none; }
+  .sidebar a.active { background: var(--accent); color: #fff; }
+
+  /* ---- Main content ---- */
+  .main {
+    margin-left: var(--sidebar-w);
+    margin-top: var(--nav-height);
+    max-width: 900px;
+    padding: 2.5rem 3rem 6rem 3rem;
+  }
+
+  h1 { font-size: 2rem; margin-bottom: .4rem; }
+  h1 + .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; }
+  h2 {
+    font-size: 1.45rem; margin-top: 2.5rem; margin-bottom: 1rem;
+    padding-bottom: .35rem; border-bottom: 2px solid var(--border);
+  }
+  p { margin-bottom: 1rem; }
+
+  /* ---- Code blocks ---- */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    margin-bottom: 1.25rem;
+  }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+  }
+  p code, li code {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* Syntax highlighting (minimal) */
+  .kw { color: #8b5cf6; }
+  .fn { color: #0891b2; }
+  .st { color: #059669; }
+  .cm { color: #9ca3af; font-style: italic; }
+  .nb { color: #dc2626; }
+  .op { color: #64748b; }
+
+  /* ---- Article cards ---- */
+  .article-list {
+    list-style: none;
+    margin-bottom: 1.5rem;
+  }
+  .article-list li {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+    transition: box-shadow 0.15s;
+  }
+  .article-list li:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  }
+  .article-list .article-title {
+    font-weight: 600;
+    font-size: 1.05rem;
+    margin-bottom: 0.3rem;
+  }
+  .article-list .article-desc {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  /* ---- Footer ---- */
+  .footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 1.5rem 1.25rem 4rem; }
+  }
+</style>
+</head>
+
+<body>
+
+<!-- TOP NAVIGATION -->
+<header class="topnav">
+  <a class="brand" href="index.html">
+    spatial-gpu <span class="version">v0.1.0</span>
+  </a>
+  <nav>
+    <a href="index.html">Get Started</a>
+    <a href="reference.html">Reference</a>
+    <a href="articles.html">Articles</a>
+    <a href="https://github.com/psychemistz/spatial-gpu">GitHub</a>
+  </nav>
+</header>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <h4>Articles</h4>
+  <ul>
+    <li><a href="visium_BC.html">Visium Breast Cancer</a></li>
+    <li><a href="oldST_PDAC.html">Old ST PDAC</a></li>
+    <li><a href="hiresST_CRC.html">Hi-Res ST CRC</a></li>
+    <li><a href="GeneSetScore.html">Gene Set Score</a></li>
+    <li><a href="SpatialCorrelation.html">Spatial Correlation</a></li>
+    <li><a href="stPattern.html">Signaling Patterns</a></li>
+    <li><a href="stCCC.html">Cell-Cell Communication</a></li>
+  </ul>
+</aside>
+
+<!-- MAIN CONTENT -->
+<div class="main">
+
+<h1>Articles</h1>
+<p class="subtitle">Tutorials and workflow guides for spatial-gpu</p>
+
+<p>
+  Each tutorial demonstrates an end-to-end spatial transcriptomics analysis
+  workflow using the <strong>spatial-gpu</strong> package. Tutorials are adapted
+  from the original
+  <a href="https://data2intelligence.github.io/SpaCET/" target="_blank">SpaCET</a> and
+  <a href="https://data2intelligence.github.io/SecAct/" target="_blank">SecAct</a>
+  R vignettes.
+</p>
+
+<h2 id="deconvolution">Deconvolution</h2>
+
+<ul class="article-list">
+  <li>
+    <div class="article-title"><a href="visium_BC.html">Visium Breast Cancer</a></div>
+    <div class="article-desc">
+      Full deconvolution + cell-cell interaction workflow on 10X Visium breast cancer data.
+      Covers two-stage hierarchical deconvolution, malignant cell state discovery,
+      colocalization analysis, ligand-receptor network scoring, and distance-to-interface
+      permutation testing.
+    </div>
+  </li>
+  <li>
+    <div class="article-title"><a href="oldST_PDAC.html">Old ST PDAC</a></div>
+    <div class="article-desc">
+      Deconvolution with a matched scRNA-seq reference on legacy spatial transcriptomics
+      (old ST) pancreatic ductal adenocarcinoma data. Demonstrates reference generation
+      from scRNA-seq and matched deconvolution.
+    </div>
+  </li>
+  <li>
+    <div class="article-title"><a href="hiresST_CRC.html">Hi-Res ST CRC</a></div>
+    <div class="article-desc">
+      High-resolution spatial transcriptomics deconvolution on colorectal cancer data.
+      Shows deconvolution on sub-cellular resolution platforms with dense spot arrays.
+    </div>
+  </li>
+</ul>
+
+<h2 id="gene-set-analysis">Gene Set Analysis</h2>
+
+<ul class="article-list">
+  <li>
+    <div class="article-title"><a href="GeneSetScore.html">Gene Set Score</a></div>
+    <div class="article-desc">
+      Gene set scoring using UCell-like ranking. Demonstrates built-in gene set
+      collections (Hallmark, CancerCellState, TLS) and spatial visualization of
+      pathway activity scores.
+    </div>
+  </li>
+</ul>
+
+<h2 id="spatial-analysis">Spatial Analysis</h2>
+
+<ul class="article-list">
+  <li>
+    <div class="article-title"><a href="SpatialCorrelation.html">Spatial Correlation</a></div>
+    <div class="article-desc">
+      Moran&rsquo;s I spatial autocorrelation analysis. Covers RBF-kernel spatial weight
+      matrix construction, univariate and bivariate Moran&rsquo;s I, and pairwise
+      correlation of cell type fractions with permutation testing.
+    </div>
+  </li>
+</ul>
+
+<h2 id="secact-workflows">SecAct Workflows</h2>
+
+<ul class="article-list">
+  <li>
+    <div class="article-title"><a href="stPattern.html">Signaling Patterns</a></div>
+    <div class="article-desc">
+      SecAct secreted protein activity inference, NMF signaling pattern discovery,
+      and signaling velocity visualization on spot-level spatial transcriptomics
+      data (10X Visium HCC sample).
+    </div>
+  </li>
+  <li>
+    <div class="article-title"><a href="stCCC.html">Cell-Cell Communication</a></div>
+    <div class="article-desc">
+      Single-cell resolution cell-cell communication inference on CosMx liver cancer
+      data. Demonstrates SecAct activity inference, spatial CCC with permutation testing,
+      heatmap/circle/dotplot visualization, and signaling velocity arrows.
+    </div>
+  </li>
+</ul>
+
+<!-- Footer -->
+<div class="footer">
+  <p>
+    <strong>spatial-gpu</strong> &copy; 2026 &middot;
+    Built with Python &middot;
+    <a href="https://doi.org/10.1038/s41467-025-56540-3" target="_blank">SecAct paper</a> &middot;
+    <a href="https://doi.org/10.1038/s41467-023-36062-6" target="_blank">SpaCET paper</a> &middot;
+    <a href="https://github.com/psychemistz/spatial-gpu">GitHub</a>
+  </p>
+</div>
+
+</div> <!-- .main -->
+
+</body>
+</html>

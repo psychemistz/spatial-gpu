@@ -870,7 +870,7 @@ def secact_spatial_ccc(
     )
 
     expr_new_aggr = pd.DataFrame(
-        expr_new.values @ adj.toarray(),
+        expr_new.values @ adj,
         index=expr_new.index,
         columns=common_spots,
     )

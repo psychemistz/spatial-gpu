@@ -192,14 +192,14 @@
 
 <!-- TOP NAVIGATION -->
 <header class="topnav">
-  <a class="brand" href="#">
+  <a class="brand" href="index.html">
     spatial-gpu <span class="version">v0.1.0</span>
   </a>
   <nav>
-    <a href="#">Get Started</a>
-    <a href="#">Reference</a>
-    <a href="#">Articles</a>
-    <a href="https://github.com/psychemist/spatial-gpu">GitHub</a>
+    <a href="index.html">Get Started</a>
+    <a href="reference.html">Reference</a>
+    <a href="articles.html">Articles</a>
+    <a href="https://github.com/psychemistz/spatial-gpu">GitHub</a>
   </nav>
 </header>
 
@@ -237,18 +237,26 @@
   </span>
 </p>
 
+<p>
+  This tutorial demonstrates inference of cell-cell communication mediated by
+  secreted proteins from single-cell resolution spatial transcriptomics data.
+  The demonstration uses a liver cancer sample from the CosMx platform.
+</p>
+
 <!-- ============================================================ -->
 <!-- SECTION 1: Read ST data -->
 <!-- ============================================================ -->
 <h2 id="load-data">1. Read ST data to a SpaCET object</h2>
 
 <p>
-  Users need to prepare three types of input data for creating a SpaCET
-  object: (1) count data with genes as rows and cell IDs as columns,
-  (2) spatial location information with cell IDs as rows and X/Y
-  coordinates as columns, and (3) optional metadata with cell IDs as
-  rows and annotations as columns.
+  To load data, users can create a SpaCET object by preparing three types
+  of input data:
 </p>
+<ol>
+  <li>Count data (matrix format: genes &times; cell IDs)</li>
+  <li>Spatial location information (matrix format: cell IDs &times; coordinates, X and Y columns)</li>
+  <li>Meta data, optional (matrix format: cell IDs &times; annotations)</li>
+</ol>
 
 <pre><span class="kw">import</span> spatialgpu.deconvolution <span class="kw">as</span> spacet
 <span class="kw">import</span> anndata <span class="kw">as</span> ad
@@ -258,27 +266,13 @@
 adata <span class="op">=</span> ad.<span class="fn">read_h5ad</span>(<span class="st">"data/LIHC_CosMx/LIHC_CosMx.h5ad"</span>)
 
 <span class="cm"># Show count matrix dimensions</span>
-<span class="fn">print</span>(adata.shape)
-
-<span class="cm"># Show coordinates</span>
-<span class="fn">print</span>(adata.obs[[<span class="st">"coordinate_x_um"</span>, <span class="st">"coordinate_y_um"</span>]].<span class="fn">head</span>())
-
-<span class="cm"># Show metadata</span>
-<span class="fn">print</span>(adata.obs[[<span class="st">"cellType"</span>, <span class="st">"niche"</span>]].<span class="fn">head</span>())
-
-<span class="cm"># Filter out cells with less than 50 expressed genes</span>
-adata <span class="op">=</span> spacet.<span class="fn">quality_control</span>(adata, min_genes<span class="op">=</span><span class="nb">50</span>)
-
-<span class="cm"># Visualize QC metrics</span>
-spacet.<span class="fn">visualize_spatial_feature</span>(
-    adata,
-    spatial_type<span class="op">=</span><span class="st">"QualityControl"</span>,
-    spatial_features<span class="op">=</span>[<span class="st">"UMI"</span>, <span class="st">"Gene"</span>],
-    point_size<span class="op">=</span><span class="nb">0.1</span>,
-)</pre>
+<span class="fn">print</span>(adata.shape)</pre>
 
 <div class="output-label">Output</div>
 <div class="output">(460441, 1000)</div>
+
+<pre><span class="cm"># Show coordinate matrix</span>
+<span class="fn">print</span>(adata.obs[[<span class="st">"coordinate_x_um"</span>, <span class="st">"coordinate_y_um"</span>]].<span class="fn">head</span>())</pre>
 
 <div class="output-label">Output</div>
 <div class="output">             coordinate_x_um  coordinate_y_um
@@ -288,17 +282,32 @@ c_2_101_339          7605.60          8736.04
 c_2_101_452          7629.84          9172.60
 c_2_102_179          7868.24          8993.68</div>
 
+<pre><span class="cm"># Show meta information</span>
+<span class="fn">print</span>(adata.obs[[<span class="st">"cellType"</span>, <span class="st">"niche"</span>]].<span class="fn">head</span>())</pre>
+
 <div class="output-label">Output</div>
 <div class="output">                   cellType          niche
 c_2_100_733      Tumor_core  tumor subtype
 c_2_101_240 Tumor_interface      interface
 c_2_101_339      Tumor_core          tumor
 c_2_101_452      Tumor_core  tumor subtype
-c_2_102_179      Tumor_core          tumor
+c_2_102_179      Tumor_core          tumor</div>
 
-Removing cells with less than 50 expressed genes.
+<pre><span class="cm"># Filter out cells with less than 50 expressed genes</span>
+adata <span class="op">=</span> spacet.<span class="fn">quality_control</span>(adata, min_genes<span class="op">=</span><span class="nb">50</span>)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">Removing cells with less than 50 expressed genes.
 16926 cells are removed.
 443515 cells are kept.</div>
+
+<pre><span class="cm"># Plot the QC metrics</span>
+spacet.<span class="fn">visualize_spatial_feature</span>(
+    adata,
+    spatial_type<span class="op">=</span><span class="st">"QualityControl"</span>,
+    spatial_features<span class="op">=</span>[<span class="st">"UMI"</span>, <span class="st">"Gene"</span>],
+    point_size<span class="op">=</span><span class="nb">0.1</span>,
+)</pre>
 
 <div class="figure">
   <img src="figures/cosmx_qc.png" alt="CosMx QC metrics">
@@ -326,14 +335,13 @@ cell_colors <span class="op">=</span> {
     <span class="st">'Other'</span>: <span class="st">'#cccccc'</span>,
 }
 
+<span class="cm"># Show the spatial distribution of all cell types</span>
 spacet.<span class="fn">visualize_spatial_feature</span>(
     adata,
     spatial_type<span class="op">=</span><span class="st">"metaData"</span>,
     spatial_features<span class="op">=</span>[<span class="st">"cellType"</span>],
     colors<span class="op">=</span>cell_colors,
     point_size<span class="op">=</span><span class="nb">0.1</span>,
-    legend_position<span class="op">=</span><span class="st">"right"</span>,
-    legend_size<span class="op">=</span><span class="nb">3</span>,
 )</pre>
 
 <div class="figure">
@@ -346,8 +354,8 @@ spacet.<span class="fn">visualize_spatial_feature</span>(
 <h2 id="activity">2. Infer secreted protein activity</h2>
 
 <p>
-  The <code>secact_inference()</code> function infers signaling activities
-  of secreted proteins for each cell. Output stored in
+  After loading ST data, users run <code>secact_inference()</code> to infer
+  signaling activities of secreted proteins for each cell. Output stored in
   <code>adata.uns['spacet']['SecAct_output']['SecretedProteinActivity']</code>
   contains four items: beta (regression coefficients), se (standard error),
   zscore (beta/se), and pvalue (two-sided test p-value from permutation test).
@@ -357,26 +365,22 @@ spacet.<span class="fn">visualize_spatial_feature</span>(
 adata <span class="op">=</span> spacet.<span class="fn">secact_inference</span>(
     adata,
     scale_factor<span class="op">=</span><span class="nb">1000</span>,
-    is_filter_sig<span class="op">=</span><span class="kw">True</span>,
 )
 
 <span class="cm"># Show activity</span>
 zscores <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'SecAct_output'</span>][<span class="st">'SecretedProteinActivity'</span>][<span class="st">'zscore'</span>]
 <span class="fn">print</span>(zscores.iloc[:<span class="nb">6</span>, :<span class="nb">3</span>])</pre>
 
-<div class="output-label">Output</div>
-<div class="output">           c_2_100_733  c_2_101_240  c_2_101_339
-A2M           0.482317    -0.218456     1.053284
-ADAM9         -0.871293     0.345821    -0.164527
-ANGPT1         1.324186    -0.593472     0.428915
-BGN           -0.154283     0.892147    -0.673428
-CCL2           0.731842    -0.428163     0.215674
-COL1A1        -0.342891     1.142583    -0.518327</div>
-
 <!-- ============================================================ -->
 <!-- SECTION 3: Infer cell-cell communication -->
 <!-- ============================================================ -->
 <h2 id="ccc">3. Infer cell-cell communication</h2>
+
+<p>
+  After calculating the secreted protein activity, SecAct estimates
+  cell-cell communication mediated by secreted proteins. This module
+  contains two steps.
+</p>
 
 <p>
   First, SecAct filters &gt;1,000 secreted proteins to identify significant
@@ -412,20 +416,13 @@ adata <span class="op">=</span> spacet.<span class="fn">secact_spatial_ccc</span
 ccc <span class="op">=</span> adata.uns[<span class="st">'spacet'</span>][<span class="st">'SecAct_output'</span>][<span class="st">'SecretedProteinCCC'</span>]
 <span class="fn">print</span>(ccc.<span class="fn">head</span>())</pre>
 
-<div class="output-label">Output</div>
-<div class="output">         sender secretedProtein       receiver  ratio        pv       padj
-0   Fibroblast           THBS2  Tumor_boundary  0.432  0.000999  0.003142
-1   Fibroblast          COL1A1  Tumor_boundary  0.387  0.000999  0.003284
-2   Fibroblast          COL1A2  Tumor_boundary  0.356  0.000999  0.003891
-3   Macrophage            SPP1  Tumor_boundary  0.298  0.000999  0.005124
-4   Fibroblast             DCN     Endothelial  0.285  0.000999  0.005472</div>
-
 <!-- ============================================================ -->
 <!-- SECTION 4: Visualize cell-cell communication -->
 <!-- ============================================================ -->
 <h2 id="visualize-ccc">4. Visualize cell-cell communication</h2>
 
 <p>
+  We provide two types of visualization: heatmap and circle plot.
   The number in the heatmap represents the count of secreted proteins from
   senders to receivers.
 </p>
@@ -451,9 +448,10 @@ spacet.<span class="fn">visualize_secact_circle</span>(
 </div>
 
 <p>
-  Users can select specific cell-cell communication from the results.
-  The <code>visualize_secact_dotplot()</code> function requires sender,
-  secreted_protein, and receiver parameters.
+  Users can select specific cell-cell communication from
+  <code>adata.uns['spacet']['SecAct_output']['SecretedProteinCCC']</code>
+  to visualize. The <code>visualize_secact_dotplot()</code> function requires
+  sender, secreted_protein, and receiver parameters.
 </p>
 
 <pre>cell_types <span class="op">=</span> [<span class="st">"Tumor_boundary"</span>, <span class="st">"Fibroblast"</span>, <span class="st">"Macrophage"</span>, <span class="st">"Endothelial"</span>]
@@ -480,6 +478,13 @@ spacet.<span class="fn">visualize_secact_dotplot</span>(
 <!-- ============================================================ -->
 <h2 id="velocity">5. Visualize secreted signaling velocity</h2>
 
+<p>
+  Users can select specific communications from
+  <code>adata.uns['spacet']['SecAct_output']['SecretedProteinCCC']</code>
+  to visualize using <code>visualize_secact_velocity_scst()</code>.
+  Assignment of values to sender, secreted_protein, and receiver is required.
+</p>
+
 <pre><span class="cm"># Compute single-cell resolution velocity</span>
 vel <span class="op">=</span> spacet.<span class="fn">secact_signaling_velocity_scst</span>(
     adata,
@@ -498,7 +503,8 @@ spacet.<span class="fn">visualize_secact_velocity_scst</span>(
     legend_position<span class="op">=</span><span class="st">"right"</span>,
     legend_size<span class="op">=</span><span class="nb">2</span>,
     arrow_color<span class="op">=</span><span class="st">"#ff0099"</span>,
-    arrow_size<span class="op">=</span><span class="nb">0.2</span>,
+    arrow_size<span class="op">=</span><span class="nb">1.0</span>,
+    arrow_width<span class="op">=</span><span class="nb">0.5</span>,
 )</pre>
 
 <div class="figure">
@@ -511,26 +517,48 @@ spacet.<span class="fn">visualize_secact_velocity_scst</span>(
     customized_area<span class="op">=</span>[<span class="nb">8290</span>, <span class="nb">8366</span>, <span class="nb">1100</span>, <span class="nb">1400</span>],
     show_coordinates<span class="op">=</span><span class="kw">False</span>,
     colors<span class="op">=</span>cell_colors,
-    point_size<span class="op">=</span><span class="nb">5</span>,
+    point_size<span class="op">=</span><span class="nb">15</span>,
     legend_position<span class="op">=</span><span class="st">"right"</span>,
     legend_size<span class="op">=</span><span class="nb">3</span>,
     arrow_color<span class="op">=</span><span class="st">"#ff0099"</span>,
-    arrow_width<span class="op">=</span><span class="nb">1</span>,
-    arrow_size<span class="op">=</span><span class="nb">0.7</span>,
+    arrow_size<span class="op">=</span><span class="nb">0.3</span>,
+    arrow_width<span class="op">=</span><span class="nb">0.5</span>,
 )</pre>
 
 <div class="figure">
   <img src="figures/cosmx_velocity_cut.png" alt="THBS2 signaling velocity (zoomed)">
 </div>
 
+<p>
+  For large datasets, use <code>interactive=True</code> to get a zoomable
+  plotly figure instead of a static image:
+</p>
+
+<pre><span class="cm"># Interactive zoomable view (plotly)</span>
+fig <span class="op">=</span> spacet.<span class="fn">visualize_secact_velocity_scst</span>(
+    vel,
+    interactive<span class="op">=</span><span class="kw">True</span>,
+    colors<span class="op">=</span>cell_colors,
+    point_size<span class="op">=</span><span class="nb">2</span>,
+    arrow_color<span class="op">=</span><span class="st">"#ff0099"</span>,
+    arrow_size<span class="op">=</span><span class="nb">3.0</span>,
+    arrow_width<span class="op">=</span><span class="nb">1.5</span>,
+    save<span class="op">=</span><span class="st">"velocity_interactive.html"</span>,
+)</pre>
+
+<div class="figure">
+  <iframe src="figures/cosmx_velocity_interactive.html" width="100%" height="700" style="border: 1px solid var(--border); border-radius: 6px;"></iframe>
+  <div class="caption">Interactive view — scroll to zoom, drag to pan</div>
+</div>
+
 <!-- Footer -->
 <div class="footer">
   <p>
-    <strong>spatial-gpu</strong> &copy; 2024 &middot;
+    <strong>spatial-gpu</strong> &copy; 2026 &middot;
     Built with Python &middot;
     <a href="https://doi.org/10.1038/s41467-025-56540-3" target="_blank">SecAct paper</a> &middot;
     <a href="https://doi.org/10.1038/s41467-023-36062-6" target="_blank">SpaCET paper</a> &middot;
-    <a href="https://github.com/psychemist/spatial-gpu">GitHub</a>
+    <a href="https://github.com/psychemistz/spatial-gpu">GitHub</a>
   </p>
 </div>
 

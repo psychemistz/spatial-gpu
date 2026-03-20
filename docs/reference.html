@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reference &bull; spatial-gpu</title>
+
+<style>
+  /* ---- Reset & base ---- */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --link: #2563eb;
+    --link-hover: #1d4ed8;
+    --code-bg: #f8f9fa;
+    --code-border: #e2e8f0;
+    --header-bg: #1e293b;
+    --header-fg: #f8fafc;
+    --accent: #3b82f6;
+    --output-bg: #fefce8;
+    --output-border: #fde68a;
+    --sidebar-w: 260px;
+    --nav-height: 60px;
+  }
+
+  html { scroll-behavior: smooth; font-size: 16px; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+  }
+
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+
+  /* ---- Top navigation bar ---- */
+  .topnav {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--nav-height);
+    background: var(--header-bg);
+    color: var(--header-fg);
+    display: flex; align-items: center;
+    padding: 0 1.5rem;
+    z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .topnav .brand {
+    font-weight: 700; font-size: 1.15rem;
+    color: var(--header-fg);
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .topnav .brand:hover { text-decoration: none; }
+  .topnav .brand .version {
+    font-size: 0.75rem; font-weight: 400;
+    background: rgba(255,255,255,.15);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .topnav nav { margin-left: auto; display: flex; gap: 1.25rem; }
+  .topnav nav a { color: rgba(248,250,252,.75); font-size: 0.9rem; }
+  .topnav nav a:hover { color: #fff; text-decoration: none; }
+
+  /* ---- Sidebar (table of contents) ---- */
+  .sidebar {
+    position: fixed; top: var(--nav-height); left: 0;
+    width: var(--sidebar-w); height: calc(100vh - var(--nav-height));
+    overflow-y: auto; padding: 1.5rem 1rem;
+    border-right: 1px solid var(--border);
+    background: #fafbfc;
+    font-size: 0.85rem;
+  }
+  .sidebar h4 {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin-bottom: .5rem; margin-top: 1rem;
+  }
+  .sidebar h4:first-child { margin-top: 0; }
+  .sidebar ul { list-style: none; }
+  .sidebar li { margin-bottom: .3rem; }
+  .sidebar a { color: var(--fg); display: block; padding: 2px 6px; border-radius: 4px; }
+  .sidebar a:hover { background: #e2e8f0; text-decoration: none; }
+  .sidebar a.active { background: var(--accent); color: #fff; }
+
+  /* ---- Main content ---- */
+  .main {
+    margin-left: var(--sidebar-w);
+    margin-top: var(--nav-height);
+    max-width: 900px;
+    padding: 2.5rem 3rem 6rem 3rem;
+  }
+
+  h1 { font-size: 2rem; margin-bottom: .4rem; }
+  h1 + .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; }
+  h2 {
+    font-size: 1.45rem; margin-top: 2.5rem; margin-bottom: 1rem;
+    padding-bottom: .35rem; border-bottom: 2px solid var(--border);
+  }
+  h3 {
+    font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.5rem;
+    color: var(--fg);
+  }
+  p { margin-bottom: 1rem; }
+
+  /* ---- Code blocks ---- */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    margin-bottom: 1.25rem;
+  }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+  }
+  p code, li code, td code, dt code {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* Syntax highlighting (minimal) */
+  .kw { color: #8b5cf6; }
+  .fn { color: #0891b2; }
+  .st { color: #059669; }
+  .cm { color: #9ca3af; font-style: italic; }
+  .nb { color: #dc2626; }
+  .op { color: #64748b; }
+
+  /* ---- Reference list ---- */
+  dl.ref-list {
+    margin-bottom: 1.5rem;
+  }
+  dl.ref-list dt {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.15rem;
+  }
+  dl.ref-list dd {
+    margin-left: 1.25rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+  }
+
+  /* ---- Footer ---- */
+  .footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 1.5rem 1.25rem 4rem; }
+  }
+</style>
+</head>
+
+<body>
+
+<!-- TOP NAVIGATION -->
+<header class="topnav">
+  <a class="brand" href="index.html">
+    spatial-gpu <span class="version">v0.1.0</span>
+  </a>
+  <nav>
+    <a href="index.html">Get Started</a>
+    <a href="reference.html">Reference</a>
+    <a href="articles.html">Articles</a>
+    <a href="https://github.com/psychemistz/spatial-gpu">GitHub</a>
+  </nav>
+</header>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <h4>Reference</h4>
+  <ul>
+    <li><a href="#core">Core Deconvolution</a></li>
+    <li><a href="#extensions">Extensions</a></li>
+    <li><a href="#gene-set">Gene Set</a></li>
+    <li><a href="#interaction">Cell-Cell Interaction</a></li>
+    <li><a href="#spatial-correlation">Spatial Correlation</a></li>
+    <li><a href="#secact">SecAct Analysis</a></li>
+    <li><a href="#visualization">Visualization</a></li>
+    <li><a href="#io">I/O</a></li>
+  </ul>
+
+  <h4>Articles</h4>
+  <ul>
+    <li><a href="visium_BC.html">Visium Breast Cancer</a></li>
+    <li><a href="oldST_PDAC.html">Old ST PDAC</a></li>
+    <li><a href="hiresST_CRC.html">Hi-Res ST CRC</a></li>
+    <li><a href="GeneSetScore.html">Gene Set Score</a></li>
+    <li><a href="SpatialCorrelation.html">Spatial Correlation</a></li>
+    <li><a href="stPattern.html">Signaling Patterns</a></li>
+    <li><a href="stCCC.html">Cell-Cell Communication</a></li>
+  </ul>
+</aside>
+
+<!-- MAIN CONTENT -->
+<div class="main">
+
+<h1>Reference</h1>
+<p class="subtitle">
+  API reference for <code>spatialgpu.deconvolution</code>
+</p>
+
+<p>
+  All public functions are available via
+  <code>import spatialgpu.deconvolution as spacet</code>.
+</p>
+
+<!-- ============================================================ -->
+<!-- Core Deconvolution -->
+<!-- ============================================================ -->
+<h2 id="core">Core Deconvolution</h2>
+
+<dl class="ref-list">
+  <dt><code>deconvolution(adata, cancer_type, ...)</code></dt>
+  <dd>Two-stage hierarchical cell type deconvolution. Infers malignant cell fractions, then deconvolves non-malignant cell types.</dd>
+
+  <dt><code>deconvolution_bulk(adata, cancer_type, ...)</code></dt>
+  <dd>Cell type deconvolution adapted for bulk RNA-seq cohorts.</dd>
+
+  <dt><code>quality_control(adata, min_genes=1)</code></dt>
+  <dd>Filter out cells/spots with fewer than <code>min_genes</code> expressed genes.</dd>
+
+  <dt><code>cormat(adata)</code></dt>
+  <dd>Compute pairwise correlation matrix of deconvolution cell type fractions.</dd>
+</dl>
+
+<!-- ============================================================ -->
+<!-- Extensions -->
+<!-- ============================================================ -->
+<h2 id="extensions">Extensions</h2>
+
+<dl class="ref-list">
+  <dt><code>deconvolution_malignant(adata, ...)</code></dt>
+  <dd>Explore different malignant cell states in tumor ST data by clustering high-malignant spots and re-deconvolving.</dd>
+
+  <dt><code>deconvolution_malignant_custom_scrnaseq(adata, ...)</code></dt>
+  <dd>Malignant cell state deconvolution using a custom scRNA-seq reference.</dd>
+
+  <dt><code>deconvolution_matched_scrnaseq(adata, ...)</code></dt>
+  <dd>Deconvolution using a matched scRNA-seq reference from the same tissue sample.</dd>
+
+  <dt><code>generate_ref(adata_sc, ...)</code></dt>
+  <dd>Generate a reference signature matrix from scRNA-seq data for use in deconvolution.</dd>
+</dl>
+
+<!-- ============================================================ -->
+<!-- Gene Set -->
+<!-- ============================================================ -->
+<h2 id="gene-set">Gene Set</h2>
+
+<dl class="ref-list">
+  <dt><code>gene_set_score(adata, gene_sets)</code></dt>
+  <dd>Calculate gene set scores per spot using UCell-like ranking. Supports built-in sets (<code>'Hallmark'</code>, <code>'CancerCellState'</code>, <code>'TLS'</code>) or custom gene set dicts.</dd>
+</dl>
+
+<!-- ============================================================ -->
+<!-- Cell-Cell Interaction -->
+<!-- ============================================================ -->
+<h2 id="interaction">Cell-Cell Interaction</h2>
+
+<dl class="ref-list">
+  <dt><code>cci_colocalization(adata)</code></dt>
+  <dd>Cell-type pair colocalization via Spearman correlation of deconvolution fractions.</dd>
+
+  <dt><code>cci_lr_network_score(adata, ...)</code></dt>
+  <dd>Ligand-receptor network scoring with permutation testing for each spot.</dd>
+
+  <dt><code>cci_cell_type_pair(adata, cell_type_pair)</code></dt>
+  <dd>Cell-type pair interaction analysis using Cohen&rsquo;s d and Wilcoxon test.</dd>
+
+  <dt><code>identify_interface(adata, ...)</code></dt>
+  <dd>Identify tumor-stroma interface spots based on malignant fraction and spatial neighbors.</dd>
+
+  <dt><code>combine_interface(adata, cell_type_pair)</code></dt>
+  <dd>Overlay cell-type pair interaction spots onto the tumor-stroma interface map.</dd>
+
+  <dt><code>distance_to_interface(adata, cell_type_pair, ...)</code></dt>
+  <dd>Permutation test for the distance of cell-cell interactions to the tumor border.</dd>
+
+  <dt><code>visualize_colocalization(adata, ...)</code></dt>
+  <dd>Dot plot + scatter visualization of cell-type colocalization results.</dd>
+
+  <dt><code>visualize_cell_type_pair(adata, cell_type_pair, ...)</code></dt>
+  <dd>Three-panel visualization of a co-localized cell-type pair interaction.</dd>
+
+  <dt><code>visualize_distance_to_interface(adata, cell_type_pair, ...)</code></dt>
+  <dd>Histogram with density overlay showing distance of interactions to the tumor border.</dd>
+</dl>
+
+<!-- ============================================================ -->
+<!-- Spatial Correlation -->
+<!-- ============================================================ -->
+<h2 id="spatial-correlation">Spatial Correlation</h2>
+
+<dl class="ref-list">
+  <dt><code>spatial_correlation(adata, ...)</code></dt>
+  <dd>Univariate, bivariate, and pairwise Moran&rsquo;s I spatial autocorrelation with permutation testing.</dd>
+
+  <dt><code>cal_weights(adata, radius=200, ...)</code></dt>
+  <dd>Compute spatial weight matrix using an RBF (Gaussian) kernel with KD-tree neighbor search.</dd>
+</dl>
+
+<!-- ============================================================ -->
+<!-- SecAct Analysis -->
+<!-- ============================================================ -->
+<h2 id="secact">SecAct Analysis</h2>
+
+<dl class="ref-list">
+  <dt><code>secact_inference(adata, ...)</code></dt>
+  <dd>Infer secreted protein signaling activity from spatial transcriptomics data via ridge regression.</dd>
+
+  <dt><code>secact_signaling_patterns(adata, k=3, ...)</code></dt>
+  <dd>Discover signaling patterns via NMF on activity z-scores, with optional automatic k selection by silhouette score.</dd>
+
+  <dt><code>secact_pattern_genes(adata, n)</code></dt>
+  <dd>Enumerate secreted proteins most associated with signaling pattern <em>n</em>, sorted by NMF weight.</dd>
+
+  <dt><code>secact_signaling_velocity(adata, gene, ...)</code></dt>
+  <dd>Compute spot-level signaling velocity arrows for a secreted protein (source &rarr; sink direction).</dd>
+
+  <dt><code>secact_signaling_velocity_scst(adata, sender, secreted_protein, receiver, ...)</code></dt>
+  <dd>Compute single-cell resolution signaling velocity arrows between specific sender and receiver cell types.</dd>
+
+  <dt><code>secact_spatial_ccc(adata, cell_type_col, ...)</code></dt>
+  <dd>Compute spatial cell-cell communication mediated by secreted proteins with permutation testing.</dd>
+
+  <dt><code>secact_coxph_regression(activity_matrix, survival_data)</code></dt>
+  <dd>Cox proportional hazards regression for secreted protein risk scores in bulk cohorts.</dd>
+
+  <dt><code>secact_survival_data(activity_matrix, survival_data, protein, ...)</code></dt>
+  <dd>Prepare Kaplan-Meier survival data for a secreted protein, stratified by activity cutoff.</dd>
+</dl>
+
+<!-- ============================================================ -->
+<!-- Visualization -->
+<!-- ============================================================ -->
+<h2 id="visualization">Visualization</h2>
+
+<dl class="ref-list">
+  <dt><code>visualize_spatial_feature(adata, spatial_type, ...)</code></dt>
+  <dd>Spatial scatter plots for QC metrics, gene expression, cell fractions, interface, gene set scores, activity, and metadata.</dd>
+
+  <dt><code>visualize_secact_heatmap(adata, ...)</code></dt>
+  <dd>CCC heatmap showing sender &times; receiver secreted protein counts with marginal bar plots.</dd>
+
+  <dt><code>visualize_secact_circle(adata, ...)</code></dt>
+  <dd>CCC chord/circle diagram with directional links between cell types.</dd>
+
+  <dt><code>visualize_secact_sankey(adata, sender, secreted_protein, receiver, ...)</code></dt>
+  <dd>Sankey (alluvial) diagram of sender &rarr; protein &rarr; receiver communication flows.</dd>
+
+  <dt><code>visualize_secact_dotplot(adata, sender, secreted_protein, receiver, ...)</code></dt>
+  <dd>CCC dot plot showing secreted protein communication across sender&rarr;receiver pairs.</dd>
+
+  <dt><code>visualize_secact_heatmap_activity(data, ...)</code></dt>
+  <dd>Generic activity heatmap for secreted protein z-scores or pattern weights.</dd>
+
+  <dt><code>visualize_secact_bar(data, ...)</code></dt>
+  <dd>Diverging bar plot for secreted protein values (e.g., Cox regression coefficients).</dd>
+
+  <dt><code>visualize_secact_lollipop(data, ...)</code></dt>
+  <dd>Lollipop plot for secreted protein values.</dd>
+
+  <dt><code>visualize_secact_velocity(adata, gene, ...)</code></dt>
+  <dd>Spot-level signaling velocity visualization with optional contour map and animation.</dd>
+
+  <dt><code>visualize_secact_velocity_scst(velocity_result, ...)</code></dt>
+  <dd>Single-cell resolution signaling velocity visualization with customizable area zoom.</dd>
+
+  <dt><code>visualize_secact_survival(survival_result, ...)</code></dt>
+  <dd>Kaplan-Meier survival plot for secreted protein stratification.</dd>
+</dl>
+
+<!-- ============================================================ -->
+<!-- I/O -->
+<!-- ============================================================ -->
+<h2 id="io">I/O</h2>
+
+<dl class="ref-list">
+  <dt><code>create_spacet_object(counts, spot_coordinates, platform, ...)</code></dt>
+  <dd>Create an AnnData object from a count matrix (genes &times; spots) and spot coordinate DataFrame.</dd>
+
+  <dt><code>create_spacet_object_10x(visium_path)</code></dt>
+  <dd>Create an AnnData object from a 10X Visium Space Ranger output directory.</dd>
+</dl>
+
+<!-- Footer -->
+<div class="footer">
+  <p>
+    <strong>spatial-gpu</strong> &copy; 2026 &middot;
+    Built with Python &middot;
+    <a href="https://doi.org/10.1038/s41467-025-56540-3" target="_blank">SecAct paper</a> &middot;
+    <a href="https://doi.org/10.1038/s41467-023-36062-6" target="_blank">SpaCET paper</a> &middot;
+    <a href="https://github.com/psychemistz/spatial-gpu">GitHub</a>
+  </p>
+</div>
+
+</div> <!-- .main -->
+
+<!-- Sidebar active link highlighting -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const links = document.querySelectorAll('.sidebar a[href^="#"]');
+  const sections = [];
+  links.forEach(function (link) {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ link: link, el: el });
+  });
+
+  function onScroll() {
+    const scrollY = window.scrollY + 80;
+    let current = null;
+    for (let i = sections.length - 1; i >= 0; i--) {
+      if (sections[i].el.offsetTop <= scrollY) {
+        current = sections[i].link;
+        break;
+      }
+    }
+    links.forEach(function (l) { l.classList.remove('active'); });
+    if (current) current.classList.add('active');
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+});
+</script>
+</body>
+</html>

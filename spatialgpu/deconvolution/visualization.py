@@ -1120,13 +1120,17 @@ def _plot_single(
                 label=cat,
                 edgecolors="none",
             )
-        ax.legend(
+        # Fixed legend marker size (R uses override.aes size=3)
+        legend = ax.legend(
             title=legend_name,
             fontsize=7,
             title_fontsize=8,
             loc="center left",
             bbox_to_anchor=(1, 0.5),
+            frameon=False,
         )
+        for h in legend.legend_handles:
+            h.set_sizes([20])
     else:
         vals = np.asarray(values, dtype=float)
         if colors:
@@ -1486,77 +1490,32 @@ def visualize_secact_circle(
         tab20 = plt.cm.tab20(np.linspace(0, 1, max(20, len(all_types))))
         colors_cell_type = {ct: tab20[i] for i, ct in enumerate(all_types)}
 
-    # Draw chord diagram as arcs on a circle
-    fig, ax = plt.subplots(1, 1, figsize=figsize, subplot_kw={"projection": "polar"})
+    # Chord diagram via pycirclize (matches R circlize::chordDiagram)
+    from pycirclize import Circos
 
-    n = len(all_types)
-    angles = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    # Filter by sender/receiver if specified
+    if sender is not None:
+        for s in list(mat.index):
+            if s not in sender:
+                mat.loc[s, :] = 0
+    if receiver is not None:
+        for r in list(mat.columns):
+            if r not in receiver:
+                mat.loc[:, r] = 0
 
-    # Draw cell type sectors
-    for i, ct in enumerate(all_types):
-        color = colors_cell_type.get(ct, "gray")
-        theta = angles[i]
-        ax.bar(
-            theta,
-            1,
-            width=2 * np.pi / n * 0.8,
-            bottom=0.9,
-            color=color,
-            edgecolor="white",
-            linewidth=0.5,
-            alpha=0.8,
-        )
-        ax.text(
-            theta,
-            2.1,
-            ct,
-            ha="center",
-            va="center",
-            fontsize=8,
-            rotation=(
-                np.degrees(theta) - 90 if theta < np.pi else np.degrees(theta) + 90
-            ),
-        )
+    sector_colors = {
+        ct: colors_cell_type.get(ct, "gray") for ct in all_types
+    }
 
-    # Draw links (arcs)
-    ct_to_idx = {ct: i for i, ct in enumerate(all_types)}
-    max_val = mat.values.max() if mat.values.max() > 0 else 1
+    circos = Circos.initialize_from_matrix(
+        mat,
+        space=3,
+        cmap=sector_colors,
+        label_kws=dict(fontsize=8),
+        link_kws=dict(direction=1, ec="white", lw=0.3),
+    )
 
-    for s in all_types:
-        for r in all_types:
-            val = mat.loc[s, r]
-            if val == 0 or s == r:
-                continue
-            if sender and s not in sender:
-                continue
-            if receiver and r not in receiver:
-                continue
-
-            theta_s = angles[ct_to_idx[s]]
-            theta_r = angles[ct_to_idx[r]]
-            color = colors_cell_type.get(s, "gray")
-            lw = 1 + 3 * val / max_val
-
-            # Draw bezier-like arc
-            t = np.linspace(0, 1, 50)
-            theta_mid = (theta_s + theta_r) / 2
-            if abs(theta_s - theta_r) > np.pi:
-                theta_mid += np.pi
-            r_mid = 0.3
-            r_ends = 0.85
-
-            thetas = (
-                (1 - t) ** 2 * theta_s + 2 * (1 - t) * t * theta_mid + t**2 * theta_r
-            )
-            radii = (1 - t) ** 2 * r_ends + 2 * (1 - t) * t * r_mid + t**2 * r_ends
-
-            ax.plot(thetas, radii, color=color, alpha=0.5, linewidth=lw)
-
-    ax.set_ylim(0, 2.5)
-    ax.set_yticklabels([])
-    ax.set_xticklabels([])
-    ax.grid(False)
-    ax.spines["polar"].set_visible(False)
+    fig = circos.plotfig(figsize=figsize)
 
     if save:
         fig.savefig(save, dpi=dpi, bbox_inches="tight")
@@ -2436,10 +2395,11 @@ def visualize_secact_velocity_scst(
     arrow_width: float = 1.0,
     legend_position: str = "right",
     legend_size: float = 3.0,
+    interactive: bool = False,
     figsize: tuple[float, float] = (10, 8),
     save: str | None = None,
     dpi: int = 300,
-) -> plt.Figure:
+):
     """Single-cell resolution signaling velocity plot.
 
     Equivalent to ``SecAct.signaling.velocity.scST()`` in R.  Draws
@@ -2461,18 +2421,21 @@ def visualize_secact_velocity_scst(
     arrow_color : str
         Arrow colour. Default: ``"#ff0099"``.
     arrow_size : float
-        Arrowhead length in data-coordinate fraction. Default: 0.3.
+        Arrow scale (shaft width + head). Default: 0.3.
     arrow_width : float
-        Arrow line width. Default: 1.0.
+        Arrow line width in points. Default: 1.0.
     legend_position : str
         "right", "left", or "none".
     legend_size : float
         Legend marker size.
+    interactive : bool
+        If True, return a plotly Figure (zoomable/pannable HTML).
+        If False (default), return a matplotlib Figure.
     figsize, save, dpi : standard plotting params.
 
     Returns
     -------
-    matplotlib Figure
+    matplotlib Figure or plotly Figure (if interactive=True)
     """
     arrows = velocity_result["arrows"]
     cell_df = velocity_result["cell_types"]
@@ -2500,6 +2463,12 @@ def visualize_secact_velocity_scst(
             )
             arrows = arrows[a_mask].copy()
 
+    if interactive:
+        return _velocity_scst_plotly(
+            cell_df, arrows, colors, point_size, point_alpha,
+            arrow_color, arrow_size, arrow_width, figsize, save,
+        )
+
     fig, ax = plt.subplots(figsize=figsize)
 
     # Draw cells coloured by type
@@ -2518,46 +2487,33 @@ def visualize_secact_velocity_scst(
             zorder=1,
         )
 
-    # Draw arrows (vectorised) — matches R geom_segment + arrow()
+    # Draw arrows — matches R geom_segment + arrow()
+    # arrow_size: arrow scale (shaft width + head)
+    # arrow_width: shaft line weight (points)
     if len(arrows) > 0:
-        from matplotlib.collections import LineCollection
-
         x0 = arrows["x_start"].values
         y0 = arrows["y_start"].values
         x1 = arrows["x_end"].values
         y1 = arrows["y_end"].values
+        dx = x1 - x0
+        dy = y1 - y0
 
-        # Line segments
-        segments = np.column_stack([x0, y0, x1, y1]).reshape(-1, 2, 2)
-        lc = LineCollection(
-            segments,
-            colors=arrow_color,
-            linewidths=arrow_width,
+        ax.quiver(
+            x0, y0, dx, dy,
+            color=arrow_color,
+            angles="xy", scale_units="xy", scale=1,
+            width=arrow_size * 0.01,
+            headwidth=4,
+            headlength=5,
+            headaxislength=4.5,
+            linewidth=arrow_width,
             alpha=0.7,
             zorder=2,
         )
-        ax.add_collection(lc)
 
-        # Arrowheads via quiver (just the head, no shaft)
-        dx = x1 - x0
-        dy = y1 - y0
-        ax.quiver(
-            x1,
-            y1,
-            dx,
-            dy,
-            color=arrow_color,
-            scale=1,
-            scale_units="xy",
-            width=0.001,
-            headwidth=6,
-            headlength=8,
-            headaxislength=8,
-            alpha=0.7,
-            zorder=3,
-        )
-
-    ax.set_aspect("equal")
+    # Don't force equal aspect for zoomed subregions (avoids stretched figures)
+    if customized_area is None:
+        ax.set_aspect("equal")
 
     if not show_coordinates:
         ax.axis("off")
@@ -2565,23 +2521,156 @@ def visualize_secact_velocity_scst(
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-    # Legend
+    # Legend with fixed marker size (R uses guide_legend override.aes size)
     if legend_position != "none":
         loc = "center left" if legend_position == "right" else "center right"
         bbox = (1.02, 0.5) if legend_position == "right" else (-0.02, 0.5)
-        ax.legend(
+        legend = ax.legend(
             loc=loc,
             bbox_to_anchor=bbox,
-            markerscale=legend_size,
             frameon=False,
             fontsize=8,
         )
+        target_size = max(20, point_size * legend_size)
+        for h in legend.legend_handles:
+            h.set_sizes([target_size])
     else:
         ax.legend().remove()
 
     fig.tight_layout()
     if save:
         fig.savefig(save, dpi=dpi, bbox_inches="tight")
+    return fig
+
+
+def _velocity_scst_plotly(
+    cell_df: pd.DataFrame,
+    arrows: pd.DataFrame,
+    colors: dict[str, str] | None,
+    point_size: float,
+    point_alpha: float,
+    arrow_color: str,
+    arrow_size: float,
+    arrow_width: float,
+    figsize: tuple[float, float],
+    save: str | None,
+):
+    """Interactive plotly version of scST velocity plot."""
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+
+    # Cell type scatter traces
+    for ct in cell_df["cell_type"].unique():
+        sub = cell_df[cell_df["cell_type"] == ct]
+        c = colors.get(ct, "#cccccc") if colors else None
+        fig.add_trace(
+            go.Scattergl(
+                x=sub["x"].values,
+                y=sub["y"].values,
+                mode="markers",
+                marker=dict(
+                    size=max(2, point_size),
+                    color=c,
+                    opacity=point_alpha,
+                ),
+                name=ct,
+                hoverinfo="text",
+                text=[f"{ct}" for _ in range(len(sub))],
+            )
+        )
+
+    # Arrows drawn in data coordinates so they scale with zoom
+    if len(arrows) > 0:
+        x0 = arrows["x_start"].values
+        y0 = arrows["y_start"].values
+        x1_raw = arrows["x_end"].values
+        y1_raw = arrows["y_end"].values
+        dx_raw = x1_raw - x0
+        dy_raw = y1_raw - y0
+
+        # Scale arrows by arrow_size so they're visible at full zoom
+        # arrow_size=1.0 → arrows are ~1% of data range
+        x_range = cell_df["x"].max() - cell_df["x"].min()
+        target_len = x_range * arrow_size * 0.01
+        mag = np.sqrt(dx_raw**2 + dy_raw**2)
+        mag[mag == 0] = 1
+        dx = dx_raw / mag * target_len
+        dy = dy_raw / mag * target_len
+        x1 = x0 + dx
+        y1 = y0 + dy
+
+        # Shaft: line segments (None-separated)
+        x_lines, y_lines = [], []
+        for i in range(len(x0)):
+            x_lines.extend([x0[i], x1[i], None])
+            y_lines.extend([y0[i], y1[i], None])
+
+        fig.add_trace(
+            go.Scattergl(
+                x=x_lines,
+                y=y_lines,
+                mode="lines",
+                line=dict(color=arrow_color, width=max(1, arrow_width)),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+        # Arrowheads: triangles drawn as filled polygons in data coords
+        # Each head is 3 vertices forming a triangle at the endpoint
+        mag = np.sqrt(dx**2 + dy**2)
+        mag[mag == 0] = 1
+        ux, uy = dx / mag, dy / mag  # unit direction
+        px, py = -uy, ux  # perpendicular
+
+        head_len = mag * 0.25  # head = 25% of arrow length
+        head_w = head_len * 0.4
+
+        # Triangle vertices: tip, left base, right base
+        tip_x, tip_y = x1, y1
+        base_x = x1 - ux * head_len
+        base_y = y1 - uy * head_len
+        left_x = base_x + px * head_w
+        left_y = base_y + py * head_w
+        right_x = base_x - px * head_w
+        right_y = base_y - py * head_w
+
+        x_heads, y_heads = [], []
+        for i in range(len(tip_x)):
+            x_heads.extend([tip_x[i], left_x[i], right_x[i], tip_x[i], None])
+            y_heads.extend([tip_y[i], left_y[i], right_y[i], tip_y[i], None])
+
+        fig.add_trace(
+            go.Scatter(
+                x=x_heads,
+                y=y_heads,
+                mode="lines",
+                fill="toself",
+                fillcolor=arrow_color,
+                line=dict(color=arrow_color, width=0.5),
+                opacity=0.7,
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    fig.update_layout(
+        width=int(figsize[0] * 100),
+        height=int(figsize[1] * 100),
+        xaxis=dict(scaleanchor="y", scaleratio=1, showgrid=False),
+        yaxis=dict(showgrid=False),
+        plot_bgcolor="white",
+        legend=dict(itemsizing="constant"),
+        margin=dict(l=40, r=40, t=40, b=40),
+    )
+
+    if save:
+        if save.endswith(".html"):
+            fig.write_html(save)
+        else:
+            fig.write_image(save)
+
     return fig
 
 
