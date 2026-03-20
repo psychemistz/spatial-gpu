@@ -1503,9 +1503,7 @@ def visualize_secact_circle(
             if r not in receiver:
                 mat.loc[:, r] = 0
 
-    sector_colors = {
-        ct: colors_cell_type.get(ct, "gray") for ct in all_types
-    }
+    sector_colors = {ct: colors_cell_type.get(ct, "gray") for ct in all_types}
 
     circos = Circos.initialize_from_matrix(
         mat,
@@ -2465,8 +2463,16 @@ def visualize_secact_velocity_scst(
 
     if interactive:
         return _velocity_scst_plotly(
-            cell_df, arrows, colors, point_size, point_alpha,
-            arrow_color, arrow_size, arrow_width, figsize, save,
+            cell_df,
+            arrows,
+            colors,
+            point_size,
+            point_alpha,
+            arrow_color,
+            arrow_size,
+            arrow_width,
+            figsize,
+            save,
         )
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -2499,9 +2505,14 @@ def visualize_secact_velocity_scst(
         dy = y1 - y0
 
         ax.quiver(
-            x0, y0, dx, dy,
+            x0,
+            y0,
+            dx,
+            dy,
             color=arrow_color,
-            angles="xy", scale_units="xy", scale=1,
+            angles="xy",
+            scale_units="xy",
+            scale=1,
             width=arrow_size * 0.01,
             headwidth=4,
             headlength=5,
