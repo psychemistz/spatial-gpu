@@ -98,14 +98,17 @@ def _ucell_score(
     else:
         X_dense = np.asarray(X)
 
-    # Rank: argsort descending, then assign ranks
-    # Use scipy rankdata for consistency
+    # Vectorized ranking: argsort twice gives ordinal ranks, then handle ties
+    # For "average" tie-breaking we use scipy rankdata but batch via apply
     from scipy.stats import rankdata
 
-    ranks = np.zeros_like(X_dense, dtype=np.float64)
-    for i in range(n_spots):
-        # Rank in ascending order (1 = lowest), then invert
-        ranks[i] = n_genes + 1 - rankdata(X_dense[i], method="average")
+    # rankdata along axis=1 gives ascending ranks per row
+    # Invert so highest expression = rank 1
+    ranks = np.apply_along_axis(
+        lambda row: n_genes + 1 - rankdata(row, method="average"),
+        axis=1,
+        arr=X_dense,
+    )
 
     results = {}
     for set_name, genes in gene_sets.items():

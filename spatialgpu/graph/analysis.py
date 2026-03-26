@@ -76,7 +76,6 @@ def nhood_enrichment(
         cluster_idx = np.array([categories.index(c) for c in clusters])
 
     n_clusters = len(categories)
-    len(cluster_idx)
 
     # Get connectivity matrix
     adj = adata.obsp[connectivity_key]
@@ -121,8 +120,6 @@ def _nhood_enrichment_gpu(
 
     if seed is not None:
         cp.random.seed(seed)
-
-    len(cluster_idx)
 
     # Transfer to GPU
     cluster_idx_gpu = to_gpu(cluster_idx.astype(np.int32))
@@ -216,8 +213,6 @@ def _nhood_enrichment_cpu(
     if seed is not None:
         np.random.seed(seed)
 
-    len(cluster_idx)
-
     # Compute observed counts
     count = _compute_interaction_count_cpu(adj, cluster_idx, n_clusters)
 
@@ -251,8 +246,9 @@ def _compute_interaction_count_cpu(
     count = np.zeros((n_clusters, n_clusters), dtype=np.float32)
 
     rows, cols = adj.nonzero()
-    for i, j in zip(rows, cols):
-        count[cluster_idx[i], cluster_idx[j]] += 1
+    cluster_rows = cluster_idx[rows]
+    cluster_cols = cluster_idx[cols]
+    np.add.at(count, (cluster_rows, cluster_cols), 1)
 
     return count
 
@@ -371,6 +367,13 @@ def _co_occurrence_gpu(
     # Process in chunks to manage memory
     chunk_size = min(5000, n_cells)
 
+    # Pre-compute loop-invariant arrays
+    cluster_range_gpu = cp.arange(n_clusters, dtype=cp.int32)
+    all_onehot_gpu = (cluster_idx_gpu[:, None] == cluster_range_gpu[None, :]).astype(
+        cp.float32
+    )
+    all_sq = cp.sum(coords_gpu**2, axis=1, keepdims=True).T
+
     iterator = range(0, n_cells, chunk_size)
     if show_progress:
         iterator = tqdm(list(iterator), desc="Computing co-occurrence")
@@ -380,22 +383,25 @@ def _co_occurrence_gpu(
         chunk_coords = coords_gpu[i:end_i]
         chunk_clusters = cluster_idx_gpu[i:end_i]
 
-        # Compute pairwise distances
-        diff = chunk_coords[:, None, :] - coords_gpu[None, :, :]
-        dists = cp.sqrt(cp.sum(diff**2, axis=2))
+        chunk_sq = cp.sum(chunk_coords**2, axis=1, keepdims=True)
+        dists_sq = chunk_sq + all_sq - 2.0 * chunk_coords @ coords_gpu.T
+        dists = cp.sqrt(cp.maximum(dists_sq, 0.0))
 
-        # Bin distances and count co-occurrences
+        # Vectorized bin and cluster co-occurrence counting
+        bin_indices = cp.searchsorted(bins_gpu, dists, side="right") - 1
+        valid_mask = (bin_indices >= 0) & (bin_indices < n_bins)
+
+        # Build cluster membership indicator for this chunk
+        chunk_onehot = chunk_clusters[:, None] == cluster_range_gpu[None, :]
+
         for b in range(n_bins):
-            mask = (dists >= bins_gpu[b]) & (dists < bins_gpu[b + 1])
-
-            for ci in range(n_clusters):
-                for cj in range(n_clusters):
-                    cluster_mask = (chunk_clusters[:, None] == ci) & (
-                        cluster_idx_gpu[None, :] == cj
-                    )
-                    occurrence[ci, cj, b] += cp.sum(mask & cluster_mask)
-
+            mask = (bin_indices == b) & valid_mask
             counts[b] += cp.sum(mask)
+
+            mask_float = mask.astype(cp.float32)
+            occurrence[:, :, b] += (
+                chunk_onehot.astype(cp.float32).T @ mask_float @ all_onehot_gpu
+            )
 
     # Normalize
     counts = cp.maximum(counts, 1)
@@ -423,6 +429,10 @@ def _co_occurrence_cpu(
     # Process in chunks
     chunk_size = min(2000, n_cells)
 
+    # Pre-compute loop-invariant arrays
+    cluster_range = np.arange(n_clusters)
+    all_onehot = (cluster_idx[:, None] == cluster_range[None, :]).astype(np.float32)
+
     iterator = range(0, n_cells, chunk_size)
     if show_progress:
         iterator = tqdm(list(iterator), desc="Computing co-occurrence")
@@ -431,17 +441,20 @@ def _co_occurrence_cpu(
         end_i = min(i + chunk_size, n_cells)
         dists = cdist(coords[i:end_i], coords)
 
+        # Vectorized bin and cluster co-occurrence counting
+        bin_indices = np.searchsorted(bins, dists, side="right") - 1
+        valid_mask = (bin_indices >= 0) & (bin_indices < n_bins)
+
+        chunk_onehot = (cluster_idx[i:end_i, None] == cluster_range[None, :]).astype(
+            np.float32
+        )
+
         for b in range(n_bins):
-            mask = (dists >= bins[b]) & (dists < bins[b + 1])
-
-            for ci in range(n_clusters):
-                for cj in range(n_clusters):
-                    cluster_mask = (cluster_idx[i:end_i, None] == ci) & (
-                        cluster_idx[None, :] == cj
-                    )
-                    occurrence[ci, cj, b] += np.sum(mask & cluster_mask)
-
+            mask = (bin_indices == b) & valid_mask
             counts[b] += np.sum(mask)
+
+            mask_float = mask.astype(np.float32)
+            occurrence[:, :, b] += chunk_onehot.T @ mask_float @ all_onehot
 
     # Normalize
     counts = np.maximum(counts, 1)
@@ -567,25 +580,31 @@ def centrality_scores(
 
     scores = {}
 
+    # Pre-compute cluster sums helper for vectorized mean-per-cluster
+    cluster_counts = np.bincount(cluster_idx, minlength=n_clusters).astype(np.float64)
+    cluster_counts = np.maximum(cluster_counts, 1)  # avoid div-by-zero
+
     if "degree" in score_types:
-        degree = np.array([d for n, d in G.degree()])
-        scores["degree"] = np.array(
-            [np.mean(degree[cluster_idx == c]) for c in range(n_clusters)]
-        )
+        degree = np.array([d for _, d in G.degree()], dtype=np.float64)
+        sums = np.bincount(cluster_idx, weights=degree, minlength=n_clusters)
+        scores["degree"] = sums / cluster_counts
 
     if "closeness" in score_types:
-        closeness = np.array(list(nx.closeness_centrality(G).values()))
-        scores["closeness"] = np.array(
-            [np.mean(closeness[cluster_idx == c]) for c in range(n_clusters)]
+        closeness = np.fromiter(
+            nx.closeness_centrality(G).values(), dtype=np.float64, count=n_cells
         )
+        sums = np.bincount(cluster_idx, weights=closeness, minlength=n_clusters)
+        scores["closeness"] = sums / cluster_counts
 
     if "betweenness" in score_types:
-        # Sample for large graphs
         k = min(1000, n_cells)
-        betweenness = np.array(list(nx.betweenness_centrality(G, k=k).values()))
-        scores["betweenness"] = np.array(
-            [np.mean(betweenness[cluster_idx == c]) for c in range(n_clusters)]
+        betweenness = np.fromiter(
+            nx.betweenness_centrality(G, k=k).values(),
+            dtype=np.float64,
+            count=n_cells,
         )
+        sums = np.bincount(cluster_idx, weights=betweenness, minlength=n_clusters)
+        scores["betweenness"] = sums / cluster_counts
 
     if copy:
         return scores

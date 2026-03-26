@@ -86,7 +86,6 @@ def spatial_neighbors(
         adata = adata.copy()
 
     coords = get_spatial_coords(adata, spatial_key=spatial_key)
-    coords.shape[0]
 
     get_backend()
 
@@ -183,30 +182,74 @@ def _knn_graph_gpu(
     n_neighbors: int,
     set_diag: bool = False,
 ) -> tuple[sparse.csr_matrix, sparse.csr_matrix]:
-    """GPU implementation using cuML."""
+    """GPU implementation using cuML with CuPy brute-force fallback."""
     from spatialgpu.core.array_utils import to_cpu, to_gpu
     from spatialgpu.core.backend import get_backend
 
     backend = get_backend()
-    cuml = backend.get_cuml()
 
     n_cells = coords.shape[0]
 
     # Transfer to GPU
     coords_gpu = to_gpu(coords.astype(np.float32))
 
-    # Use cuML NearestNeighbors
-    nn = cuml.neighbors.NearestNeighbors(
-        n_neighbors=n_neighbors + 1,  # Include self
-        metric="euclidean",
-        algorithm="brute",  # Brute force is fast on GPU
-    )
-    nn.fit(coords_gpu)
-    distances_arr, indices_arr = nn.kneighbors(coords_gpu)
+    try:
+        cuml = backend.get_cuml()
 
-    # Transfer back to CPU for sparse matrix construction
-    distances_arr = to_cpu(distances_arr)
-    indices_arr = to_cpu(indices_arr)
+        # Use cuML NearestNeighbors
+        nn = cuml.neighbors.NearestNeighbors(
+            n_neighbors=n_neighbors + 1,  # Include self
+            metric="euclidean",
+            algorithm="brute",  # Brute force is fast on GPU
+        )
+        nn.fit(coords_gpu)
+        distances_arr, indices_arr = nn.kneighbors(coords_gpu)
+
+        # Transfer back to CPU for sparse matrix construction
+        distances_arr = to_cpu(distances_arr)
+        indices_arr = to_cpu(indices_arr)
+    except (ImportError, RuntimeError) as exc:
+        # Fallback: CuPy brute-force kNN when cuML is unavailable
+        import logging
+
+        import cupy as cp
+
+        logging.getLogger(__name__).warning(
+            "cuML unavailable, falling back to CuPy brute-force kNN: %s", exc
+        )
+
+        k = n_neighbors + 1  # Include self
+        chunk_size = min(5000, n_cells)
+        all_distances = np.empty((n_cells, k), dtype=np.float32)
+        all_indices = np.empty((n_cells, k), dtype=np.int64)
+
+        # Pre-compute loop-invariant squared norms
+        all_sq = cp.sum(coords_gpu**2, axis=1, keepdims=True).T
+
+        for start in range(0, n_cells, chunk_size):
+            end = min(start + chunk_size, n_cells)
+            chunk = coords_gpu[start:end]
+            chunk_sq = cp.sum(chunk**2, axis=1, keepdims=True)
+            dists_sq = chunk_sq + all_sq - 2.0 * chunk @ coords_gpu.T
+            dists_sq = cp.maximum(dists_sq, 0.0)
+            dists_chunk = cp.sqrt(dists_sq)
+
+            # Guard against k >= n_cells (argpartition requires k < axis len)
+            if k >= n_cells:
+                idx = cp.argsort(dists_chunk, axis=1)[:, :k]
+                row_dists = cp.take_along_axis(dists_chunk, idx, axis=1)
+            else:
+                idx = cp.argpartition(dists_chunk, k, axis=1)[:, :k]
+                row_dists = cp.take_along_axis(dists_chunk, idx, axis=1)
+                sort_order = cp.argsort(row_dists, axis=1)
+                idx = cp.take_along_axis(idx, sort_order, axis=1)
+                row_dists = cp.take_along_axis(row_dists, sort_order, axis=1)
+
+            all_distances[start:end] = to_cpu(row_dists)
+            all_indices[start:end] = to_cpu(idx)
+
+        distances_arr = all_distances
+        indices_arr = all_indices
 
     # Build sparse matrices (exclude self-neighbors)
     row_indices = np.repeat(np.arange(n_cells), n_neighbors)
@@ -345,17 +388,21 @@ def _radius_graph_gpu(
     cols = []
     dists = []
 
+    # Pre-compute squared norms for memory-efficient distance computation
+    all_sq_norms = cp.sum(coords_gpu**2, axis=1, keepdims=True)
+
     for i in range(0, n_cells, chunk_size):
         end_i = min(i + chunk_size, n_cells)
         chunk_i = coords_gpu[i:end_i]
+        chunk_sq_i = all_sq_norms[i:end_i]
 
         for j in range(0, n_cells, chunk_size):
             end_j = min(j + chunk_size, n_cells)
             chunk_j = coords_gpu[j:end_j]
 
-            # Compute distances for this chunk pair
-            diff = chunk_i[:, None, :] - chunk_j[None, :, :]
-            dist_chunk = cp.sqrt(cp.sum(diff**2, axis=2))
+            # ||a-b||^2 = ||a||^2 + ||b||^2 - 2*a.b (avoids large 3D intermediate)
+            dists_sq = chunk_sq_i + all_sq_norms[j:end_j].T - 2.0 * chunk_i @ chunk_j.T
+            dist_chunk = cp.sqrt(cp.maximum(dists_sq, 0.0))
 
             # Find pairs within radius
             mask = (dist_chunk <= radius) & (dist_chunk > 0)
@@ -399,8 +446,6 @@ def _radius_graph_cpu(
 ) -> tuple[sparse.csr_matrix, sparse.csr_matrix]:
     """CPU implementation of radius graph."""
     from sklearn.neighbors import NearestNeighbors
-
-    coords.shape[0]
 
     nn = NearestNeighbors(radius=radius, metric=metric, algorithm="auto")
     nn.fit(coords)
@@ -449,15 +494,17 @@ def delaunay_graph(
     # Compute Delaunay triangulation
     tri = Delaunay(coords)
 
-    # Extract edges from triangulation
-    edges = set()
-    for simplex in tri.simplices:
-        for i in range(3):
-            for j in range(i + 1, 3):
-                edge = tuple(sorted([simplex[i], simplex[j]]))
-                edges.add(edge)
-
-    edges = np.array(list(edges))
+    # Extract unique edges from triangulation (vectorized)
+    s = tri.simplices
+    edge_pairs = np.concatenate(
+        [
+            np.sort(s[:, [0, 1]], axis=1),
+            np.sort(s[:, [0, 2]], axis=1),
+            np.sort(s[:, [1, 2]], axis=1),
+        ],
+        axis=0,
+    )
+    edges = np.unique(edge_pairs, axis=0)
 
     if len(edges) == 0:
         connectivities = sparse.csr_matrix((n_cells, n_cells))
@@ -501,18 +548,17 @@ def _cosine_transform(
     coords: NDArray,
 ) -> sparse.csr_matrix:
     """Apply cosine similarity transformation."""
-    from sklearn.metrics.pairwise import cosine_similarity
-
     n = coords.shape[0]
 
-    # Get nonzero indices
     rows, cols = adj.nonzero()
 
-    # Compute cosine similarities for connected pairs
-    cos_sims = []
-    for i, j in zip(rows, cols):
-        sim = cosine_similarity(coords[i : i + 1], coords[j : j + 1])[0, 0]
-        cos_sims.append((sim + 1) / 2)  # Scale to [0, 1]
+    # Vectorized cosine similarity for connected pairs
+    v1 = coords[rows]
+    v2 = coords[cols]
+    dot = np.sum(v1 * v2, axis=1)
+    norms = np.linalg.norm(v1, axis=1) * np.linalg.norm(v2, axis=1)
+    norms = np.maximum(norms, 1e-12)
+    cos_sims = (dot / norms + 1) / 2  # Scale to [0, 1]
 
     return sparse.csr_matrix(
         (cos_sims, (rows, cols)),

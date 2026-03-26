@@ -82,42 +82,53 @@ def cal_weights(
     tree = KDTree(coords)
     neighbors = tree.query_ball_tree(tree, r=radius)
 
-    # Build sparse matrix triplets
-    rows = []
-    cols = []
-    vals = []
+    # Flatten neighbor lists into COO triplets
+    row_list = []
+    col_list = []
+    for i, nbrs in enumerate(neighbors):
+        nbrs_arr = np.asarray(nbrs, dtype=np.intp)
+        # Exclude self
+        nbrs_arr = nbrs_arr[nbrs_arr != i]
+        if len(nbrs_arr) > 0:
+            row_list.append(np.full(len(nbrs_arr), i, dtype=np.intp))
+            col_list.append(nbrs_arr)
 
-    for i in range(n_spots):
-        for j in neighbors[i]:
-            if i == j:
-                continue  # skip self
-            d = np.sqrt(np.sum((coords[i] - coords[j]) ** 2))
-            if d > 0 and d <= radius:
-                w = np.exp(-(d**2) / (2.0 * sigma**2))
-                rows.append(i)
-                cols.append(j)
-                vals.append(w)
+    if row_list:
+        all_rows = np.concatenate(row_list)
+        all_cols = np.concatenate(col_list)
+        # Vectorized distance and weight computation
+        diffs = coords[all_rows] - coords[all_cols]
+        dists = np.sqrt(np.sum(diffs**2, axis=1))
+        valid = (dists > 0) & (dists <= radius)
+        all_rows = all_rows[valid]
+        all_cols = all_cols[valid]
+        dists = dists[valid]
+        all_vals = np.exp(-(dists**2) / (2.0 * sigma**2))
+    else:
+        all_rows = np.array([], dtype=np.intp)
+        all_cols = np.array([], dtype=np.intp)
+        all_vals = np.array([], dtype=np.float64)
 
     W = sparse.csr_matrix(
-        (np.array(vals, dtype=np.float64), (rows, cols)),
+        (all_vals, (all_rows, all_cols)),
         shape=(n_spots, n_spots),
     )
 
     # Optionally limit to k nearest neighbors per spot
     if k is not None and k < n_spots:
-        W_lil = W.tolil()
+        W_csr = W.tocsr()
         for i in range(n_spots):
-            row_data = W_lil[i]
-            nonzero_cols = row_data.nonzero()[1]
-            if len(nonzero_cols) > k:
-                weights = np.array(row_data[0, nonzero_cols].toarray()).ravel()
-                # Keep top-k by weight (largest weights)
-                keep_idx = np.argsort(weights)[-k:]
-                remove_idx = np.setdiff1d(np.arange(len(nonzero_cols)), keep_idx)
-                for ri in remove_idx:
-                    W_lil[i, nonzero_cols[ri]] = 0.0
-        W = W_lil.tocsr()
-        W.eliminate_zeros()
+            start, end = W_csr.indptr[i], W_csr.indptr[i + 1]
+            nnz_row = end - start
+            if nnz_row > k:
+                row_data = W_csr.data[start:end]
+                # Zero out all but top-k weights
+                keep = np.argpartition(row_data, -k)[-k:]
+                mask = np.ones(nnz_row, dtype=bool)
+                mask[keep] = False
+                W_csr.data[start:end][mask] = 0.0
+        W_csr.eliminate_zeros()
+        W = W_csr
 
     if not diag_as_zero:
         W = W + sparse.eye(n_spots, dtype=np.float64, format="csr")
@@ -267,14 +278,13 @@ def spatial_correlation(
     # ---- Step 3: Standardize each gene (z-score with population std) ----
     N = mat.shape[1]
 
-    for i in range(mat.shape[0]):
-        x = mat[i, :]
-        dx = x - np.mean(x)
-        std_x = np.sqrt(np.sum(dx**2) / N)
-        if std_x > 0:
-            mat[i, :] = dx / std_x
-        else:
-            mat[i, :] = 0.0
+    row_means = mat.mean(axis=1, keepdims=True)
+    mat -= row_means
+    row_std = np.sqrt(np.sum(mat**2, axis=1, keepdims=True) / N)
+    zero_std = (row_std == 0).ravel()
+    row_std[row_std == 0] = 1.0  # avoid div-by-zero
+    mat /= row_std
+    mat[zero_std, :] = 0.0
 
     # Build gene name -> row index mapping
     gene_to_idx = {g: i for i, g in enumerate(gene_names)}

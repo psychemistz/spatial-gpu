@@ -334,19 +334,20 @@ def sparse_to_dense_chunked(
     else:
         xp = np
 
-    # Pre-allocate output
-    out = xp.zeros(sparse_matrix.shape, dtype=dtype)
-
-    # Guard against OOM: warn if dense output exceeds 4GB
-    dense_bytes = out.nbytes if hasattr(out, 'nbytes') else np.prod(sparse_matrix.shape) * np.dtype(dtype).itemsize
+    # Guard against OOM: warn BEFORE allocation
+    dense_bytes = int(np.prod(sparse_matrix.shape)) * np.dtype(dtype).itemsize
     if dense_bytes > 4e9:
         import warnings
+
         warnings.warn(
             f"Densifying sparse matrix into {dense_bytes / 1e9:.1f} GB array. "
             f"Consider keeping sparse.",
             ResourceWarning,
             stacklevel=2,
         )
+
+    # Pre-allocate output
+    out = xp.zeros(sparse_matrix.shape, dtype=dtype)
 
     for start in range(0, n_rows, chunk_size):
         end = min(start + chunk_size, n_rows)

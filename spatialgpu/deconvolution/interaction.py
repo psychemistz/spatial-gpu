@@ -89,20 +89,7 @@ def cci_colocalization(adata: ad.AnnData) -> ad.AnnData:
     n_types = frac_mat.shape[0]
     cell_types = list(res_deconv.index)
 
-    rho_frac = np.zeros((n_types, n_types), dtype=np.float64)
-    pval_frac = np.zeros((n_types, n_types), dtype=np.float64)
-
-    for i in range(n_types):
-        for j in range(n_types):
-            if i == j:
-                rho_frac[i, j] = 1.0
-                pval_frac[i, j] = 0.0
-            elif j > i:
-                r, p = stats.spearmanr(frac_mat[i], frac_mat[j])
-                rho_frac[i, j] = r if not np.isnan(r) else 0.0
-                rho_frac[j, i] = rho_frac[i, j]
-                pval_frac[i, j] = p if not np.isnan(p) else 1.0
-                pval_frac[j, i] = pval_frac[i, j]
+    rho_frac, pval_frac = _pairwise_spearmanr(frac_mat)
 
     # Build summary dataframe (melt-style, matching R output)
     rows = []
@@ -156,20 +143,7 @@ def cci_colocalization(adata: ad.AnnData) -> ad.AnnData:
     n_ref = len(ref_types)
     ref_mat = reff.values  # (n_genes, n_ref_types)
 
-    rho_ref = np.zeros((n_ref, n_ref), dtype=np.float64)
-    pval_ref = np.zeros((n_ref, n_ref), dtype=np.float64)
-
-    for i in range(n_ref):
-        for j in range(n_ref):
-            if i == j:
-                rho_ref[i, j] = 1.0
-                pval_ref[i, j] = 0.0
-            elif j > i:
-                r, p = stats.spearmanr(ref_mat[:, i], ref_mat[:, j])
-                rho_ref[i, j] = r if not np.isnan(r) else 0.0
-                rho_ref[j, i] = rho_ref[i, j]
-                pval_ref[i, j] = p if not np.isnan(p) else 1.0
-                pval_ref[j, i] = pval_ref[i, j]
+    rho_ref, pval_ref = _pairwise_spearmanr(ref_mat.T)
 
     # Build reference summary and merge into main summary
     for i in range(n_ref):
@@ -232,20 +206,10 @@ def cci_lr_network_score(
     spot_names = np.array(adata.obs_names)
     n_spots = counts.shape[1]
 
-    # CPM + log2 normalization
-    if sparse.issparse(counts):
-        col_sums = np.asarray(counts.sum(axis=0)).ravel()
-        csc = sparse.csc_matrix(counts, dtype=np.float64, copy=True)
-        for j in range(csc.shape[1]):
-            start, end = csc.indptr[j], csc.indptr[j + 1]
-            if col_sums[j] > 0:
-                csc.data[start:end] = csc.data[start:end] / col_sums[j] * 1e6
-        csc.data = np.log2(csc.data + 1)
-        st_mat = csc
-    else:
-        col_sums = counts.sum(axis=0)
-        st_mat = counts / col_sums[np.newaxis, :] * 1e6
-        st_mat = np.log2(st_mat + 1)
+    # CPM + log2 normalization (shared with core._cpm_log2)
+    from spatialgpu.deconvolution.core import _cpm_log2
+
+    st_mat = _cpm_log2(counts)
 
     # Build gene name -> index mapping
     gene_to_idx: dict[str, int] = {g: i for i, g in enumerate(gene_names)}
@@ -289,7 +253,11 @@ def cci_lr_network_score(
     # Permute LR network 1000 times using bipartite edge swap
     rng = np.random.RandomState(123456)
 
-    # Collect all permuted LR pair indices
+    # Pre-compute ligand/receptor gene index lookup arrays (vectorized)
+    lig_gene_indices = np.array([gene_to_idx[g] for g in ligands])
+    rec_gene_indices = np.array([gene_to_idx[g] for g in receptors])
+
+    # Generate 1000 permuted networks and collect indices
     logger.info("  Generating 1000 permuted networks...")
     all_perm_l_indices = []
     all_perm_r_indices = []
@@ -297,46 +265,45 @@ def cci_lr_network_score(
     for _perm_i in range(1000):
         perm_mat = _bipartite_edge_swap(lr_mat.copy(), rng)
 
-        # Extract edges from permuted matrix
-        perm_l_idx_list = []
-        perm_r_idx_list = []
         li_arr, ri_arr = np.where(perm_mat == 1)
-        for li, ri in zip(li_arr, ri_arr):
-            perm_l_idx_list.append(gene_to_idx[ligands[li]])
-            perm_r_idx_list.append(gene_to_idx[receptors[ri]])
-
-        all_perm_l_indices.append(np.array(perm_l_idx_list))
-        all_perm_r_indices.append(np.array(perm_r_idx_list))
+        all_perm_l_indices.append(lig_gene_indices[li_arr])
+        all_perm_r_indices.append(rec_gene_indices[ri_arr])
 
     # Calculate LR network score per spot
     logger.info("Step 2. Calculate L-R network score.")
 
+    # Only densify rows referenced by LR indices (avoids full genes x spots dense)
+    all_needed = np.union1d(l_indices, r_indices)
+    for perm_l, perm_r in zip(all_perm_l_indices, all_perm_r_indices):
+        all_needed = np.union1d(all_needed, np.union1d(perm_l, perm_r))
+    if sparse.issparse(st_mat):
+        st_sub = st_mat[all_needed, :].toarray()
+    else:
+        st_sub = np.asarray(st_mat[all_needed, :])
+    # Build re-index map: original gene index -> position in st_sub
+    idx_map = np.empty(st_mat.shape[0], dtype=np.intp)
+    idx_map[all_needed] = np.arange(len(all_needed))
+
+    lr_raw_all = np.mean(
+        st_sub[idx_map[l_indices], :] * st_sub[idx_map[r_indices], :], axis=0
+    )
+
+    perm_scores_all = np.empty((1000, n_spots), dtype=np.float64)
+    for p in range(1000):
+        perm_scores_all[p] = np.mean(
+            st_sub[idx_map[all_perm_l_indices[p]], :]
+            * st_sub[idx_map[all_perm_r_indices[p]], :],
+            axis=0,
+        )
+
+    perm_mean_all = np.mean(perm_scores_all, axis=0)
     lr_result = np.zeros((3, n_spots), dtype=np.float64)
-
-    for s in range(n_spots):
-        # Get spot expression vector
-        if sparse.issparse(st_mat):
-            spot = np.asarray(st_mat[:, s].todense()).ravel()
-        else:
-            spot = st_mat[:, s]
-
-        # Raw LR co-expression score
-        lr_raw = np.mean(spot[l_indices] * spot[r_indices])
-
-        # Permuted scores
-        perm_scores = np.zeros(1000, dtype=np.float64)
-        for p in range(1000):
-            perm_scores[p] = np.mean(
-                spot[all_perm_l_indices[p]] * spot[all_perm_r_indices[p]]
-            )
-
-        perm_mean = np.mean(perm_scores)
-        score = lr_raw / perm_mean if perm_mean != 0 else 0.0
-        pv = (np.sum(perm_scores >= lr_raw) + 1) / 1001
-
-        lr_result[0, s] = lr_raw
-        lr_result[1, s] = score
-        lr_result[2, s] = pv
+    lr_result[0, :] = lr_raw_all
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lr_result[1, :] = np.where(perm_mean_all != 0, lr_raw_all / perm_mean_all, 0.0)
+    lr_result[2, :] = (
+        np.sum(perm_scores_all >= lr_raw_all[np.newaxis, :], axis=0) + 1
+    ) / 1001
 
     # Store results as labeled matrix
     lr_score_mat = pd.DataFrame(
@@ -504,18 +471,14 @@ def cci_cell_type_pair(
     cutoff11 = np.percentile(frac1, 85)
     cutoff22 = np.percentile(frac2, 85)
 
-    content = pd.Series(index=spot_names, dtype=object)
-    for i, spot in enumerate(spot_names):
-        f1 = frac1[i]
-        f2 = frac2[i]
-        if f1 > cutoff11 and f2 > cutoff22:
-            content[spot] = "Both"
-        elif f1 > cutoff11 and f2 < cutoff2:
-            content[spot] = ct1
-        elif f2 > cutoff22 and f1 < cutoff1:
-            content[spot] = ct2
-        else:
-            content[spot] = np.nan
+    content_arr = np.full(len(spot_names), np.nan, dtype=object)
+    both_mask = (frac1 > cutoff11) & (frac2 > cutoff22)
+    ct1_mask = (frac1 > cutoff11) & (frac2 < cutoff2) & ~both_mask
+    ct2_mask = (frac2 > cutoff22) & (frac1 < cutoff1) & ~both_mask
+    content_arr[both_mask] = "Both"
+    content_arr[ct1_mask] = ct1
+    content_arr[ct2_mask] = ct2
+    content = pd.Series(content_arr, index=spot_names)
 
     group_mat.loc[pair_key, spot_names] = content.values
 
@@ -572,6 +535,39 @@ def cci_cell_type_pair(
     cci["interaction"] = interaction
 
     return adata
+
+
+def _pairwise_spearmanr(
+    mat: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Pairwise Spearman correlation for rows of *mat* (n_vars x n_obs).
+
+    Returns symmetric rho and p-value matrices.  Uses scipy's vectorized
+    ``spearmanr`` on the full matrix for the correlation coefficients, then
+    computes p-values from the t-distribution (same formula as
+    ``scipy.stats.spearmanr``).  Falls back to element-wise computation if
+    the matrix is too small for the shortcut.
+    """
+    n = mat.shape[0]
+    # scipy.stats.spearmanr on a (n_obs, n_vars) matrix returns (n_vars, n_vars) rho
+    result = stats.spearmanr(mat, axis=1)
+    if n == 2:
+        # spearmanr returns scalars for 2 variables
+        rho = np.array([[1.0, result.correlation], [result.correlation, 1.0]])
+        pval = np.array([[0.0, result.pvalue], [result.pvalue, 0.0]])
+    else:
+        rho = np.asarray(result.correlation)
+        pval = np.asarray(result.pvalue)
+
+    # Replace NaN with 0 (rho) / 1 (pval) for constant rows
+    rho = np.nan_to_num(rho, nan=0.0)
+    pval = np.where(np.isnan(pval), 1.0, pval)
+
+    # Ensure exact 1.0 on diagonal
+    np.fill_diagonal(rho, 1.0)
+    np.fill_diagonal(pval, 0.0)
+
+    return rho, pval
 
 
 def _cohens_d(group1: np.ndarray, group2: np.ndarray) -> float:

@@ -408,22 +408,41 @@ def cormat(
     if Y.ndim == 1:
         Y = Y.reshape(-1, 1)
 
-    cor_func = stats.pearsonr if method == "pearson" else stats.spearmanr
+    n_obs = X.shape[0]
 
-    # Compute correlation for each sample against each feature
-    # For SpaCET, Y is typically a single column (signature)
+    # Prepare X data once (rank for Spearman, raw for Pearson)
+    if method == "spearman":
+        from scipy.stats import rankdata
+
+        X_prep = np.apply_along_axis(rankdata, 0, X)
+    elif method == "pearson":
+        X_prep = X
+    else:
+        raise ValueError(f"method must be 'pearson' or 'spearman', got '{method}'")
+
+    X_centered = X_prep - X_prep.mean(axis=0, keepdims=True)
+    std_x = np.sqrt((X_centered**2).sum(axis=0))
+
     results = []
     for j in range(n_features):
         y_col = Y[:, j]
-        rs = np.zeros(n_samples)
-        ps = np.zeros(n_samples)
-        for i in range(n_samples):
-            r, p = cor_func(X[:, i], y_col)
-            rs[i] = r
-            ps[i] = p
+        if method == "spearman":
+            from scipy.stats import rankdata as _rd
+
+            y_prep = _rd(y_col)
+        else:
+            y_prep = y_col
+
+        y_centered = y_prep - y_prep.mean()
+        cov_xy = (X_centered * y_centered[:, None]).sum(axis=0)
+        std_y = np.sqrt((y_centered**2).sum())
+        denom = std_x * std_y
+        denom[denom == 0] = 1.0
+        rs = cov_xy / denom
+        t_stat = rs * np.sqrt((n_obs - 2) / (1 - rs**2 + 1e-300))
+        ps = 2 * stats.t.sf(np.abs(t_stat), df=n_obs - 2)
         results.append((rs, ps))
 
-    # Use first feature (SpaCET always uses single-column Y)
     cor_r = np.round(results[0][0], 3)
     cor_p = np.array([float(f"{p:.3g}") for p in results[0][1]])
 
@@ -482,33 +501,36 @@ def _infer_mal_cor(
         )
 
 
-def _cpm_log2_center(counts: sparse.spmatrix | np.ndarray) -> np.ndarray:
-    """CPM normalize, log2(x+1) transform, center by row means.
+def _cpm_log2(counts: sparse.spmatrix | np.ndarray) -> sparse.spmatrix | np.ndarray:
+    """CPM normalize and log2(x+1) transform.  Preserves sparsity.
 
-    Returns dense matrix (genes x spots).
+    Returns CSC sparse or dense (genes x spots) depending on input.
     """
     if sparse.issparse(counts):
         col_sums = np.asarray(counts.sum(axis=0)).ravel()
-        # CPM: divide each column by its sum, multiply by 1e6
-        # Work with CSC for efficient column operations
-        csc = sparse.csc_matrix(counts, dtype=np.float64, copy=True)
-        # Normalize columns
-        for j in range(csc.shape[1]):
-            start, end = csc.indptr[j], csc.indptr[j + 1]
-            if col_sums[j] > 0:
-                csc.data[start:end] = csc.data[start:end] / col_sums[j] * 1e6
-        # log2(x + 1) on nonzero elements
+        csc = sparse.csc_matrix(counts, dtype=np.float64)
+        col_sums_safe = np.maximum(col_sums, 1.0)
+        col_idx = np.repeat(np.arange(csc.shape[1]), np.diff(csc.indptr))
+        csc.data = csc.data / col_sums_safe[col_idx] * 1e6
         csc.data = np.log2(csc.data + 1)
-        # Convert to dense for centering
-        mat = csc.toarray()
+        return csc
     else:
         counts = counts.astype(np.float64)
         col_sums = counts.sum(axis=0)
         mat = counts / col_sums[np.newaxis, :] * 1e6
         mat = np.nan_to_num(mat)
         mat = np.log2(mat + 1)
+        return mat
 
-    # Center: subtract row means
+
+def _cpm_log2_center(counts: sparse.spmatrix | np.ndarray) -> np.ndarray:
+    """CPM normalize, log2(x+1) transform, center by row means.
+
+    Returns dense matrix (genes x spots).
+    """
+    mat = _cpm_log2(counts)
+    if sparse.issparse(mat):
+        mat = mat.toarray()
     row_means = mat.mean(axis=1, keepdims=True)
     mat -= row_means
     return mat
