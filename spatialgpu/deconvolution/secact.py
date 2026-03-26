@@ -61,6 +61,15 @@ def _get_expression_matrix(adata: ad.AnnData) -> pd.DataFrame:
     """Extract raw counts as DataFrame (genes × spots)."""
     X = adata.X
     if sparse.issparse(X):
+        dense_gb = X.shape[0] * X.shape[1] * 8 / 1e9
+        if dense_gb > 4:
+            import warnings
+            warnings.warn(
+                f"Densifying {X.shape} sparse expression matrix ({dense_gb:.1f} GB). "
+                f"Consider subsetting genes.",
+                ResourceWarning,
+                stacklevel=2,
+            )
         X = X.toarray()
     return pd.DataFrame(
         X.T,
@@ -249,14 +258,11 @@ def secact_signaling_patterns(
     act_new = act[common_spots]
     expr_new = expr[common_spots]
 
-    # Neighbor-aggregated expression: expr_new_aggr = expr_new @ weights
+    # Use sparse matmul to avoid dense n×n weight matrix
     if sparse.issparse(weights):
-        weights_dense = weights.toarray()
+        expr_new_aggr = (expr_new.values @ weights).A if sparse.issparse(expr_new.values @ weights) else expr_new.values @ weights
     else:
-        weights_dense = np.asarray(weights)
-
-    # Row-normalize weights so each column sums as in R
-    expr_new_aggr = expr_new.values @ weights_dense
+        expr_new_aggr = expr_new.values @ np.asarray(weights)
 
     expr_new_aggr = pd.DataFrame(
         expr_new_aggr, index=expr_new.index, columns=common_spots
@@ -459,6 +465,15 @@ def secact_signaling_velocity(
     # Spatial weights
     weights = cal_weights(adata, radius=radius, sigma=sigma, diag_as_zero=True)
     if sparse.issparse(weights):
+        dense_gb = weights.shape[0] * weights.shape[1] * 8 / 1e9
+        if dense_gb > 4:
+            import warnings
+            warnings.warn(
+                f"Densifying {weights.shape} weight matrix ({dense_gb:.1f} GB). "
+                f"Consider reducing spot count.",
+                ResourceWarning,
+                stacklevel=2,
+            )
         weights_dense = weights.toarray()
     else:
         weights_dense = np.asarray(weights)

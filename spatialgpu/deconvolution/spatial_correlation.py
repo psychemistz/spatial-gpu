@@ -299,13 +299,13 @@ def spatial_correlation(
                 X_perm = mat[:, random_order]
                 XW = X_perm @ W
                 if sparse.issparse(XW):
-                    XW = XW.toarray()
+                    XW = np.asarray(XW.todense())
                 moran_perm[:, p] = np.sum(XW * X_perm, axis=1)
 
             # Observed (last column)
             XW_obs = mat @ W
             if sparse.issparse(XW_obs):
-                XW_obs = XW_obs.toarray()
+                XW_obs = np.asarray(XW_obs.todense())
             moran_perm[:, n_perm] = np.sum(XW_obs * mat, axis=1)
 
         else:  # bivariate
@@ -331,13 +331,13 @@ def spatial_correlation(
 
                 XW = X_perm_L @ W
                 if sparse.issparse(XW):
-                    XW = XW.toarray()
+                    XW = np.asarray(XW.todense())
                 moran_perm[:, p] = np.sum(XW * X_perm_R, axis=1)
 
             # Observed
             XW_obs = mat[l_indices, :] @ W
             if sparse.issparse(XW_obs):
-                XW_obs = XW_obs.toarray()
+                XW_obs = np.asarray(XW_obs.todense())
             moran_perm[:, n_perm] = np.sum(XW_obs * mat[r_indices, :], axis=1)
 
         # Normalize by sum of weights
@@ -391,7 +391,7 @@ def spatial_correlation(
         # Pairwise Moran's I: I_matrix = (Z @ W @ Z.T) / sum(W)
         XW = mat @ W
         if sparse.issparse(XW):
-            XW = XW.toarray()
+            XW = np.asarray(XW.todense())
 
         # XWX = XW @ mat.T  (equivalent to tcrossprod(XW, mat) in R)
         moran_matrix = XW @ mat.T / W_sum

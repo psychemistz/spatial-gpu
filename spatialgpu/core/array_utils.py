@@ -111,7 +111,10 @@ def to_gpu(
     if not backend.is_gpu_active:
         # CPU mode: just ensure numpy array
         if sparse.issparse(x):
-            x = x.toarray()
+            # Preserve sparse in CPU mode — caller can densify if needed
+            if dtype is not None:
+                x = x.astype(dtype)
+            return x
         arr = np.asarray(x)
         if dtype is not None:
             arr = arr.astype(dtype, copy=copy)
@@ -188,7 +191,10 @@ def to_cpu(
 
         arr = cp.asnumpy(x)
     elif sparse.issparse(x):
-        arr = x.toarray()
+        # Preserve sparse — caller can densify if needed
+        if dtype is not None:
+            x = x.astype(dtype)
+        return x
     else:
         arr = np.asarray(x)
 
@@ -330,6 +336,17 @@ def sparse_to_dense_chunked(
 
     # Pre-allocate output
     out = xp.zeros(sparse_matrix.shape, dtype=dtype)
+
+    # Guard against OOM: warn if dense output exceeds 4GB
+    dense_bytes = out.nbytes if hasattr(out, 'nbytes') else np.prod(sparse_matrix.shape) * np.dtype(dtype).itemsize
+    if dense_bytes > 4e9:
+        import warnings
+        warnings.warn(
+            f"Densifying sparse matrix into {dense_bytes / 1e9:.1f} GB array. "
+            f"Consider keeping sparse.",
+            ResourceWarning,
+            stacklevel=2,
+        )
 
     for start in range(0, n_rows, chunk_size):
         end = min(start + chunk_size, n_rows)
