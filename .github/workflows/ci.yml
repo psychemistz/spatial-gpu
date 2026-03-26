@@ -54,7 +54,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install linters
         run: |
@@ -62,7 +62,7 @@ jobs:
           pip install ruff black
 
       - name: Check formatting with black
-        run: black --check spatialgpu tests
+        run: black --check --target-version py312 spatialgpu tests
 
       - name: Lint with ruff
         run: ruff check spatialgpu tests

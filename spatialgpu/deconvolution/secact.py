@@ -64,6 +64,7 @@ def _get_expression_matrix(adata: ad.AnnData) -> pd.DataFrame:
         dense_gb = X.shape[0] * X.shape[1] * 8 / 1e9
         if dense_gb > 4:
             import warnings
+
             warnings.warn(
                 f"Densifying {X.shape} sparse expression matrix ({dense_gb:.1f} GB). "
                 f"Consider subsetting genes.",
@@ -260,7 +261,11 @@ def secact_signaling_patterns(
 
     # Use sparse matmul to avoid dense n×n weight matrix
     if sparse.issparse(weights):
-        expr_new_aggr = (expr_new.values @ weights).A if sparse.issparse(expr_new.values @ weights) else expr_new.values @ weights
+        expr_new_aggr = (
+            (expr_new.values @ weights).A
+            if sparse.issparse(expr_new.values @ weights)
+            else expr_new.values @ weights
+        )
     else:
         expr_new_aggr = expr_new.values @ np.asarray(weights)
 
@@ -468,6 +473,7 @@ def secact_signaling_velocity(
         dense_gb = weights.shape[0] * weights.shape[1] * 8 / 1e9
         if dense_gb > 4:
             import warnings
+
             warnings.warn(
                 f"Densifying {weights.shape} weight matrix ({dense_gb:.1f} GB). "
                 f"Consider reducing spot count.",
