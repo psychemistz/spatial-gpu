@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/psychemistz/spatial-gpu/actions/workflows/ci.yml/badge.svg)](https://github.com/psychemistz/spatial-gpu/actions/workflows/ci.yml)
 [![PyPI version](https://badge.fury.io/py/spatial-gpu.svg)](https://badge.fury.io/py/spatial-gpu)
-[![Documentation](https://readthedocs.org/projects/spatial-gpu/badge/?version=latest)](https://spatial-gpu.readthedocs.io)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://psychemistz.github.io/spatial-gpu/)
 [![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org)
 
@@ -101,15 +101,17 @@ spacet.visualize_secact_velocity_scst(vel, interactive=True)
 
 ## Tutorials
 
+Full documentation and tutorials are hosted at **https://psychemistz.github.io/spatial-gpu/**
+
 | Tutorial | Description |
 |----------|-------------|
-| [Visium Breast Cancer](docs/visium_BC.html) | Full deconvolution + cell-cell interaction workflow |
-| [Old ST PDAC](docs/oldST_PDAC.html) | Matched scRNA-seq deconvolution |
-| [Hi-Res ST CRC](docs/hiresST_CRC.html) | High-resolution spatial deconvolution |
-| [Gene Set Score](docs/GeneSetScore.html) | Hallmark, CancerCellState, TLS scoring |
-| [Spatial Correlation](docs/SpatialCorrelation.html) | Moran's I spatial autocorrelation |
-| [Signaling Patterns](docs/stPattern.html) | SecAct activity, NMF patterns, velocity |
-| [Cell-Cell Communication](docs/stCCC.html) | Single-cell resolution CCC (CosMx 443K cells) |
+| [Visium Breast Cancer](https://psychemistz.github.io/spatial-gpu/visium_BC.html) | Full deconvolution + cell-cell interaction workflow |
+| [Old ST PDAC](https://psychemistz.github.io/spatial-gpu/oldST_PDAC.html) | Matched scRNA-seq deconvolution |
+| [Hi-Res ST CRC](https://psychemistz.github.io/spatial-gpu/hiresST_CRC.html) | High-resolution spatial deconvolution |
+| [Gene Set Score](https://psychemistz.github.io/spatial-gpu/GeneSetScore.html) | Hallmark, CancerCellState, TLS scoring |
+| [Spatial Correlation](https://psychemistz.github.io/spatial-gpu/SpatialCorrelation.html) | Moran's I spatial autocorrelation |
+| [Signaling Patterns](https://psychemistz.github.io/spatial-gpu/stPattern.html) | SecAct activity, NMF patterns, velocity |
+| [Cell-Cell Communication](https://psychemistz.github.io/spatial-gpu/stCCC.html) | Single-cell resolution CCC (CosMx 443K cells) |
 
 ## Performance Benchmarks
 

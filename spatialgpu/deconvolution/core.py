@@ -403,7 +403,6 @@ def cormat(
     """
     from statsmodels.stats.multitest import multipletests
 
-    n_samples = X.shape[1]
     n_features = Y.shape[1] if Y.ndim > 1 else 1
     if Y.ndim == 1:
         Y = Y.reshape(-1, 1)
