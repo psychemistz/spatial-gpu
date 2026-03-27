@@ -89,6 +89,7 @@ class TestGPUGeneSetScoreEquivalence:
     def test_ucell_equivalence(self):
         """GPU UCell scoring matches CPU."""
         import anndata as ad
+
         import spatialgpu as sp
         from spatialgpu.deconvolution.gene_set_score import _ucell_score
 

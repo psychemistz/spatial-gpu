@@ -265,6 +265,7 @@ def cci_lr_network_score(
     backend = get_backend()
     if backend.is_gpu_active:
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_bipartite_edge_swap
         logger.info("  Generating 1000 permuted networks (GPU)...")
         for _perm_i in range(1000):
@@ -579,6 +580,7 @@ def _pairwise_spearmanr(
     backend = get_backend()
     if backend.is_gpu_active:
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_pairwise_spearmanr
         mat_gpu = cp.asarray(mat)
         rho_gpu, pval_gpu = gpu_pairwise_spearmanr(mat_gpu)
@@ -937,6 +939,7 @@ def distance_to_interface(
 
     if backend.is_gpu_active:
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_cdist
         border_gpu = cp.asarray(border_coords)
 

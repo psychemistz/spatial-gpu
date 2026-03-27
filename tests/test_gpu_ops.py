@@ -28,6 +28,7 @@ class TestGPURankdata:
     def test_1d_average(self):
         """1-D array with ties: compare to scipy.stats.rankdata."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_rankdata
 
         data = np.array([3, 1, 4, 1, 5, 9, 2, 6, 5], dtype=np.float64)
@@ -42,6 +43,7 @@ class TestGPURankdata:
     def test_2d_columnwise(self):
         """2-D float32 array, axis=0: compare to np.apply_along_axis."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_rankdata
 
         rng = np.random.default_rng(42)
@@ -59,6 +61,7 @@ class TestGPURankdata:
     def test_2d_rowwise(self):
         """2-D float32 array, axis=1: compare to np.apply_along_axis."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_rankdata
 
         rng = np.random.default_rng(42)
@@ -76,6 +79,7 @@ class TestGPURankdata:
     def test_all_ties(self):
         """All identical values: average rank should be 2.5 for all."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_rankdata
 
         data = np.array([5, 5, 5, 5], dtype=np.float64)
@@ -90,6 +94,7 @@ class TestGPURankdata:
     def test_no_ties(self):
         """No ties: average ranks equal ordinal ranks."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_rankdata
 
         data = np.array([10, 20, 30, 40, 50], dtype=np.float64)
@@ -108,6 +113,7 @@ class TestGPUSpearmanr:
     def test_pairwise_small(self):
         """Small (5, 30) matrix: compare rho and pval to scipy_spearmanr."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_pairwise_spearmanr
 
         rng = np.random.default_rng(42)
@@ -134,6 +140,7 @@ class TestGPUSpearmanr:
     def test_pairwise_larger(self):
         """Larger (20, 500) matrix: compare rho atol=1e-5, pval atol=1e-4."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_pairwise_spearmanr
 
         rng = np.random.default_rng(123)
@@ -159,6 +166,7 @@ class TestGPUSpearmanr:
     def test_cormat_spearman(self):
         """gpu_cormat matches CPU cormat for (100, 50) X and (100, 1) Y."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_cormat
         from spatialgpu.deconvolution.core import cormat
 
@@ -183,6 +191,7 @@ class TestGPUSpearmanr:
     def test_diagonal_is_one(self):
         """Diagonal of pairwise rho matrix must be exactly 1.0."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_pairwise_spearmanr
 
         rng = np.random.default_rng(42)
@@ -201,6 +210,7 @@ class TestGPUNNLS:
     def test_basic_nnls(self):
         """Basic NNLS: non-negative true solution, compare to scipy nnls."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_nnls
 
         rng = np.random.default_rng(42)
@@ -218,6 +228,7 @@ class TestGPUNNLS:
     def test_batch_nnls(self):
         """Batch NNLS: gpu_nnls_batch matches 20 individual scipy nnls calls."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_nnls_batch
 
         rng = np.random.default_rng(42)
@@ -234,6 +245,7 @@ class TestGPUNNLS:
     def test_nnls_all_zero_rhs(self):
         """Zero right-hand side: solution should be all zeros."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_nnls
 
         A_np = np.eye(5, dtype=np.float64)
@@ -252,6 +264,7 @@ class TestGPUNMF:
     def test_reconstruction(self):
         """Reconstruction error should be less than 0.5 relative to ||V||."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_nmf
 
         rng = np.random.default_rng(42)
@@ -271,6 +284,7 @@ class TestGPUNMF:
         """GPU NMF reconstruction error should be within 1.5x of sklearn NMF."""
         import cupy as cp
         from sklearn.decomposition import NMF
+
         from spatialgpu.core.gpu_ops import gpu_nmf
 
         rng = np.random.default_rng(42)
@@ -295,6 +309,7 @@ class TestGPUNMF:
     def test_non_negative(self):
         """W and H must be non-negative after factorization."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_nmf
 
         rng = np.random.default_rng(7)
@@ -314,6 +329,7 @@ class TestGPUCdist:
     def test_euclidean(self):
         """Compare gpu_cdist to scipy.spatial.distance.cdist on float64 arrays."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_cdist
 
         rng = np.random.default_rng(42)
@@ -329,6 +345,7 @@ class TestGPUCdist:
     def test_self_distance(self):
         """Self-distance matrix diagonal must be zero."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_cdist
 
         rng = np.random.default_rng(42)
@@ -347,6 +364,7 @@ class TestGPUBipartiteEdgeSwap:
     def test_degree_preservation(self):
         """Row and column sums must be preserved after rewiring."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_bipartite_edge_swap
 
         rng = np.random.default_rng(42)
@@ -366,6 +384,7 @@ class TestGPUBipartiteEdgeSwap:
     def test_edge_count_preserved(self):
         """Total number of edges must be unchanged after rewiring."""
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_bipartite_edge_swap
 
         rng = np.random.default_rng(42)
@@ -426,7 +445,7 @@ class TestGPUTrustConstr:
             method="trust-constr",
             bounds=Bounds(0, np.inf),
             constraints=LinearConstraint(ones, ppmin, ppmax),
-            options=dict(maxiter=500, gtol=1e-15),
+            options={"maxiter": 500, "gtol": 1e-15},
         )
         x_ref = result.x
 
@@ -482,7 +501,7 @@ class TestGPUTrustConstr:
                 method="trust-constr",
                 bounds=Bounds(0, np.inf),
                 constraints=LinearConstraint(ones, ppmin_np[i], ppmax_np[i]),
-                options=dict(maxiter=500, gtol=1e-15),
+                options={"maxiter": 500, "gtol": 1e-15},
             )
             X_ref[:, i] = result.x
 

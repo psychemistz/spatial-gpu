@@ -444,6 +444,7 @@ def spatial_correlation(
 def _cal_weights_gpu(coords, n_spots, radius, sigma, diag_as_zero):
     """GPU implementation of cal_weights using chunked cdist."""
     import cupy as cp
+
     from spatialgpu.core.gpu_ops import gpu_cdist
 
     coords_gpu = cp.asarray(coords)

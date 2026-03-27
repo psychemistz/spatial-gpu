@@ -105,6 +105,7 @@ def _ucell_score(
 
     if backend.is_gpu_active:
         import cupy as cp
+
         from spatialgpu.core.gpu_ops import gpu_rankdata
         X_gpu = cp.asarray(X_dense.astype(np.float32))
         ranks = cp.asnumpy(n_genes + 1 - gpu_rankdata(X_gpu, method="average", axis=1))
