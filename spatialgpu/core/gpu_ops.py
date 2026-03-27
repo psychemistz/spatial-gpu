@@ -545,3 +545,118 @@ def gpu_nmf(V, n_components, seed=None, max_iter=500, tol=1e-4):
             prev_err = err
 
     return W, H
+
+
+def gpu_solve_qp(AtA, Atb, n_cell, ppmin, ppmax, max_iter=500, gtol=1e-15):
+    """
+    Solve a constrained quadratic program via projected gradient descent.
+
+    Minimizes:  x^T AtA x - 2 Atb^T x
+    Subject to: x >= 0,  ppmin <= sum(x) <= ppmax
+
+    Parameters
+    ----------
+    AtA : cupy.ndarray
+        (n_cell, n_cell) precomputed Gram matrix A^T A.
+    Atb : cupy.ndarray
+        (n_cell,) precomputed A^T b vector.
+    n_cell : int
+        Number of cell types (dimension of x).
+    ppmin : float
+        Minimum allowed sum of x.
+    ppmax : float
+        Maximum allowed sum of x.
+    max_iter : int, optional
+        Maximum number of projected gradient iterations. Default is 500.
+    gtol : float, optional
+        Gradient norm convergence threshold. Default is 1e-15.
+
+    Returns
+    -------
+    x : cupy.ndarray
+        (n_cell,) non-negative solution vector satisfying the sum constraint.
+    """
+    import cupy as cp
+
+    # Step size from Lipschitz constant: L = max eigenvalue of 2*AtA
+    eigvals = cp.linalg.eigvalsh(2.0 * AtA)
+    L = float(cp.max(eigvals))
+    if L <= 0.0:
+        L = 1.0
+    step = 1.0 / L
+
+    # Initialise x uniformly within the feasible sum range
+    x = cp.full(n_cell, 0.5 * ppmax / n_cell, dtype=np.float64)
+
+    for _ in range(max_iter):
+        grad = 2.0 * AtA @ x - 2.0 * Atb
+
+        if float(cp.linalg.norm(grad)) < gtol:
+            break
+
+        x_new = x - step * grad
+
+        # Project onto non-negative orthant
+        x_new = cp.maximum(x_new, 0.0)
+
+        # Project onto sum constraint [ppmin, ppmax]
+        s = float(cp.sum(x_new))
+        if s > ppmax:
+            # Scale uniformly so sum == ppmax
+            x_new = x_new * (ppmax / s)
+        elif s < ppmin:
+            # Add uniform deficit to reach ppmin
+            deficit = ppmin - s
+            x_new = x_new + deficit / n_cell
+
+        x = x_new
+
+    return cp.maximum(x, 0.0)
+
+
+def gpu_solve_qp_batch(A, AtA, B, n_cell, ppmin_arr, ppmax_arr):
+    """
+    Solve a constrained QP for each spot (column) of B.
+
+    Solves min x^T AtA x - 2 (A^T b)^T x  s.t. x >= 0, ppmin <= sum(x) <= ppmax
+    independently for every column b of B.
+
+    Parameters
+    ----------
+    A : cupy.ndarray
+        (n_genes, n_cell) signature matrix.
+    AtA : cupy.ndarray
+        (n_cell, n_cell) precomputed A^T A.
+    B : cupy.ndarray
+        (n_genes, n_spots) observed expression matrix.
+    n_cell : int
+        Number of cell types.
+    ppmin_arr : cupy.ndarray
+        (n_spots,) minimum sum constraint per spot.
+    ppmax_arr : cupy.ndarray
+        (n_spots,) maximum sum constraint per spot.
+
+    Returns
+    -------
+    X : cupy.ndarray
+        (n_cell, n_spots) solution matrix. Column i is the QP solution for spot i.
+        Spots with ppmax <= 0.01 receive a uniform allocation (1/n_cell each).
+    """
+    import cupy as cp
+
+    n_spots = B.shape[1]
+    X = cp.empty((n_cell, n_spots), dtype=np.float64)
+
+    for i in range(n_spots):
+        ppmax_i = float(ppmax_arr[i])
+        ppmin_i = float(ppmin_arr[i])
+
+        if ppmax_i <= 0.01:
+            # Degenerate spot: return uniform allocation
+            X[:, i] = cp.full(n_cell, 1.0 / n_cell, dtype=np.float64)
+            continue
+
+        Atb_i = A.T @ B[:, i]
+        X[:, i] = gpu_solve_qp(AtA, Atb_i, n_cell, ppmin_i, ppmax_i)
+
+    return X

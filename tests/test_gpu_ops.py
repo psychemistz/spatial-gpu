@@ -380,3 +380,121 @@ class TestGPUBipartiteEdgeSwap:
         assert n_edges_after == n_edges_before, (
             f"Edge count changed: {n_edges_before} -> {n_edges_after}"
         )
+
+
+class TestGPUTrustConstr:
+    """Tests for gpu_solve_qp and gpu_solve_qp_batch vs scipy trust-constr."""
+
+    @skipno_gpu
+    def test_matches_scipy_trust_constr(self):
+        """Single QP: GPU projected gradient descent matches scipy trust-constr."""
+        import cupy as cp
+        from scipy.optimize import Bounds, LinearConstraint, minimize
+
+        from spatialgpu.core.gpu_ops import gpu_solve_qp
+
+        rng = np.random.default_rng(42)
+        n_genes = 50
+        n_cell = 5
+
+        A = rng.standard_normal((n_genes, n_cell))
+        x_true = np.abs(rng.standard_normal(n_cell)) * 0.2
+        b = A @ x_true + 0.05 * rng.standard_normal(n_genes)
+
+        AtA_np = A.T @ A
+        Atb_np = A.T @ b
+        ppmin = 0.1
+        ppmax = 0.8
+
+        # scipy trust-constr reference
+        def f(x):
+            return x @ AtA_np @ x - 2.0 * Atb_np @ x
+
+        def jac(x):
+            return 2.0 * AtA_np @ x - 2.0 * Atb_np
+
+        def hess(x):
+            return 2.0 * AtA_np
+
+        theta0 = np.full(n_cell, ppmax / n_cell)
+        ones = np.ones((1, n_cell))
+        result = minimize(
+            f,
+            theta0,
+            jac=jac,
+            hess=hess,
+            method="trust-constr",
+            bounds=Bounds(0, np.inf),
+            constraints=LinearConstraint(ones, ppmin, ppmax),
+            options=dict(maxiter=500, gtol=1e-15),
+        )
+        x_ref = result.x
+
+        # GPU solution
+        AtA_gpu = cp.asarray(AtA_np)
+        Atb_gpu = cp.asarray(Atb_np)
+        x_gpu = cp.asnumpy(gpu_solve_qp(AtA_gpu, Atb_gpu, n_cell, ppmin, ppmax))
+
+        np.testing.assert_allclose(x_gpu, x_ref, atol=1e-4)
+
+    @skipno_gpu
+    def test_batch_qp(self):
+        """Batch QP: gpu_solve_qp_batch matches scipy trust-constr per spot."""
+        import cupy as cp
+        from scipy.optimize import Bounds, LinearConstraint, minimize
+
+        from spatialgpu.core.gpu_ops import gpu_solve_qp_batch
+
+        rng = np.random.default_rng(42)
+        n_genes = 30
+        n_cell = 4
+        n_spots = 10
+
+        A = rng.standard_normal((n_genes, n_cell))
+        AtA_np = A.T @ A
+        B = np.abs(rng.standard_normal((n_genes, n_spots)))
+
+        ppmin_np = np.full(n_spots, 0.1)
+        ppmax_np = np.full(n_spots, 0.8)
+
+        ones = np.ones((1, n_cell))
+
+        # scipy reference per spot
+        X_ref = np.empty((n_cell, n_spots))
+        for i in range(n_spots):
+            Atb_i = A.T @ B[:, i]
+
+            def f(x, Atb=Atb_i):
+                return x @ AtA_np @ x - 2.0 * Atb @ x
+
+            def jac(x, Atb=Atb_i):
+                return 2.0 * AtA_np @ x - 2.0 * Atb
+
+            def hess(x):
+                return 2.0 * AtA_np
+
+            theta0 = np.full(n_cell, ppmax_np[i] / n_cell)
+            result = minimize(
+                f,
+                theta0,
+                jac=jac,
+                hess=hess,
+                method="trust-constr",
+                bounds=Bounds(0, np.inf),
+                constraints=LinearConstraint(ones, ppmin_np[i], ppmax_np[i]),
+                options=dict(maxiter=500, gtol=1e-15),
+            )
+            X_ref[:, i] = result.x
+
+        # GPU batch solution
+        A_gpu = cp.asarray(A)
+        AtA_gpu = cp.asarray(AtA_np)
+        B_gpu = cp.asarray(B)
+        ppmin_gpu = cp.asarray(ppmin_np)
+        ppmax_gpu = cp.asarray(ppmax_np)
+
+        X_gpu = cp.asnumpy(
+            gpu_solve_qp_batch(A_gpu, AtA_gpu, B_gpu, n_cell, ppmin_gpu, ppmax_gpu)
+        )
+
+        np.testing.assert_allclose(X_gpu, X_ref, atol=1e-3)
