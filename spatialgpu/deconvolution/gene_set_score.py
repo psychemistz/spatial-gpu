@@ -100,15 +100,23 @@ def _ucell_score(
 
     # Vectorized ranking: argsort twice gives ordinal ranks, then handle ties
     # For "average" tie-breaking we use scipy rankdata but batch via apply
-    from scipy.stats import rankdata
+    from spatialgpu.core.backend import get_backend
+    backend = get_backend()
 
-    # rankdata along axis=1 gives ascending ranks per row
-    # Invert so highest expression = rank 1
-    ranks = np.apply_along_axis(
-        lambda row: n_genes + 1 - rankdata(row, method="average"),
-        axis=1,
-        arr=X_dense,
-    )
+    if backend.is_gpu_active:
+        import cupy as cp
+        from spatialgpu.core.gpu_ops import gpu_rankdata
+        X_gpu = cp.asarray(X_dense.astype(np.float32))
+        ranks = cp.asnumpy(n_genes + 1 - gpu_rankdata(X_gpu, method="average", axis=1))
+    else:
+        from scipy.stats import rankdata
+        # rankdata along axis=1 gives ascending ranks per row
+        # Invert so highest expression = rank 1
+        ranks = np.apply_along_axis(
+            lambda row: n_genes + 1 - rankdata(row, method="average"),
+            axis=1,
+            arr=X_dense,
+        )
 
     results = {}
     for set_name, genes in gene_sets.items():
