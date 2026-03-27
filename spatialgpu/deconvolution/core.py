@@ -401,6 +401,12 @@ def cormat(
     pd.DataFrame with columns: cor_r, cor_p, cor_padj
         One row per sample (column of X).
     """
+    from spatialgpu.core.backend import get_backend
+
+    backend = get_backend()
+    if backend.is_gpu_active:
+        return _cormat_gpu(X, Y, method)
+
     from statsmodels.stats.multitest import multipletests
 
     n_features = Y.shape[1] if Y.ndim > 1 else 1
@@ -446,6 +452,34 @@ def cormat(
     cor_p = np.array([float(f"{p:.3g}") for p in results[0][1]])
 
     # BH adjustment
+    _, cor_padj, _, _ = multipletests(cor_p, method="fdr_bh")
+
+    return pd.DataFrame({"cor_r": cor_r, "cor_p": cor_p, "cor_padj": cor_padj})
+
+
+def _cormat_gpu(
+    X: np.ndarray,
+    Y: np.ndarray,
+    method: str,
+) -> pd.DataFrame:
+    """GPU-accelerated version of cormat()."""
+    import cupy as cp
+    from statsmodels.stats.multitest import multipletests
+
+    from spatialgpu.core.gpu_ops import gpu_cormat
+
+    if Y.ndim == 1:
+        Y = Y.reshape(-1, 1)
+
+    X_gpu = cp.asarray(X, dtype=np.float64)
+    Y_gpu = cp.asarray(Y, dtype=np.float64)
+
+    rs_gpu, ps_gpu = gpu_cormat(X_gpu, Y_gpu, method=method)
+
+    cor_r = np.round(cp.asnumpy(rs_gpu), 3)
+    cor_p_raw = cp.asnumpy(ps_gpu)
+    cor_p = np.array([float(f"{p:.3g}") for p in cor_p_raw])
+
     _, cor_padj, _, _ = multipletests(cor_p, method="fdr_bh")
 
     return pd.DataFrame({"cor_r": cor_r, "cor_p": cor_p, "cor_padj": cor_padj})
@@ -1147,6 +1181,12 @@ def _solve_nnls(
     n_jobs: int = 1,
 ) -> np.ndarray:
     """Fast NNLS solver for Level 1 (ppmin=0)."""
+    from spatialgpu.core.backend import get_backend
+
+    backend = get_backend()
+    if backend.is_gpu_active:
+        return _solve_nnls_gpu(A, B, n_cell, theta_sum, pp_max_arr)
+
     from joblib import Parallel, delayed
     from scipy.optimize import nnls
 
@@ -1186,6 +1226,53 @@ def _solve_nnls(
     return np.column_stack(results)
 
 
+def _solve_nnls_gpu(
+    A: np.ndarray,
+    B: np.ndarray,
+    n_cell: int,
+    theta_sum: np.ndarray,
+    pp_max_arr: np.ndarray,
+) -> np.ndarray:
+    """GPU-accelerated NNLS solver for Level 1 (ppmin=0)."""
+    import cupy as cp
+
+    from spatialgpu.core.gpu_ops import gpu_nnls
+
+    n_spots = B.shape[1]
+    A_gpu = cp.asarray(A, dtype=np.float64)
+    B_gpu = cp.asarray(B, dtype=np.float64)
+
+    results = []
+    for i in range(n_spots):
+        ts = theta_sum[i]
+        if ts <= 0.01:
+            results.append(np.full(n_cell, max(ts, 0) / n_cell))
+            continue
+
+        b_gpu = B_gpu[:, i]
+        ppmax = float(pp_max_arr[i])
+
+        # Pass 1
+        prop_gpu = gpu_nnls(A_gpu, b_gpu)
+        s = float(cp.sum(prop_gpu))
+        if s > ppmax and s > 0:
+            prop_gpu = prop_gpu * (ppmax / s)
+
+        # Pass 2: weighted
+        bhat_gpu = A_gpu @ prop_gpu
+        w_gpu = 1.0 / cp.sqrt(bhat_gpu + 1.0)
+        Aw_gpu = A_gpu * w_gpu[:, cp.newaxis]
+        bw_gpu = b_gpu * w_gpu
+        prop2_gpu = gpu_nnls(Aw_gpu, bw_gpu)
+        s2 = float(cp.sum(prop2_gpu))
+        if s2 > ppmax and s2 > 0:
+            prop2_gpu = prop2_gpu * (ppmax / s2)
+
+        results.append(cp.asnumpy(prop2_gpu))
+
+    return np.column_stack(results)
+
+
 def _solve_trust_constr(
     A: np.ndarray,
     B: np.ndarray,
@@ -1196,6 +1283,12 @@ def _solve_trust_constr(
     n_jobs: int = 1,
 ) -> np.ndarray:
     """Trust-constr solver for Level 2 (ppmin>0, needs both bounds)."""
+    from spatialgpu.core.backend import get_backend
+
+    backend = get_backend()
+    if backend.is_gpu_active:
+        return _solve_trust_constr_gpu(A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr)
+
     import warnings
 
     from joblib import Parallel, delayed
@@ -1283,6 +1376,54 @@ def _solve_trust_constr(
         results = Parallel(n_jobs=n_jobs)(
             delayed(solve_single)(i) for i in range(n_spots)
         )
+
+    return np.column_stack(results)
+
+
+def _solve_trust_constr_gpu(
+    A: np.ndarray,
+    B: np.ndarray,
+    n_cell: int,
+    theta_sum: np.ndarray,
+    pp_min_arr: np.ndarray,
+    pp_max_arr: np.ndarray,
+) -> np.ndarray:
+    """GPU-accelerated trust-constr solver for Level 2 (ppmin>0)."""
+    import cupy as cp
+
+    from spatialgpu.core.gpu_ops import gpu_solve_qp
+
+    n_spots = B.shape[1]
+    A_gpu = cp.asarray(A, dtype=np.float64)
+    B_gpu = cp.asarray(B, dtype=np.float64)
+    AtA_gpu = A_gpu.T @ A_gpu
+
+    results = []
+    for i in range(n_spots):
+        ts = theta_sum[i]
+        if ts <= 0.01:
+            results.append(np.full(n_cell, max(ts, 0) / n_cell))
+            continue
+
+        b_gpu = B_gpu[:, i]
+        ppmin = float(pp_min_arr[i])
+        ppmax = float(pp_max_arr[i])
+
+        # Pass 1
+        Atb_gpu = A_gpu.T @ b_gpu
+        prop_gpu = gpu_solve_qp(AtA_gpu, Atb_gpu, n_cell, ppmin, ppmax)
+
+        # Pass 2: weighted
+        bhat_gpu = A_gpu @ prop_gpu
+        w_gpu = 1.0 / (bhat_gpu + 1.0)
+        sqrt_w = cp.sqrt(w_gpu)
+        Aw_gpu = A_gpu * sqrt_w[:, cp.newaxis]
+        bw_gpu = b_gpu * sqrt_w
+        AtA_w_gpu = Aw_gpu.T @ Aw_gpu
+        Atb_w_gpu = Aw_gpu.T @ bw_gpu
+        prop2_gpu = gpu_solve_qp(AtA_w_gpu, Atb_w_gpu, n_cell, ppmin, ppmax)
+
+        results.append(cp.asnumpy(cp.maximum(prop2_gpu, 0.0)))
 
     return np.column_stack(results)
 
