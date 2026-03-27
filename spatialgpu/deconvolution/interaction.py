@@ -258,16 +258,30 @@ def cci_lr_network_score(
     rec_gene_indices = np.array([gene_to_idx[g] for g in receptors])
 
     # Generate 1000 permuted networks and collect indices
-    logger.info("  Generating 1000 permuted networks...")
     all_perm_l_indices = []
     all_perm_r_indices = []
 
-    for _perm_i in range(1000):
-        perm_mat = _bipartite_edge_swap(lr_mat.copy(), rng)
+    from spatialgpu.core.backend import get_backend
+    backend = get_backend()
+    if backend.is_gpu_active:
+        import cupy as cp
+        from spatialgpu.core.gpu_ops import gpu_bipartite_edge_swap
+        logger.info("  Generating 1000 permuted networks (GPU)...")
+        for _perm_i in range(1000):
+            lr_mat_gpu = cp.asarray(lr_mat.copy().astype(np.int32))
+            perm_mat = gpu_bipartite_edge_swap(lr_mat_gpu, seed=123456 + _perm_i)
+            perm_mat_cpu = cp.asnumpy(perm_mat)
+            li_arr, ri_arr = np.where(perm_mat_cpu == 1)
+            all_perm_l_indices.append(lig_gene_indices[li_arr])
+            all_perm_r_indices.append(rec_gene_indices[ri_arr])
+    else:
+        logger.info("  Generating 1000 permuted networks...")
+        for _perm_i in range(1000):
+            perm_mat = _bipartite_edge_swap(lr_mat.copy(), rng)
 
-        li_arr, ri_arr = np.where(perm_mat == 1)
-        all_perm_l_indices.append(lig_gene_indices[li_arr])
-        all_perm_r_indices.append(rec_gene_indices[ri_arr])
+            li_arr, ri_arr = np.where(perm_mat == 1)
+            all_perm_l_indices.append(lig_gene_indices[li_arr])
+            all_perm_r_indices.append(rec_gene_indices[ri_arr])
 
     # Calculate LR network score per spot
     logger.info("Step 2. Calculate L-R network score.")
@@ -288,13 +302,26 @@ def cci_lr_network_score(
         st_sub[idx_map[l_indices], :] * st_sub[idx_map[r_indices], :], axis=0
     )
 
-    perm_scores_all = np.empty((1000, n_spots), dtype=np.float64)
-    for p in range(1000):
-        perm_scores_all[p] = np.mean(
-            st_sub[idx_map[all_perm_l_indices[p]], :]
-            * st_sub[idx_map[all_perm_r_indices[p]], :],
-            axis=0,
-        )
+    if backend.is_gpu_active:
+        st_sub_gpu = cp.asarray(st_sub)
+        idx_map_gpu = cp.asarray(idx_map)
+        perm_scores_all = np.empty((1000, n_spots), dtype=np.float64)
+        for p in range(1000):
+            perm_l = cp.asarray(all_perm_l_indices[p])
+            perm_r = cp.asarray(all_perm_r_indices[p])
+            scores = cp.mean(
+                st_sub_gpu[idx_map_gpu[perm_l], :] * st_sub_gpu[idx_map_gpu[perm_r], :],
+                axis=0,
+            )
+            perm_scores_all[p] = cp.asnumpy(scores)
+    else:
+        perm_scores_all = np.empty((1000, n_spots), dtype=np.float64)
+        for p in range(1000):
+            perm_scores_all[p] = np.mean(
+                st_sub[idx_map[all_perm_l_indices[p]], :]
+                * st_sub[idx_map[all_perm_r_indices[p]], :],
+                axis=0,
+            )
 
     perm_mean_all = np.mean(perm_scores_all, axis=0)
     lr_result = np.zeros((3, n_spots), dtype=np.float64)
@@ -548,6 +575,21 @@ def _pairwise_spearmanr(
     ``scipy.stats.spearmanr``).  Falls back to element-wise computation if
     the matrix is too small for the shortcut.
     """
+    from spatialgpu.core.backend import get_backend
+    backend = get_backend()
+    if backend.is_gpu_active:
+        import cupy as cp
+        from spatialgpu.core.gpu_ops import gpu_pairwise_spearmanr
+        mat_gpu = cp.asarray(mat)
+        rho_gpu, pval_gpu = gpu_pairwise_spearmanr(mat_gpu)
+        rho = cp.asnumpy(rho_gpu)
+        pval = cp.asnumpy(pval_gpu)
+        rho = np.nan_to_num(rho, nan=0.0)
+        pval = np.where(np.isnan(pval), 1.0, pval)
+        np.fill_diagonal(rho, 1.0)
+        np.fill_diagonal(pval, 0.0)
+        return rho, pval
+
     n = mat.shape[0]
     # scipy.stats.spearmanr on a (n_obs, n_vars) matrix returns (n_vars, n_vars) rho
     result = stats.spearmanr(mat, axis=1)
@@ -890,8 +932,26 @@ def distance_to_interface(
         min_dists = dists.min(axis=1)
         return float(np.mean(min_dists))
 
-    # Observed distance
-    d_observed = _mean_min_distance(both_spots)
+    from spatialgpu.core.backend import get_backend
+    backend = get_backend()
+
+    if backend.is_gpu_active:
+        import cupy as cp
+        from spatialgpu.core.gpu_ops import gpu_cdist
+        border_gpu = cp.asarray(border_coords)
+
+        def _mean_min_distance_gpu(spots):
+            if len(spots) == 0:
+                return np.inf
+            coords = np.array([_spot_to_coords(s) for s in spots])
+            coords_gpu = cp.asarray(coords)
+            dists = gpu_cdist(coords_gpu, border_gpu)
+            return float(cp.mean(cp.min(dists, axis=1)))
+
+        d_observed = _mean_min_distance_gpu(both_spots)
+    else:
+        # Observed distance
+        d_observed = _mean_min_distance(both_spots)
 
     # Pre-compute distances from all single-type spots to border
     if len(single_spots) == 0:
@@ -899,8 +959,14 @@ def distance_to_interface(
         return adata
 
     single_coords = np.array([_spot_to_coords(s) for s in single_spots])
-    single_dists = cdist(single_coords, border_coords)
-    single_min_dists = single_dists.min(axis=1)
+
+    if backend.is_gpu_active:
+        single_coords_gpu = cp.asarray(single_coords)
+        single_dists_gpu = gpu_cdist(single_coords_gpu, border_gpu)
+        single_min_dists = cp.asnumpy(cp.min(single_dists_gpu, axis=1))
+    else:
+        single_dists = cdist(single_coords, border_coords)
+        single_min_dists = single_dists.min(axis=1)
 
     # Permutation test
     n_both = len(both_spots)
