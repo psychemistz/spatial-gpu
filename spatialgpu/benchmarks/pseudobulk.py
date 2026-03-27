@@ -120,3 +120,78 @@ def generate_semi_synthetic_scrna(
     adata.obs_names = [f"Cell_{i:06d}" for i in range(adata.n_obs)]
 
     return adata
+
+
+def generate_pseudobulk_dirichlet(
+    scrna_adata: ad.AnnData,
+    n_samples: int = 100,
+    n_cells_per_sample: int = 1000,
+    alpha: float = 1.0,
+    seed: int = 42,
+) -> tuple[ad.AnnData, pd.DataFrame]:
+    """Generate pseudobulk by mixing single cells with Dirichlet proportions.
+
+    Parameters
+    ----------
+    scrna_adata
+        Semi-synthetic scRNA-seq with obs['cell_type'].
+    n_samples
+        Number of pseudobulk samples to generate.
+    n_cells_per_sample
+        Total cells to sample per pseudobulk mixture.
+    alpha
+        Dirichlet concentration. 1.0 = uniform; < 1.0 = sparser mixtures.
+    seed
+        Random seed.
+
+    Returns
+    -------
+    tuple of (AnnData, DataFrame)
+        AnnData: pseudobulk (samples x genes, raw counts).
+        DataFrame: ground truth proportions (samples x cell_types, sums to 1.0).
+    """
+    import anndata as ad
+
+    rng = np.random.RandomState(seed)
+    cell_types = sorted(scrna_adata.obs["cell_type"].unique())
+    n_types = len(cell_types)
+
+    type_indices = {}
+    for ct in cell_types:
+        type_indices[ct] = np.where(scrna_adata.obs["cell_type"].values == ct)[0]
+
+    X_all = scrna_adata.X
+    if sparse.issparse(X_all):
+        X_all = X_all.toarray()
+
+    bulk_counts = np.zeros((n_samples, scrna_adata.n_vars), dtype=np.float64)
+    proportions = np.zeros((n_samples, n_types), dtype=np.float64)
+    alpha_vec = np.full(n_types, alpha)
+
+    for i in range(n_samples):
+        props = rng.dirichlet(alpha_vec)
+        proportions[i] = props
+        cell_counts = rng.multinomial(n_cells_per_sample, props)
+
+        sample_sum = np.zeros(scrna_adata.n_vars, dtype=np.float64)
+        for j, ct in enumerate(cell_types):
+            if cell_counts[j] == 0:
+                continue
+            idx = rng.choice(type_indices[ct], size=cell_counts[j], replace=True)
+            sample_sum += X_all[idx].sum(axis=0)
+
+        bulk_counts[i] = sample_sum
+
+    adata_bulk = ad.AnnData(
+        X=bulk_counts,
+        obs=pd.DataFrame(index=[f"Bulk_{i:04d}" for i in range(n_samples)]),
+        var=pd.DataFrame(index=scrna_adata.var_names.copy()),
+    )
+
+    ground_truth = pd.DataFrame(
+        proportions,
+        index=adata_bulk.obs_names,
+        columns=cell_types,
+    )
+
+    return adata_bulk, ground_truth

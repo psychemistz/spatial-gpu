@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
-from spatialgpu.benchmarks.pseudobulk import generate_semi_synthetic_scrna
+from spatialgpu.benchmarks.pseudobulk import (
+    generate_pseudobulk_dirichlet,
+    generate_semi_synthetic_scrna,
+)
 
 
 class TestGenerateSemiSyntheticScrna:
@@ -75,3 +79,61 @@ class TestGenerateSemiSyntheticScrna:
         ref_genes = set(ref["refProfiles"].index)
         scrna_genes = set(scrna_with_mal.var_names)
         assert scrna_genes.issubset(ref_genes)
+
+
+class TestGeneratePseudobulkDirichlet:
+    @pytest.fixture(scope="class")
+    def scrna(self):
+        return generate_semi_synthetic_scrna(
+            n_cells_per_type=50, include_malignant=True, seed=42
+        )
+
+    @pytest.fixture(scope="class")
+    def bulk_and_truth(self, scrna):
+        return generate_pseudobulk_dirichlet(
+            scrna, n_samples=20, n_cells_per_sample=200, alpha=1.0, seed=42
+        )
+
+    def test_returns_tuple(self, bulk_and_truth):
+        adata_bulk, ground_truth = bulk_and_truth
+        import anndata as ad
+        assert isinstance(adata_bulk, ad.AnnData)
+        assert isinstance(ground_truth, pd.DataFrame)
+
+    def test_bulk_shape(self, bulk_and_truth, scrna):
+        adata_bulk, _ = bulk_and_truth
+        assert adata_bulk.n_obs == 20
+        assert adata_bulk.n_vars == scrna.n_vars
+
+    def test_ground_truth_shape(self, bulk_and_truth):
+        _, gt = bulk_and_truth
+        assert gt.shape[0] == 20
+        assert gt.shape[1] > 5
+
+    def test_ground_truth_sums_to_one(self, bulk_and_truth):
+        _, gt = bulk_and_truth
+        np.testing.assert_allclose(gt.sum(axis=1).values, 1.0, atol=1e-10)
+
+    def test_ground_truth_nonnegative(self, bulk_and_truth):
+        _, gt = bulk_and_truth
+        assert gt.min().min() >= 0.0
+
+    def test_bulk_counts_nonneg_integers(self, bulk_and_truth):
+        adata_bulk, _ = bulk_and_truth
+        X = adata_bulk.X
+        if hasattr(X, "toarray"):
+            X = X.toarray()
+        assert np.all(X >= 0)
+        assert np.allclose(X, X.astype(int))
+
+    def test_deterministic_with_seed(self, scrna):
+        _, gt1 = generate_pseudobulk_dirichlet(scrna, n_samples=5, seed=77)
+        _, gt2 = generate_pseudobulk_dirichlet(scrna, n_samples=5, seed=77)
+        np.testing.assert_array_equal(gt1.values, gt2.values)
+
+    def test_cell_type_columns_match_scrna(self, bulk_and_truth, scrna):
+        _, gt = bulk_and_truth
+        scrna_types = set(scrna.obs["cell_type"].unique())
+        gt_types = set(gt.columns)
+        assert gt_types == scrna_types
+
