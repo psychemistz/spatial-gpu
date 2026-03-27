@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from scipy.optimize import nnls as scipy_nnls
 from scipy.stats import rankdata
 from scipy.stats import spearmanr as scipy_spearmanr
 
@@ -190,3 +191,54 @@ class TestGPUSpearmanr:
         diag = cp.asnumpy(cp.diag(rho_gpu))
 
         np.testing.assert_array_equal(diag, np.ones(10))
+
+
+class TestGPUNNLS:
+    """CPU-vs-GPU equivalence tests for gpu_nnls and gpu_nnls_batch."""
+
+    @skipno_gpu
+    def test_basic_nnls(self):
+        """Basic NNLS: non-negative true solution, compare to scipy nnls."""
+        import cupy as cp
+        from spatialgpu.core.gpu_ops import gpu_nnls
+
+        rng = np.random.default_rng(42)
+        A_np = rng.random((50, 5)).astype(np.float64)
+        x_true = np.abs(rng.standard_normal(5))
+        b_np = A_np @ x_true + 0.1 * rng.standard_normal(50)
+
+        x_ref, _ = scipy_nnls(A_np, b_np)
+        x_gpu = gpu_nnls(cp.asarray(A_np), cp.asarray(b_np))
+        x_cpu = cp.asnumpy(x_gpu)
+
+        np.testing.assert_allclose(x_cpu, x_ref, atol=1e-5)
+
+    @skipno_gpu
+    def test_batch_nnls(self):
+        """Batch NNLS: gpu_nnls_batch matches 20 individual scipy nnls calls."""
+        import cupy as cp
+        from spatialgpu.core.gpu_ops import gpu_nnls_batch
+
+        rng = np.random.default_rng(42)
+        A_np = rng.random((50, 5)).astype(np.float64)
+        B_np = np.abs(rng.standard_normal((50, 20)))
+
+        X_ref = np.column_stack([scipy_nnls(A_np, B_np[:, j])[0] for j in range(20)])
+        X_gpu = gpu_nnls_batch(cp.asarray(A_np), cp.asarray(B_np))
+        X_cpu = cp.asnumpy(X_gpu)
+
+        np.testing.assert_allclose(X_cpu, X_ref, atol=1e-5)
+
+    @skipno_gpu
+    def test_nnls_all_zero_rhs(self):
+        """Zero right-hand side: solution should be all zeros."""
+        import cupy as cp
+        from spatialgpu.core.gpu_ops import gpu_nnls
+
+        A_np = np.eye(5, dtype=np.float64)
+        b_np = np.zeros(5, dtype=np.float64)
+
+        x_gpu = gpu_nnls(cp.asarray(A_np), cp.asarray(b_np))
+        x_cpu = cp.asnumpy(x_gpu)
+
+        np.testing.assert_array_equal(x_cpu, np.zeros(5))

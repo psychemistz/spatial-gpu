@@ -253,3 +253,121 @@ def gpu_cormat(X, Y, method="spearman"):
     ps = cp.asarray(ps_cpu)
 
     return rs, ps
+
+
+def gpu_nnls(A, b, max_iter=None):
+    """
+    Solve non-negative least squares on GPU using the Lawson-Hanson active-set algorithm.
+
+    Solves: min ||A @ x - b||^2  subject to  x >= 0
+
+    Parameters
+    ----------
+    A : cupy.ndarray
+        (m, n) matrix of shape (n_observations, n_variables). Must be a CuPy array.
+    b : cupy.ndarray
+        (m,) right-hand-side vector. Must be a CuPy array.
+    max_iter : int, optional
+        Maximum number of outer iterations. Default is ``3 * n``.
+
+    Returns
+    -------
+    x : cupy.ndarray
+        (n,) non-negative solution vector.
+    """
+    import cupy as cp
+
+    m, n = A.shape
+    if max_iter is None:
+        max_iter = 3 * n
+
+    # Precompute Gram matrix and projected gradient
+    AtA = A.T @ A
+    Atb = A.T @ b
+
+    x = cp.zeros(n, dtype=np.float64)
+    passive = cp.zeros(n, dtype=bool)  # True = variable is in passive (free) set
+    w = Atb - AtA @ x  # gradient: Atb - AtA @ x
+
+    for _ in range(max_iter):
+        # Find active variables with positive gradient component
+        active_mask = ~passive
+        active_w = cp.where(active_mask, w, cp.float64(-cp.inf))
+        t = int(cp.argmax(active_w))
+
+        if float(active_w[t]) <= 0.0:
+            # No active variable has a positive gradient — converged
+            break
+
+        # Move t into the passive (free) set
+        passive[t] = True
+
+        # Inner loop: ensure non-negativity on passive set
+        while True:
+            # Solve unconstrained subproblem restricted to passive set
+            passive_idx = cp.where(passive)[0]
+            AtA_sub = AtA[cp.ix_(passive_idx, passive_idx)]
+            Atb_sub = Atb[passive_idx]
+
+            # Use CPU linalg.solve for small subproblem stability
+            AtA_sub_cpu = cp.asnumpy(AtA_sub)
+            Atb_sub_cpu = cp.asnumpy(Atb_sub)
+            z_sub_cpu = np.linalg.solve(AtA_sub_cpu, Atb_sub_cpu)
+            z_sub = cp.asarray(z_sub_cpu)
+
+            # Build full z vector (zero outside passive set)
+            z = cp.zeros(n, dtype=np.float64)
+            z[passive_idx] = z_sub
+
+            # Check if all passive variables are positive
+            if cp.all(z[passive] > 0.0):
+                break
+
+            # Find the boundary-limiting alpha among infeasible passive variables
+            infeasible = passive & (z <= 0.0)
+            alpha = cp.min(x[infeasible] / (x[infeasible] - z[infeasible]))
+            alpha = float(alpha)
+
+            # Move x toward z by alpha
+            x = x + alpha * (z - x)
+
+            # Remove passive variables that have become zero (or negative)
+            newly_active = passive & (cp.abs(x) < 1e-12)
+            passive[newly_active] = False
+
+        x = z
+
+        # Update gradient
+        w = Atb - AtA @ x
+
+    return cp.maximum(x, 0.0)
+
+
+def gpu_nnls_batch(A, B):
+    """
+    Solve NNLS for each column of B against A on GPU.
+
+    Solves: min ||A @ x_k - b_k||^2  s.t.  x_k >= 0  for each column b_k of B.
+
+    Parameters
+    ----------
+    A : cupy.ndarray
+        (m, n) CuPy array.
+    B : cupy.ndarray
+        (m, k) CuPy array. Each column is an independent right-hand-side vector.
+
+    Returns
+    -------
+    X : cupy.ndarray
+        (n, k) CuPy array. Column j contains the NNLS solution for B[:, j].
+    """
+    import cupy as cp
+
+    m, n = A.shape
+    k = B.shape[1]
+    X = cp.empty((n, k), dtype=np.float64)
+
+    for j in range(k):
+        X[:, j] = gpu_nnls(A, B[:, j])
+
+    return X
