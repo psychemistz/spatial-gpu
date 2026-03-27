@@ -1,0 +1,54 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.egg-info
+dist
+build
+.eggs
+*.egg
+
+# Virtual environments
+.venv
+venv
+env
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Testing/coverage
+.pytest_cache
+.mypy_cache
+htmlcov
+.coverage
+coverage.xml
+.tox
+.nox
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.yml
+DOCKER.md
+.dockerignore
+
+# Claude
+.claude
+CLAUDE.md
+
+# Data files (large)
+data/
+validation_results/
+docs/outputs/
+docs/figures/*.png
+docs/figures/*.gif

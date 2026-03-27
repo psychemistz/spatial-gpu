@@ -1,0 +1,130 @@
+# =============================================================================
+# Docker Compose for spatial-gpu
+#
+# Usage:
+#   docker compose up -d spatial-gpu              # Start CPU container
+#   docker compose up -d spatial-gpu-gpu          # Start GPU container
+#   docker compose up spatial-gpu-jupyter         # Start Jupyter (CPU)
+#   docker compose up spatial-gpu-jupyter-gpu     # Start Jupyter (GPU)
+#   docker compose exec spatial-gpu bash          # Enter running container
+#   docker compose down                           # Stop all containers
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # CPU Container (Python only)
+  # ===========================================================================
+  spatial-gpu:
+    image: psychemistz/spatial-gpu:latest
+    container_name: spatial-gpu
+    volumes:
+      - .:/workspace
+      - spatial-gpu-cache:/root/.cache
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+  # ===========================================================================
+  # GPU Container (Python + CuPy)
+  # ===========================================================================
+  spatial-gpu-gpu:
+    image: psychemistz/spatial-gpu:gpu
+    container_name: spatial-gpu-gpu
+    volumes:
+      - .:/workspace
+      - spatial-gpu-cache:/root/.cache
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ===========================================================================
+  # CPU + R Container (Python + R SpaCET)
+  # ===========================================================================
+  spatial-gpu-r:
+    image: psychemistz/spatial-gpu:with-r
+    container_name: spatial-gpu-r
+    volumes:
+      - .:/workspace
+      - spatial-gpu-cache:/root/.cache
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+  # ===========================================================================
+  # GPU + R Container (Full stack)
+  # ===========================================================================
+  spatial-gpu-gpu-r:
+    image: psychemistz/spatial-gpu:gpu-with-r
+    container_name: spatial-gpu-gpu-r
+    volumes:
+      - .:/workspace
+      - spatial-gpu-cache:/root/.cache
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ===========================================================================
+  # Jupyter Lab (CPU)
+  # ===========================================================================
+  spatial-gpu-jupyter:
+    image: psychemistz/spatial-gpu:latest
+    container_name: spatial-gpu-jupyter
+    volumes:
+      - .:/workspace
+      - spatial-gpu-cache:/root/.cache
+    working_dir: /workspace
+    ports:
+      - "8888:8888"
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''
+
+  # ===========================================================================
+  # Jupyter Lab (GPU)
+  # ===========================================================================
+  spatial-gpu-jupyter-gpu:
+    image: psychemistz/spatial-gpu:gpu
+    container_name: spatial-gpu-jupyter-gpu
+    volumes:
+      - .:/workspace
+      - spatial-gpu-cache:/root/.cache
+    working_dir: /workspace
+    ports:
+      - "8889:8888"
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ===========================================================================
+  # Jupyter Lab (CPU + R)
+  # ===========================================================================
+  spatial-gpu-jupyter-r:
+    image: psychemistz/spatial-gpu:with-r
+    container_name: spatial-gpu-jupyter-r
+    volumes:
+      - .:/workspace
+      - spatial-gpu-cache:/root/.cache
+    working_dir: /workspace
+    ports:
+      - "8890:8888"
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''
+
+volumes:
+  spatial-gpu-cache:
