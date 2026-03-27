@@ -11,6 +11,7 @@ import pytest
 def gpu_available():
     try:
         import cupy as cp
+
         cp.cuda.runtime.getDeviceCount()
         return True
     except Exception:

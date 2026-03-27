@@ -180,7 +180,9 @@ class TestGPUSpearmanr:
         ref_p = ref_df["cor_p"].to_numpy()
 
         # GPU
-        rs_gpu, ps_gpu = gpu_cormat(cp.asarray(X_np), cp.asarray(Y_np), method="spearman")
+        rs_gpu, ps_gpu = gpu_cormat(
+            cp.asarray(X_np), cp.asarray(Y_np), method="spearman"
+        )
         rs_cpu = cp.asnumpy(rs_gpu)
         ps_cpu = cp.asnumpy(ps_gpu)
 
@@ -301,9 +303,9 @@ class TestGPUNMF:
         H_sk = model.components_
         sk_err = np.linalg.norm(V_np - W_sk @ H_sk)
 
-        assert gpu_err <= 1.5 * sk_err, (
-            f"GPU NMF error {gpu_err:.4f} is more than 1.5x sklearn error {sk_err:.4f}"
-        )
+        assert (
+            gpu_err <= 1.5 * sk_err
+        ), f"GPU NMF error {gpu_err:.4f} is more than 1.5x sklearn error {sk_err:.4f}"
 
     @skipno_gpu
     def test_non_negative(self):
@@ -396,9 +398,9 @@ class TestGPUBipartiteEdgeSwap:
         rewired = gpu_bipartite_edge_swap(mat_gpu, seed=99)
         n_edges_after = int(cp.asnumpy(rewired).sum())
 
-        assert n_edges_after == n_edges_before, (
-            f"Edge count changed: {n_edges_before} -> {n_edges_after}"
-        )
+        assert (
+            n_edges_after == n_edges_before
+        ), f"Edge count changed: {n_edges_before} -> {n_edges_after}"
 
 
 class TestGPUTrustConstr:

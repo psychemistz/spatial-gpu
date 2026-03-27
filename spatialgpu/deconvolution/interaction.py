@@ -262,11 +262,13 @@ def cci_lr_network_score(
     all_perm_r_indices = []
 
     from spatialgpu.core.backend import get_backend
+
     backend = get_backend()
     if backend.is_gpu_active:
         import cupy as cp
 
         from spatialgpu.core.gpu_ops import gpu_bipartite_edge_swap
+
         logger.info("  Generating 1000 permuted networks (GPU)...")
         for _perm_i in range(1000):
             lr_mat_gpu = cp.asarray(lr_mat.copy().astype(np.int32))
@@ -577,11 +579,13 @@ def _pairwise_spearmanr(
     the matrix is too small for the shortcut.
     """
     from spatialgpu.core.backend import get_backend
+
     backend = get_backend()
     if backend.is_gpu_active:
         import cupy as cp
 
         from spatialgpu.core.gpu_ops import gpu_pairwise_spearmanr
+
         mat_gpu = cp.asarray(mat)
         rho_gpu, pval_gpu = gpu_pairwise_spearmanr(mat_gpu)
         rho = cp.asnumpy(rho_gpu)
@@ -935,12 +939,14 @@ def distance_to_interface(
         return float(np.mean(min_dists))
 
     from spatialgpu.core.backend import get_backend
+
     backend = get_backend()
 
     if backend.is_gpu_active:
         import cupy as cp
 
         from spatialgpu.core.gpu_ops import gpu_cdist
+
         border_gpu = cp.asarray(border_coords)
 
         def _mean_min_distance_gpu(spots):

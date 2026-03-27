@@ -367,9 +367,15 @@ def secact_signaling_patterns(
         if isinstance(k, list):
             best_k, best_sil = k[0], -1.0
             for ki in k:
-                _W_gpu, _H_gpu = gpu_nmf(_act_nneg_gpu, n_components=ki, seed=seed, max_iter=500)
+                _W_gpu, _H_gpu = gpu_nmf(
+                    _act_nneg_gpu, n_components=ki, seed=seed, max_iter=500
+                )
                 _labels = cp.asnumpy(_W_gpu.argmax(axis=1))
-                _sil = silhouette_score(act_nneg, _labels) if len(set(_labels)) > 1 else 0.0
+                _sil = (
+                    silhouette_score(act_nneg, _labels)
+                    if len(set(_labels)) > 1
+                    else 0.0
+                )
                 if _sil > best_sil:
                     best_sil, best_k = _sil, ki
             k_final = best_k
@@ -377,7 +383,9 @@ def secact_signaling_patterns(
         else:
             k_final = k
 
-        _W_gpu, _H_gpu = gpu_nmf(_act_nneg_gpu, n_components=k_final, seed=seed, max_iter=500)
+        _W_gpu, _H_gpu = gpu_nmf(
+            _act_nneg_gpu, n_components=k_final, seed=seed, max_iter=500
+        )
         W, H = cp.asnumpy(_W_gpu), cp.asnumpy(_H_gpu)
     else:
         if isinstance(k, list):

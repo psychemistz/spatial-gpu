@@ -458,7 +458,7 @@ def _cal_weights_gpu(coords, n_spots, radius, sigma, diag_as_zero):
         mask = (dists <= radius) & (dists > 0)
         local_rows, local_cols = cp.where(mask)
         d_vals = dists[mask]
-        w_vals = cp.exp(-d_vals ** 2 / (2 * sigma ** 2))
+        w_vals = cp.exp(-(d_vals**2) / (2 * sigma**2))
 
         rows_list.append(cp.asnumpy(local_rows) + i)
         cols_list.append(cp.asnumpy(local_cols))
