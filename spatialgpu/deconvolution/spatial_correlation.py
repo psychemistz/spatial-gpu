@@ -71,6 +71,13 @@ def cal_weights(
     )
     n_spots = coords.shape[0]
 
+    from spatialgpu.core.backend import get_backend
+
+    backend = get_backend()
+
+    if backend.is_gpu_active and n_spots > 1000:
+        return _cal_weights_gpu(coords, n_spots, radius, sigma, diag_as_zero)
+
     logger.info(
         "Building weight matrix: %d spots, radius=%.0f um, sigma=%.0f.",
         n_spots,
@@ -432,6 +439,51 @@ def spatial_correlation(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _cal_weights_gpu(coords, n_spots, radius, sigma, diag_as_zero):
+    """GPU implementation of cal_weights using chunked cdist."""
+    import cupy as cp
+    from spatialgpu.core.gpu_ops import gpu_cdist
+
+    coords_gpu = cp.asarray(coords)
+    chunk_size = min(5000, n_spots)
+    rows_list, cols_list, vals_list = [], [], []
+
+    for i in range(0, n_spots, chunk_size):
+        end_i = min(i + chunk_size, n_spots)
+        dists = gpu_cdist(coords_gpu[i:end_i], coords_gpu)
+
+        mask = (dists <= radius) & (dists > 0)
+        local_rows, local_cols = cp.where(mask)
+        d_vals = dists[mask]
+        w_vals = cp.exp(-d_vals ** 2 / (2 * sigma ** 2))
+
+        rows_list.append(cp.asnumpy(local_rows) + i)
+        cols_list.append(cp.asnumpy(local_cols))
+        vals_list.append(cp.asnumpy(w_vals))
+
+    if rows_list:
+        all_rows = np.concatenate(rows_list)
+        all_cols = np.concatenate(cols_list)
+        all_vals = np.concatenate(vals_list)
+    else:
+        all_rows = np.array([], dtype=np.int64)
+        all_cols = np.array([], dtype=np.int64)
+        all_vals = np.array([], dtype=np.float64)
+
+    W = sparse.csr_matrix((all_vals, (all_rows, all_cols)), shape=(n_spots, n_spots))
+
+    # Row-normalize (same as CPU path)
+    row_sums = np.asarray(W.sum(axis=1)).ravel()
+    row_sums[row_sums == 0] = 1.0
+    W = sparse.diags(1.0 / row_sums) @ W
+
+    if diag_as_zero:
+        W.setdiag(0)
+        W.eliminate_zeros()
+
+    return W
 
 
 def _vst_normalize(adata: ad.AnnData) -> np.ndarray:
