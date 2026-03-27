@@ -371,3 +371,177 @@ def gpu_nnls_batch(A, B):
         X[:, j] = gpu_nnls(A, B[:, j])
 
     return X
+
+
+def gpu_cdist(A, B):
+    """
+    Compute pairwise Euclidean distances between rows of A and rows of B on GPU.
+
+    Parameters
+    ----------
+    A : cupy.ndarray
+        (n, d) CuPy array of n points in d-dimensional space.
+    B : cupy.ndarray
+        (m, d) CuPy array of m points in d-dimensional space.
+
+    Returns
+    -------
+    cupy.ndarray
+        (n, m) CuPy array where entry [i, j] is the Euclidean distance
+        between A[i] and B[j].
+    """
+    import cupy as cp
+
+    # ||a - b||^2 = ||a||^2 + ||b||^2 - 2 * a @ b.T
+    A_sq = (A * A).sum(axis=1, keepdims=True)  # (n, 1)
+    B_sq = (B * B).sum(axis=1, keepdims=True)  # (m, 1)
+    cross = A @ B.T  # (n, m)
+    dist_sq = A_sq + B_sq.T - 2.0 * cross
+    return cp.sqrt(cp.maximum(dist_sq, 0.0))
+
+
+def gpu_bipartite_edge_swap(mat, n_swaps=None, seed=None):
+    """
+    Degree-preserving bipartite edge swap on GPU.
+
+    Randomly rewires a binary bipartite adjacency matrix while preserving
+    the degree (row and column sums) of every node. Mirrors the CPU
+    ``_bipartite_edge_swap`` in ``spatialgpu.deconvolution.interaction``.
+
+    Parameters
+    ----------
+    mat : cupy.ndarray
+        Binary int32 adjacency matrix of shape (n_ligands, n_receptors).
+        Entry [i, j] == 1 indicates an edge between ligand i and receptor j.
+    n_swaps : int, optional
+        Number of swap attempts. Default is ``5 * n_edges``.
+    seed : int, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    cupy.ndarray
+        Rewired binary adjacency matrix with the same shape and preserved
+        row/column degree sums.
+
+    Notes
+    -----
+    The swap loop is inherently sequential because each attempt depends on
+    the current state of the matrix. Random pairs are pre-generated in bulk
+    for efficiency; scalar indices are extracted with ``int()`` to avoid
+    per-iteration CuPy overhead.
+    """
+    import cupy as cp
+
+    if seed is not None:
+        cp.random.seed(seed)
+
+    mat = mat.copy()
+    edges_l, edges_r = cp.where(mat == 1)
+    n_edges = int(edges_l.size)
+
+    if n_edges < 2:
+        return mat
+
+    if n_swaps is None:
+        n_swaps = 5 * n_edges
+
+    # Pre-generate all random pairs at once
+    rand_pairs = cp.random.randint(0, n_edges, size=(n_swaps, 2))
+
+    for i in range(n_swaps):
+        idx1 = int(rand_pairs[i, 0])
+        idx2 = int(rand_pairs[i, 1])
+
+        if idx1 == idx2:
+            continue
+
+        l1 = int(edges_l[idx1])
+        r1 = int(edges_r[idx1])
+        l2 = int(edges_l[idx2])
+        r2 = int(edges_r[idx2])
+
+        # Skip if same ligand or same receptor
+        if l1 == l2 or r1 == r2:
+            continue
+
+        # Check that swapped edges don't already exist
+        if int(mat[l1, r2]) == 1 or int(mat[l2, r1]) == 1:
+            continue
+
+        # Perform swap
+        mat[l1, r1] = 0
+        mat[l2, r2] = 0
+        mat[l1, r2] = 1
+        mat[l2, r1] = 1
+
+        # Update edge lists
+        edges_r[idx1] = r2
+        edges_r[idx2] = r1
+
+    return mat
+
+
+def gpu_nmf(V, n_components, seed=None, max_iter=500, tol=1e-4):
+    """
+    Non-negative Matrix Factorization using multiplicative update rules on GPU.
+
+    Factorizes V ≈ W @ H where W and H are non-negative, using the
+    Lee & Seung multiplicative update algorithm.
+
+    Parameters
+    ----------
+    V : cupy.ndarray
+        (n, m) non-negative CuPy array to factorize.
+    n_components : int
+        Number of components (k). Determines the inner dimension of W and H.
+    seed : int or None, optional
+        Random seed for reproducible initialization. Default is None.
+    max_iter : int, optional
+        Maximum number of multiplicative update iterations. Default is 500.
+    tol : float, optional
+        Convergence tolerance on relative change in reconstruction error.
+        Default is 1e-4.
+
+    Returns
+    -------
+    W : cupy.ndarray
+        (n, k) non-negative factor matrix.
+    H : cupy.ndarray
+        (k, m) non-negative factor matrix.
+    """
+    import cupy as cp
+
+    rng = cp.random.RandomState(seed)
+
+    n, m = V.shape
+    k = n_components
+    eps = 1e-16
+
+    # Initialize W and H from scaled random normal (absolute value)
+    avg = cp.sqrt(V.mean() / k)
+    W = cp.abs(avg * rng.randn(n, k))
+    H = cp.abs(avg * rng.randn(k, m))
+
+    prev_err = None
+
+    for i in range(max_iter):
+        # Update H: H *= (W.T @ V) / (W.T @ W @ H + eps)
+        WtV = W.T @ V
+        WtW = W.T @ W
+        H *= WtV / (WtW @ H + eps)
+
+        # Update W: W *= (V @ H.T) / (W @ (H @ H.T) + eps)
+        VHt = V @ H.T
+        HHt = H @ H.T
+        W *= VHt / (W @ HHt + eps)
+
+        # Check convergence every 10 iterations
+        if i % 10 == 0:
+            err = float(cp.linalg.norm(V - W @ H))
+            if prev_err is not None and prev_err > 0:
+                if abs(prev_err - err) / prev_err < tol:
+                    break
+            prev_err = err
+
+    return W, H
