@@ -120,3 +120,136 @@ def gpu_rankdata(x, method="average", axis=None):
         return result
 
     raise ValueError(f"axis={axis!r} is not supported. Use None, 0, or 1.")
+
+
+def gpu_pairwise_spearmanr(mat):
+    """
+    Compute pairwise Spearman correlations for all row pairs in a matrix.
+
+    Parameters
+    ----------
+    mat : cupy.ndarray
+        2-D input array of shape (n_vars, n_obs). Each row is a variable
+        whose pairwise Spearman correlation with every other row is computed.
+
+    Returns
+    -------
+    rho : cupy.ndarray
+        (n_vars, n_vars) float64 array of Spearman correlation coefficients.
+    pval : cupy.ndarray
+        (n_vars, n_vars) float64 array of two-sided p-values.
+    """
+    import cupy as cp
+    from scipy import stats as scipy_stats
+
+    n_vars, n_obs = mat.shape
+
+    # Rank each row using average method
+    ranked = gpu_rankdata(mat, method="average", axis=1)
+
+    # Center and normalize
+    ranked_mean = ranked.mean(axis=1, keepdims=True)
+    ranked_centered = ranked - ranked_mean
+    ranked_std = ranked_centered.std(axis=1, keepdims=True)
+    # Avoid division by zero for constant rows
+    ranked_std[ranked_std == 0] = 1.0
+    ranked_norm = ranked_centered / ranked_std
+
+    # Correlation via matmul
+    rho = ranked_norm @ ranked_norm.T / n_obs
+
+    # Clip to valid correlation range
+    rho = cp.clip(rho, -1.0, 1.0)
+
+    # Compute t-statistics for p-values
+    t_stat = rho * cp.sqrt((n_obs - 2) / (1.0 - rho**2 + 1e-300))
+
+    # Transfer to CPU for scipy p-value calculation
+    t_stat_cpu = cp.asnumpy(t_stat)
+    pval_cpu = 2.0 * scipy_stats.t.sf(np.abs(t_stat_cpu), df=n_obs - 2)
+
+    pval = cp.asarray(pval_cpu)
+
+    # Fix diagonal: rho=1, pval=0
+    diag_idx = cp.arange(n_vars)
+    rho[diag_idx, diag_idx] = 1.0
+    pval[diag_idx, diag_idx] = 0.0
+
+    # Replace NaN: rho->0, pval->1
+    rho = cp.where(cp.isnan(rho), cp.float64(0.0), rho)
+    pval = cp.where(cp.isnan(pval), cp.float64(1.0), pval)
+
+    return rho, pval
+
+
+def gpu_cormat(X, Y, method="spearman"):
+    """
+    Compute correlation between columns of X and each column of Y on GPU.
+
+    Equivalent to the CPU ``cormat()`` in ``spatialgpu.deconvolution.core``,
+    but operates on CuPy arrays and returns CuPy arrays.
+
+    Parameters
+    ----------
+    X : cupy.ndarray
+        (n_genes, n_samples) matrix. Correlations are computed across genes
+        (rows) for every sample (column).
+    Y : cupy.ndarray
+        (n_genes, n_features) matrix. Usually a single-column signature.
+    method : str, optional
+        ``"spearman"`` (default) or ``"pearson"``.
+
+    Returns
+    -------
+    rs : cupy.ndarray
+        1-D array of length n_samples with rounded (3 decimals) correlation
+        coefficients against the first column of Y.
+    ps : cupy.ndarray
+        1-D array of length n_samples with two-sided p-values against the
+        first column of Y.
+    """
+    import cupy as cp
+    from scipy import stats as scipy_stats
+
+    if Y.ndim == 1:
+        Y = Y.reshape(-1, 1)
+
+    n_obs = X.shape[0]
+
+    # Rank column-wise for Spearman
+    if method == "spearman":
+        X_prep = gpu_rankdata(X, method="average", axis=0)
+    elif method == "pearson":
+        X_prep = X.astype(np.float64)
+    else:
+        raise ValueError(f"method must be 'pearson' or 'spearman', got '{method!r}'")
+
+    X_centered = X_prep - X_prep.mean(axis=0, keepdims=True)
+    std_x = cp.sqrt((X_centered**2).sum(axis=0))
+
+    # Use first column of Y only (matches CPU cormat behaviour)
+    y_col = Y[:, 0]
+    if method == "spearman":
+        y_prep = gpu_rankdata(y_col.reshape(1, -1), method="average", axis=1).ravel()
+    else:
+        y_prep = y_col.astype(np.float64)
+
+    y_centered = y_prep - y_prep.mean()
+    cov_xy = (X_centered * y_centered[:, None]).sum(axis=0)
+    std_y = cp.sqrt((y_centered**2).sum())
+
+    denom = std_x * std_y
+    denom = cp.where(denom == 0, cp.float64(1.0), denom)
+    rs_raw = cov_xy / denom
+
+    t_stat = rs_raw * cp.sqrt((n_obs - 2) / (1.0 - rs_raw**2 + 1e-300))
+
+    # P-values via scipy on CPU
+    t_stat_cpu = cp.asnumpy(t_stat)
+    ps_cpu = 2.0 * scipy_stats.t.sf(np.abs(t_stat_cpu), df=n_obs - 2)
+
+    # Round rs to 3 decimals (matches CPU cormat)
+    rs = cp.round(rs_raw, 3)
+    ps = cp.asarray(ps_cpu)
+
+    return rs, ps
