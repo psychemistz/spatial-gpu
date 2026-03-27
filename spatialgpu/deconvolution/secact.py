@@ -274,15 +274,50 @@ def secact_signaling_patterns(
     )
 
     # Spearman correlation for each secreted protein
-    corr_data = []
-    for gene in act_new.index:
-        act_gene = act_new.loc[gene].values
-        if gene in expr_new.index:
-            exp_gene = expr_new_aggr.loc[gene].values
-            r, p = stats.spearmanr(act_gene, exp_gene)
-            corr_data.append({"gene": gene, "r": r, "p": p})
+    from spatialgpu.core.backend import get_backend as _get_backend
+
+    _backend = _get_backend()
+
+    if _backend.is_gpu_active:
+        import cupy as cp
+
+        from spatialgpu.core.gpu_ops import gpu_rankdata
+
+        # Vectorized Spearman for all genes at once
+        _common_genes = [g for g in act_new.index if g in expr_new_aggr.index]
+        _other_genes = [g for g in act_new.index if g not in expr_new_aggr.index]
+
+        if _common_genes:
+            _act_vals = cp.asarray(act_new.loc[_common_genes].values)
+            _exp_vals = cp.asarray(expr_new_aggr.loc[_common_genes].values)
+            _act_ranked = gpu_rankdata(_act_vals, method="average", axis=1)
+            _exp_ranked = gpu_rankdata(_exp_vals, method="average", axis=1)
+            _act_c = _act_ranked - _act_ranked.mean(axis=1, keepdims=True)
+            _exp_c = _exp_ranked - _exp_ranked.mean(axis=1, keepdims=True)
+            _num = (_act_c * _exp_c).sum(axis=1)
+            _den = cp.sqrt((_act_c**2).sum(axis=1) * (_exp_c**2).sum(axis=1))
+            _den = cp.where(_den == 0, 1.0, _den)
+            _r_vals = cp.asnumpy(_num / _den)
+            _n_obs = _act_vals.shape[1]
+            _t_vals = _r_vals * np.sqrt((_n_obs - 2) / (1 - _r_vals**2 + 1e-300))
+            _p_vals = 2 * stats.t.sf(np.abs(_t_vals), df=_n_obs - 2)
+            corr_data = [
+                {"gene": g, "r": _r_vals[i], "p": _p_vals[i]}
+                for i, g in enumerate(_common_genes)
+            ]
         else:
-            corr_data.append({"gene": gene, "r": np.nan, "p": np.nan})
+            corr_data = []
+        corr_data.extend([{"gene": g, "r": np.nan, "p": np.nan} for g in _other_genes])
+    else:
+        corr_data = []
+        for gene in act_new.index:
+            act_gene = act_new.loc[gene].values
+            if gene in expr_new.index:
+                exp_gene = expr_new_aggr.loc[gene].values
+                r, p = stats.spearmanr(act_gene, exp_gene)
+                corr_data.append({"gene": gene, "r": r, "p": p})
+            else:
+                corr_data.append({"gene": gene, "r": np.nan, "p": np.nan})
 
     corr_df = pd.DataFrame(corr_data).set_index("gene")
 
@@ -322,33 +357,56 @@ def secact_signaling_patterns(
     # Prepare non-negative matrix (nneg: clip to 0)
     act_nneg = act.loc[corr_genes].clip(lower=0).values
 
-    if isinstance(k, list):
-        # Select optimal k by silhouette coefficient
-        best_k = k[0]
-        best_sil = -1.0
-        sil_scores = []
-        for ki in k:
-            model = NMF(n_components=ki, random_state=seed, max_iter=500)
-            W = model.fit_transform(act_nneg)
-            labels = W.argmax(axis=1)
-            if len(set(labels)) > 1:
-                sil = silhouette_score(act_nneg, labels)
-            else:
-                sil = 0.0
-            sil_scores.append(sil)
-            if sil > best_sil:
-                best_sil = sil
-                best_k = ki
+    if _backend.is_gpu_active:
+        import cupy as cp
 
-        # R uses max drop in silhouette, but we use max silhouette
-        k_final = best_k
-        logger.info("Optimal k = %d (silhouette = %.3f)", k_final, best_sil)
+        from spatialgpu.core.gpu_ops import gpu_nmf
+
+        _act_nneg_gpu = cp.asarray(act_nneg)
+
+        if isinstance(k, list):
+            best_k, best_sil = k[0], -1.0
+            for ki in k:
+                _W_gpu, _H_gpu = gpu_nmf(_act_nneg_gpu, n_components=ki, seed=seed, max_iter=500)
+                _labels = cp.asnumpy(_W_gpu.argmax(axis=1))
+                _sil = silhouette_score(act_nneg, _labels) if len(set(_labels)) > 1 else 0.0
+                if _sil > best_sil:
+                    best_sil, best_k = _sil, ki
+            k_final = best_k
+            logger.info("Optimal k = %d (silhouette = %.3f)", k_final, best_sil)
+        else:
+            k_final = k
+
+        _W_gpu, _H_gpu = gpu_nmf(_act_nneg_gpu, n_components=k_final, seed=seed, max_iter=500)
+        W, H = cp.asnumpy(_W_gpu), cp.asnumpy(_H_gpu)
     else:
-        k_final = k
+        if isinstance(k, list):
+            # Select optimal k by silhouette coefficient
+            best_k = k[0]
+            best_sil = -1.0
+            sil_scores = []
+            for ki in k:
+                model = NMF(n_components=ki, random_state=seed, max_iter=500)
+                W = model.fit_transform(act_nneg)
+                labels = W.argmax(axis=1)
+                if len(set(labels)) > 1:
+                    sil = silhouette_score(act_nneg, labels)
+                else:
+                    sil = 0.0
+                sil_scores.append(sil)
+                if sil > best_sil:
+                    best_sil = sil
+                    best_k = ki
 
-    model = NMF(n_components=k_final, random_state=seed, max_iter=500)
-    W = model.fit_transform(act_nneg)
-    H = model.components_
+            # R uses max drop in silhouette, but we use max silhouette
+            k_final = best_k
+            logger.info("Optimal k = %d (silhouette = %.3f)", k_final, best_sil)
+        else:
+            k_final = k
+
+        model = NMF(n_components=k_final, random_state=seed, max_iter=500)
+        W = model.fit_transform(act_nneg)
+        H = model.components_
 
     # Create DataFrames matching R's naming
     factor_names = [str(i + 1) for i in range(k_final)]
@@ -468,21 +526,33 @@ def secact_signaling_velocity(
     expr = _normalize_tpm(expr, scale_factor)
 
     # Spatial weights
-    weights = cal_weights(adata, radius=radius, sigma=sigma, diag_as_zero=True)
-    if sparse.issparse(weights):
-        dense_gb = weights.shape[0] * weights.shape[1] * 8 / 1e9
-        if dense_gb > 4:
-            import warnings
+    from spatialgpu.core.backend import get_backend as _get_backend
 
-            warnings.warn(
-                f"Densifying {weights.shape} weight matrix ({dense_gb:.1f} GB). "
-                f"Consider reducing spot count.",
-                ResourceWarning,
-                stacklevel=2,
-            )
-        weights_dense = weights.toarray()
+    _backend = _get_backend()
+
+    weights = cal_weights(adata, radius=radius, sigma=sigma, diag_as_zero=True)
+    if _backend.is_gpu_active:
+        import cupy as cp
+
+        if sparse.issparse(weights):
+            weights_dense = cp.asarray(weights.toarray())
+        else:
+            weights_dense = cp.asarray(weights)
     else:
-        weights_dense = np.asarray(weights)
+        if sparse.issparse(weights):
+            dense_gb = weights.shape[0] * weights.shape[1] * 8 / 1e9
+            if dense_gb > 4:
+                import warnings
+
+                warnings.warn(
+                    f"Densifying {weights.shape} weight matrix ({dense_gb:.1f} GB). "
+                    f"Consider reducing spot count.",
+                    ResourceWarning,
+                    stacklevel=2,
+                )
+            weights_dense = weights.toarray()
+        else:
+            weights_dense = np.asarray(weights)
 
     spot_names = adata.obs_names.tolist()
     common_spots = [s for s in spot_names if s in act.columns and s in expr.columns]
@@ -492,19 +562,37 @@ def secact_signaling_velocity(
     expr_new = expr[common_spots]
 
     # Build weighted matrix: weights_new[i,j] = weights[i,j] * expr[gene, i] * act[gene, j]
-    if gene not in expr_new.index:
-        weights_new = np.zeros((n_spots, n_spots))
-    else:
-        expr_gene = expr_new.loc[gene].values  # (n_spots,)
-        # weights_new = weights * expr[gene, :]  (row-wise multiply)
-        weights_new = weights_dense[:n_spots, :n_spots] * expr_gene[:, np.newaxis]
+    if _backend.is_gpu_active:
+        import cupy as cp
 
-    # Then multiply columns by act[gene, :]
-    if gene in act_new.index:
-        act_gene = act_new.loc[gene].values  # (n_spots,)
-        weights_new = weights_new * act_gene[np.newaxis, :]
+        if gene not in expr_new.index:
+            weights_new = np.zeros((n_spots, n_spots))
+        else:
+            expr_gene = expr_new.loc[gene].values  # (n_spots,)
+            _expr_gene_gpu = cp.asarray(expr_gene)
+            _w_sub = weights_dense[:n_spots, :n_spots]
+            weights_new_gpu = _w_sub * _expr_gene_gpu[:, cp.newaxis]
+            if gene in act_new.index:
+                act_gene = act_new.loc[gene].values  # (n_spots,)
+                _act_gene_gpu = cp.asarray(act_gene)
+                weights_new_gpu = weights_new_gpu * _act_gene_gpu[cp.newaxis, :]
+            else:
+                weights_new_gpu = cp.zeros_like(weights_new_gpu)
+            weights_new = cp.asnumpy(weights_new_gpu)
     else:
-        weights_new = np.zeros_like(weights_new)
+        if gene not in expr_new.index:
+            weights_new = np.zeros((n_spots, n_spots))
+        else:
+            expr_gene = expr_new.loc[gene].values  # (n_spots,)
+            # weights_new = weights * expr[gene, :]  (row-wise multiply)
+            weights_new = weights_dense[:n_spots, :n_spots] * expr_gene[:, np.newaxis]
+
+        # Then multiply columns by act[gene, :]
+        if gene in act_new.index:
+            act_gene = act_new.loc[gene].values  # (n_spots,)
+            weights_new = weights_new * act_gene[np.newaxis, :]
+        else:
+            weights_new = np.zeros_like(weights_new)
 
     # Coordinates
     coords = np.column_stack(
