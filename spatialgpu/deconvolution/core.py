@@ -17,10 +17,10 @@ import pandas as pd
 from scipy import sparse, stats
 
 from spatialgpu.deconvolution.reference import (
+    ensure_human_genes,
     get_cancer_signature,
     load_comb_ref,
     load_ref_normal_lihc,
-    mouse2human_mat,
 )
 
 if TYPE_CHECKING:
@@ -310,10 +310,7 @@ def _deconvolution_python(
     gene_names = gene_names[nonzero_mask]
 
     # Mouse-to-human gene conversion
-    organism = adata.uns.get("spacet_organism", "human")
-    if organism == "mouse":
-        logger.info("Converting mouse genes to human orthologs.")
-        counts, gene_names = mouse2human_mat(counts, gene_names)
+    counts, gene_names = ensure_human_genes(adata, counts, gene_names)
 
     # Load reference
     ref = load_comb_ref()

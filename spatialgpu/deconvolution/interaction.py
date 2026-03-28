@@ -21,7 +21,7 @@ import pandas as pd
 from scipy import sparse, stats
 from scipy.spatial.distance import cdist
 
-from spatialgpu.deconvolution.reference import load_lr_database, mouse2human_mat
+from spatialgpu.deconvolution.reference import ensure_human_genes, load_lr_database
 
 if TYPE_CHECKING:
     import anndata as ad
@@ -207,10 +207,7 @@ def cci_lr_network_score(
     n_spots = counts.shape[1]
 
     # Mouse-to-human gene conversion
-    organism = adata.uns.get("spacet_organism", "human")
-    if organism == "mouse":
-        logger.info("Converting mouse genes to human orthologs.")
-        counts, gene_names = mouse2human_mat(counts, gene_names)
+    counts, gene_names = ensure_human_genes(adata, counts, gene_names)
 
     # CPM + log2 normalization (shared with core._cpm_log2)
     from spatialgpu.deconvolution.core import _cpm_log2

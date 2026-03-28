@@ -27,7 +27,7 @@ from spatialgpu.deconvolution.core import (
     _get_counts_genes_by_spots,
     _spatial_deconv,
 )
-from spatialgpu.deconvolution.reference import mouse2human_mat
+from spatialgpu.deconvolution.reference import ensure_human_genes
 
 if TYPE_CHECKING:
     import anndata as ad
@@ -112,10 +112,7 @@ def deconvolution_malignant(
     gene_names = gene_names[nonzero_mask]
 
     # Mouse-to-human gene conversion
-    organism = adata.uns.get("spacet_organism", "human")
-    if organism == "mouse":
-        logger.info("Converting mouse genes to human orthologs.")
-        counts, gene_names = mouse2human_mat(counts, gene_names)
+    counts, gene_names = ensure_human_genes(adata, counts, gene_names)
 
     # --- Select malignant spots ---
     mal_fractions = res_deconv.loc[malignant]

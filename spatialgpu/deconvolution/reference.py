@@ -7,12 +7,15 @@ databases from bundled data files. Uses lazy loading with caching.
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -214,6 +217,16 @@ def _load_mouse2human_map() -> pd.DataFrame:
     return pd.read_csv(_DATA_DIR / "Mouse2Human_filter.csv", index_col=0)
 
 
+@lru_cache(maxsize=1)
+def _mouse2human_dict() -> dict[str, str]:
+    """Build cached mouse-to-human gene name lookup dict."""
+    m2h = _load_mouse2human_map()[["mouse", "human"]]
+    return dict(zip(m2h["mouse"], m2h["human"]))
+
+
+_VALID_ORGANISMS = {"human", "mouse"}
+
+
 def mouse2human_mat(
     counts: np.ndarray,
     gene_names: np.ndarray,
@@ -227,7 +240,8 @@ def mouse2human_mat(
     Parameters
     ----------
     counts : sparse matrix or ndarray
-        Gene expression matrix (genes x spots).
+        Gene expression matrix, shape (genes x spots). The number of rows
+        must equal ``len(gene_names)``.
     gene_names : ndarray of str
         Mouse gene symbols corresponding to rows of *counts*.
 
@@ -238,22 +252,23 @@ def mouse2human_mat(
     """
     from scipy import sparse as sp
 
-    m2h = _load_mouse2human_map()[["mouse", "human"]]
+    if counts.shape[0] != len(gene_names):
+        raise ValueError(
+            f"counts has {counts.shape[0]} rows but gene_names has "
+            f"{len(gene_names)} entries. Counts must be genes x spots."
+        )
 
-    # Match mouse gene names
-    mouse_to_human = dict(zip(m2h["mouse"], m2h["human"]))
-    keep_idx = []
-    human_names = []
-    for i, g in enumerate(gene_names):
-        if g in mouse_to_human:
-            keep_idx.append(i)
-            human_names.append(mouse_to_human[g])
+    mouse_to_human = _mouse2human_dict()
+
+    # Vectorized gene matching
+    gene_series = pd.Series(gene_names)
+    mapped = gene_series.map(mouse_to_human)
+    mask = mapped.notna()
+    keep_idx = np.where(mask.values)[0]
+    human_names = mapped[mask].values
 
     if len(keep_idx) == 0:
         raise ValueError("No mouse genes matched the mapping table.")
-
-    keep_idx = np.array(keep_idx)
-    human_names = np.array(human_names)
 
     # Subset to matched genes
     counts_sub = counts[keep_idx]
@@ -267,4 +282,38 @@ def mouse2human_mat(
     )
 
     out = agg @ counts_sub
+
+    logger.info(
+        "Mapped %d mouse genes to %d unique human orthologs.",
+        len(keep_idx),
+        n_human,
+    )
+
     return out, unique_human
+
+
+def ensure_human_genes(
+    adata: Any,
+    counts: np.ndarray,
+    gene_names: np.ndarray,
+) -> tuple:
+    """Convert mouse genes to human orthologs if organism is mouse.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Used to check ``adata.uns.get('spacet_organism')``.
+    counts : sparse matrix or ndarray
+        Gene expression matrix (genes x spots).
+    gene_names : ndarray of str
+        Gene symbols corresponding to rows of *counts*.
+
+    Returns
+    -------
+    tuple of (counts, gene_names) — unchanged if human, converted if mouse.
+    """
+    organism = adata.uns.get("spacet_organism", "human")
+    if organism == "mouse":
+        logger.info("Converting mouse genes to human orthologs.")
+        return mouse2human_mat(counts, gene_names)
+    return counts, gene_names

@@ -23,6 +23,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from spatialgpu.deconvolution.reference import _VALID_ORGANISMS
+
+
+def _validate_organism(organism: str) -> str:
+    """Validate and normalize organism string."""
+    org = organism.lower().strip()
+    if org not in _VALID_ORGANISMS:
+        raise ValueError(
+            f"Unknown organism '{organism}'. Must be one of: {_VALID_ORGANISMS}"
+        )
+    return org
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -155,7 +167,7 @@ def create_spacet_object_10x(
     )
 
     adata.uns["spacet_platform"] = platform
-    adata.uns["spacet_organism"] = organism.lower()
+    adata.uns["spacet_organism"] = _validate_organism(organism)
     adata.uns["spacet"] = {}
 
     logger.info(
@@ -270,7 +282,7 @@ def create_spacet_object(
     adata.obsm["spatial"] = np.column_stack([coord_x, coord_y])
 
     adata.uns["spacet_platform"] = platform
-    adata.uns["spacet_organism"] = organism.lower()
+    adata.uns["spacet_organism"] = _validate_organism(organism)
     adata.uns["spacet"] = {}
 
     if image_path is not None:

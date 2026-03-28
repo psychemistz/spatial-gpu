@@ -30,6 +30,7 @@ from spatialgpu.deconvolution.io import (
     quality_control,
 )
 from spatialgpu.deconvolution.reference import (
+    ensure_human_genes,
     get_cancer_signature,
     load_comb_ref,
     load_gene_set,
@@ -95,6 +96,7 @@ __all__ = [
     "load_gene_set",
     "load_lr_database",
     "get_cancer_signature",
+    "ensure_human_genes",
     "mouse2human_mat",
     "read_gmt",
     "write_gmt",
