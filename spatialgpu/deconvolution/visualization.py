@@ -21,17 +21,24 @@ from scipy import sparse
 
 from spatialgpu.deconvolution._keys import (
     KEY_CCI,
+    KEY_COLOCALIZATION,
     KEY_DECONV,
     KEY_GENESET,
     KEY_GROUPMAT,
     KEY_INTERACTION,
+    KEY_INTERFACE,
+    KEY_LR_NETWORK_SCORE,
+    KEY_LR_NETWORK_SCORE_IDX,
+    KEY_PATTERN,
     KEY_PROPMAT,
     KEY_SECACT,
+    KEY_SECRETED_PROTEIN_ACTIVITY,
     KEY_TESTRES,
     LABEL_MACROPHAGE_OTHER,
     LABEL_MALIGNANT,
     LABEL_UNIDENTIFIABLE,
     OBSM_SPATIAL,
+    UNS_PLATFORM,
     UNS_SPACET,
 )
 
@@ -299,7 +306,7 @@ def visualize_colocalization(
     """
     spacet = adata.uns.get(UNS_SPACET, {})
     cci = spacet.get(KEY_CCI, {})
-    summary_df = cci.get("colocalization")
+    summary_df = cci.get(KEY_COLOCALIZATION)
     if summary_df is None:
         raise ValueError("Run cci_colocalization() first.")
 
@@ -550,7 +557,7 @@ def visualize_cell_type_pair(
     ax2.spines["right"].set_visible(False)
 
     # --- Panel 3: Boxplot (Both vs Single) ---
-    lr_score = cci.get("LRNetworkScore")
+    lr_score = cci.get(KEY_LR_NETWORK_SCORE)
     if lr_score is not None:
         lr_vals = lr_score[1, :].astype(float).copy()
         lr_vals = np.clip(lr_vals, None, 2.0)
@@ -642,7 +649,7 @@ def visualize_distance_to_interface(
     """
     spacet = adata.uns.get(UNS_SPACET, {})
     cci = spacet.get(KEY_CCI, {})
-    interface = cci.get("interface")
+    interface = cci.get(KEY_INTERFACE)
     interaction = cci.get(KEY_INTERACTION, {})
     test_res = interaction.get(KEY_TESTRES)
     group_mat = interaction.get(KEY_GROUPMAT)
@@ -747,7 +754,7 @@ def visualize_distance_to_interface(
 
 def _needs_yflip(adata: ad.AnnData) -> bool:
     """Check if Y-axis should be inverted (Visium pixel coordinates)."""
-    platform = adata.uns.get("spacet_platform", "")
+    platform = adata.uns.get(UNS_PLATFORM, "")
     # Visium/VisiumHD use pixel coordinates where row increases downward
     return platform in ("Visium", "VisiumHD")
 
@@ -842,8 +849,10 @@ def _prepare_quality_control(
 
 def _get_column_float64(X, idx: int) -> np.ndarray:
     """Extract a single column from X as a dense float64 array."""
+    from spatialgpu.core.array_utils import to_dense_float64
+
     if sparse.issparse(X):
-        return np.asarray(X[:, idx].todense()).ravel().astype(np.float64)
+        return to_dense_float64(X[:, idx].toarray()).ravel()
     return X[:, idx].astype(np.float64)
 
 
@@ -975,7 +984,7 @@ def _prepare_lr_network_score(
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
     cci = spacet.get(KEY_CCI, {})
-    lr_score = cci.get("LRNetworkScore")
+    lr_score = cci.get(KEY_LR_NETWORK_SCORE)
     if lr_score is None:
         raise ValueError("Run cci_lr_network_score() first.")
 
@@ -983,7 +992,7 @@ def _prepare_lr_network_score(
         spatial_features = ["Network_Score", "Network_Score_pv"]
 
     lr_index = cci.get(
-        "LRNetworkScore_index",
+        KEY_LR_NETWORK_SCORE_IDX,
         [
             "Raw_expr",
             "Network_Score",
@@ -1011,7 +1020,7 @@ def _prepare_interface(
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
     cci = spacet.get(KEY_CCI, {})
-    interface_df = cci.get("interface")
+    interface_df = cci.get(KEY_INTERFACE)
     if interface_df is None:
         raise ValueError("Run identify_interface() first.")
 
@@ -1048,7 +1057,7 @@ def _prepare_secreted_protein_activity(
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
     sec_act = spacet.get(KEY_SECACT, {})
-    spa = sec_act.get("SecretedProteinActivity", {})
+    spa = sec_act.get(KEY_SECRETED_PROTEIN_ACTIVITY, {})
     zscore = spa.get("zscore")
     if zscore is None:
         raise ValueError("Run SecAct signaling inference first.")
@@ -1069,7 +1078,7 @@ def _prepare_signaling_pattern(
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
     sec_act = spacet.get(KEY_SECACT, {})
-    pattern = sec_act.get("pattern", {})
+    pattern = sec_act.get(KEY_PATTERN, {})
     signal_h = pattern.get("signal_H")
     if signal_h is None:
         signal_h = pattern.get("signal.H")

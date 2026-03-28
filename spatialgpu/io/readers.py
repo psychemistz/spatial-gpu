@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from spatialgpu.deconvolution._keys import UNS_TRANSCRIPTS_FILE
+
 if TYPE_CHECKING:
     import anndata as ad
 
@@ -134,7 +136,7 @@ def read_xenium(
                 adata.obs[col] = cells[col].values
 
     # Store transcripts path for later use
-    adata.uns["transcripts_file"] = str(path / transcripts_file)
+    adata.uns[UNS_TRANSCRIPTS_FILE] = str(path / transcripts_file)
 
     return adata
 

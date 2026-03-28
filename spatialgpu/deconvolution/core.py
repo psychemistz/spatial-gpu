@@ -16,16 +16,22 @@ import numpy as np
 import pandas as pd
 from scipy import sparse, stats
 
-from spatialgpu.core.array_utils import to_dense_float64
+from spatialgpu.core.array_utils import filter_zero_genes, to_dense_float64
 from spatialgpu.deconvolution._keys import (
+    KEY_CANCER_TYPE,
     KEY_DECONV,
     KEY_MALPROP,
     KEY_MALREF,
+    KEY_MALRES,
     KEY_PROPMAT,
+    KEY_PROPMAT_COLS,
     KEY_REF,
     LABEL_MACROPHAGE_OTHER,
     LABEL_MALIGNANT,
     LABEL_UNIDENTIFIABLE,
+    OBSM_DECONV_PROPMAT,
+    OBSM_SPACET_PROPMAT,
+    UNS_DECONV,
     UNS_SPACET,
 )
 from spatialgpu.deconvolution.reference import (
@@ -95,13 +101,13 @@ def deconvolution(
     )
 
     # Store results in AnnData
-    adata.obsm["spacet_propMat"] = prop_mat.T.reindex(adata.obs_names).values
+    adata.obsm[OBSM_SPACET_PROPMAT] = prop_mat.T.reindex(adata.obs_names).values
     adata.uns[UNS_SPACET] = {
         KEY_DECONV: {
             KEY_PROPMAT: prop_mat,
-            "malRes": mal_res,
+            KEY_MALRES: mal_res,
         },
-        "propMat_columns": list(prop_mat.index),
+        KEY_PROPMAT_COLS: list(prop_mat.index),
     }
 
     # Always store combined reference for downstream CCI analysis
@@ -155,13 +161,7 @@ def deconvolution_bulk(
     sample_names = np.array(adata.obs_names)
 
     # Filter zero-sum genes
-    if sparse.issparse(counts):
-        gene_sums = np.asarray(counts.sum(axis=1)).ravel()
-    else:
-        gene_sums = counts.sum(axis=1)
-    nonzero_mask = gene_sums > 0
-    counts = counts[nonzero_mask]
-    gene_names = gene_names[nonzero_mask]
+    counts, gene_names = filter_zero_genes(counts, gene_names)
 
     ref = load_comb_ref()
     if cancer_type in ("LIHC", "CHOL"):
@@ -211,15 +211,15 @@ def deconvolution_bulk(
     )
 
     # Store results
-    adata.obsm["deconv_propMat"] = prop_mat.T.reindex(adata.obs_names).values
-    adata.uns["deconv"] = {
+    adata.obsm[OBSM_DECONV_PROPMAT] = prop_mat.T.reindex(adata.obs_names).values
+    adata.uns[UNS_DECONV] = {
         KEY_PROPMAT: prop_mat,
         KEY_MALPROP: mal_prop_s,
-        "cancer_type": cancer_type,
+        KEY_CANCER_TYPE: cancer_type,
     }
     adata.uns.setdefault(UNS_SPACET, {})[KEY_DECONV] = {
         KEY_PROPMAT: prop_mat,
-        "malRes": {KEY_MALPROP: mal_prop_s, KEY_MALREF: mal_ref},
+        KEY_MALRES: {KEY_MALPROP: mal_prop_s, KEY_MALREF: mal_ref},
     }
 
     try:
@@ -327,13 +327,7 @@ def _deconvolution_python(
     spot_names = np.array(adata.obs_names)
 
     # Filter zero-sum genes
-    if sparse.issparse(counts):
-        gene_sums = np.asarray(counts.sum(axis=1)).ravel()
-    else:
-        gene_sums = counts.sum(axis=1)
-    nonzero_mask = gene_sums > 0
-    counts = counts[nonzero_mask]
-    gene_names = gene_names[nonzero_mask]
+    counts, gene_names = filter_zero_genes(counts, gene_names)
 
     # Mouse-to-human gene conversion
     counts, gene_names = ensure_human_genes(adata, counts, gene_names)
@@ -1001,14 +995,18 @@ def _collect_signature_genes(
 
 def _gene_indices(sig_genes: list[str], olp_genes: np.ndarray) -> np.ndarray:
     """Return integer indices into *olp_genes* for each gene in *sig_genes*."""
-    gene_to_idx = {g: i for i, g in enumerate(olp_genes)}
+    # Build dict keeping first occurrence to match prior np.where behaviour
+    gene_to_idx: dict[str, int] = {}
+    for i, g in enumerate(olp_genes):
+        if g not in gene_to_idx:
+            gene_to_idx[g] = i
     return np.array([gene_to_idx[g] for g in sig_genes])
 
 
 def _ref_col_indices(types: list[str], ref_columns: pd.Index | list[str]) -> list[int]:
     """Return column indices in *ref_columns* for each type in *types*."""
     if isinstance(ref_columns, pd.Index):
-        return [ref_columns.get_loc(t) for t in types]
+        return list(ref_columns.get_indexer(types))
     col_map = {t: i for i, t in enumerate(ref_columns)}
     return [col_map[t] for t in types]
 

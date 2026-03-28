@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 import numpy as np
 import pandas as pd
 
+from spatialgpu.deconvolution._keys import UNS_ORGANISM
+
 logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
@@ -316,7 +318,7 @@ def ensure_human_genes(
     -------
     tuple of (counts, gene_names) — unchanged if human, converted if mouse.
     """
-    organism = adata.uns.get("spacet_organism", "human")
+    organism = adata.uns.get(UNS_ORGANISM, "human")
     if organism == "mouse":
         logger.info("Converting mouse genes to human orthologs.")
         return mouse2human_mat(counts, gene_names)

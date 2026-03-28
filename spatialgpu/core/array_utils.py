@@ -235,12 +235,10 @@ def ensure_contiguous(x: Array, order: str = "C") -> Array:
 
 
 def as_float32(x: Array) -> Array:
-    """Convert array to float32."""
     return x.astype(np.float32, copy=False)
 
 
 def as_float64(x: Array) -> Array:
-    """Convert array to float64."""
     return x.astype(np.float64, copy=False)
 
 
@@ -380,3 +378,28 @@ def sparse_sum(
         return np.asarray(X.sum(axis=axis)).ravel()
     s = np.asarray(X).sum(axis=axis)
     return np.atleast_1d(s).ravel()
+
+
+def filter_zero_genes(
+    counts: Union[np.ndarray, sparse.spmatrix],
+    gene_names: np.ndarray,
+    axis: int = 1,
+) -> tuple[Union[np.ndarray, sparse.spmatrix], np.ndarray]:
+    """Remove genes (rows) with zero total counts.
+
+    Parameters
+    ----------
+    counts : ndarray or sparse matrix
+        Expression matrix, typically genes x spots.
+    gene_names : ndarray
+        Gene name array aligned with *counts* along *axis*.
+    axis : int
+        Axis along which to sum (default 1 = sum across columns).
+
+    Returns
+    -------
+    tuple of (filtered_counts, filtered_gene_names)
+    """
+    gene_sums = sparse_sum(counts, axis=axis)
+    nonzero_mask = gene_sums > 0
+    return counts[nonzero_mask], gene_names[nonzero_mask]

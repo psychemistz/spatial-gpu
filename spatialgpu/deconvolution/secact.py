@@ -22,7 +22,12 @@ import pandas as pd
 from scipy import sparse, stats
 from scipy.spatial import KDTree
 
-from spatialgpu.deconvolution._keys import KEY_SECACT, UNS_SPACET
+from spatialgpu.deconvolution._keys import (
+    KEY_PATTERN,
+    KEY_SECACT,
+    KEY_SECRETED_PROTEIN_ACTIVITY,
+    UNS_SPACET,
+)
 from spatialgpu.deconvolution.spatial_correlation import cal_weights
 
 if TYPE_CHECKING:
@@ -181,7 +186,7 @@ def secact_inference(
         verbose=verbose,
     )
 
-    secact_out["SecretedProteinActivity"] = result
+    secact_out[KEY_SECRETED_PROTEIN_ACTIVITY] = result
     logger.info(
         "SecAct inference done: %d proteins × %d spots",
         result["zscore"].shape[0],
@@ -235,10 +240,10 @@ def secact_signaling_patterns(
     from sklearn.metrics import silhouette_score
 
     secact_out = _ensure_secact(adata)
-    if "SecretedProteinActivity" not in secact_out:
+    if KEY_SECRETED_PROTEIN_ACTIVITY not in secact_out:
         raise ValueError("Run secact_inference() first.")
 
-    act = secact_out["SecretedProteinActivity"]["zscore"].copy()
+    act = secact_out[KEY_SECRETED_PROTEIN_ACTIVITY]["zscore"].copy()
     act = act.clip(lower=0)  # clip negative z-scores to 0
 
     # Step 1: Filter by Spearman correlation with neighbor-aggregated expression
@@ -420,7 +425,7 @@ def secact_signaling_patterns(
     weight_W = pd.DataFrame(W, index=corr_genes, columns=factor_names)
     signal_H = pd.DataFrame(H, index=factor_names, columns=act.columns)
 
-    secact_out["pattern"] = {
+    secact_out[KEY_PATTERN] = {
         "ccc_SP": corr_df,
         "weight_W": weight_W,
         "signal_H": signal_H,
@@ -450,10 +455,10 @@ def secact_pattern_genes(
     DataFrame of proteins most associated with pattern n, sorted by weight.
     """
     secact_out = _ensure_secact(adata)
-    if "pattern" not in secact_out:
+    if KEY_PATTERN not in secact_out:
         raise ValueError("Run secact_signaling_patterns() first.")
 
-    weight_W = secact_out["pattern"]["weight_W"].copy()
+    weight_W = secact_out[KEY_PATTERN]["weight_W"].copy()
     n_idx = n - 1  # convert to 0-based
 
     # R logic: double non-target columns, keep rows where target is max
@@ -491,10 +496,10 @@ def _prepare_velocity_data(
     expr is TPM-normalized + log2-transformed.
     """
     secact_out = _ensure_secact(adata)
-    if "SecretedProteinActivity" not in secact_out:
+    if KEY_SECRETED_PROTEIN_ACTIVITY not in secact_out:
         raise ValueError("Run secact_inference() first.")
 
-    act = secact_out["SecretedProteinActivity"]["zscore"].copy()
+    act = secact_out[KEY_SECRETED_PROTEIN_ACTIVITY]["zscore"].copy()
     act = act.clip(lower=0)
 
     expr = _get_expression_matrix(adata)
@@ -861,10 +866,10 @@ def secact_signaling_velocity_scst(
         - 'sender', 'receiver', 'secreted_protein': str
     """
     secact_out = _ensure_secact(adata)
-    if "SecretedProteinActivity" not in secact_out:
+    if KEY_SECRETED_PROTEIN_ACTIVITY not in secact_out:
         raise ValueError("Run secact_inference() first.")
 
-    act = secact_out["SecretedProteinActivity"]["zscore"].copy()
+    act = secact_out[KEY_SECRETED_PROTEIN_ACTIVITY]["zscore"].copy()
     act = act.clip(lower=0)
 
     expr = _get_expression_matrix(adata)
@@ -1010,10 +1015,10 @@ def secact_spatial_ccc(
     AnnData with CCC results in adata.uns['spacet']['SecAct_output']
     """
     secact_out = _ensure_secact(adata)
-    if "SecretedProteinActivity" not in secact_out:
+    if KEY_SECRETED_PROTEIN_ACTIVITY not in secact_out:
         raise ValueError("Run secact_inference() first.")
 
-    act = secact_out["SecretedProteinActivity"]["zscore"].copy()
+    act = secact_out[KEY_SECRETED_PROTEIN_ACTIVITY]["zscore"].copy()
     act = act.clip(lower=0)
 
     # Expression

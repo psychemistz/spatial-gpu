@@ -23,9 +23,15 @@ from scipy.spatial.distance import cdist
 
 from spatialgpu.deconvolution._keys import (
     KEY_CCI,
+    KEY_COLOCALIZATION,
     KEY_DECONV,
+    KEY_DIST_TO_INTERFACE,
     KEY_GROUPMAT,
     KEY_INTERACTION,
+    KEY_INTERFACE,
+    KEY_LR_NETWORK_SCORE,
+    KEY_LR_NETWORK_SCORE_COLS,
+    KEY_LR_NETWORK_SCORE_IDX,
     KEY_PROPMAT,
     KEY_REF,
     KEY_TESTRES,
@@ -172,7 +178,7 @@ def cci_colocalization(adata: ad.AnnData) -> ad.AnnData:
     summary_df = summary_df.loc[summary_df["cell_type_1"] != summary_df["cell_type_2"]]
 
     cci = _ensure_cci(adata)
-    cci["colocalization"] = summary_df
+    cci[KEY_COLOCALIZATION] = summary_df
 
     return adata
 
@@ -359,9 +365,9 @@ def cci_lr_network_score(
     )
 
     cci = _ensure_cci(adata)
-    cci["LRNetworkScore"] = lr_score_mat.values
-    cci["LRNetworkScore_columns"] = list(spot_names)
-    cci["LRNetworkScore_index"] = [
+    cci[KEY_LR_NETWORK_SCORE] = lr_score_mat.values
+    cci[KEY_LR_NETWORK_SCORE_COLS] = list(spot_names)
+    cci[KEY_LR_NETWORK_SCORE_IDX] = [
         "Raw_expr",
         "Network_Score",
         "Network_Score_pv",
@@ -478,7 +484,7 @@ def cci_cell_type_pair(
     pair_key = f"{ct1}_{ct2}"
 
     cci = _ensure_cci(adata)
-    lr_score_mat = cci["LRNetworkScore"]  # (3, n_spots) array
+    lr_score_mat = cci[KEY_LR_NETWORK_SCORE]  # (3, n_spots) array
     spot_names = list(res_deconv.columns)
 
     # Initialize or retrieve interaction results
@@ -497,7 +503,7 @@ def cci_cell_type_pair(
         test_res = pd.DataFrame()
 
     # Get colocalization rho and pv
-    coloc = cci["colocalization"]
+    coloc = cci[KEY_COLOCALIZATION]
     mask = (coloc["cell_type_1"] == ct1) & (coloc["cell_type_2"] == ct2)
     rho = float(coloc.loc[mask, "fraction_rho"].values[0])
     pv1 = float(coloc.loc[mask, "fraction_pv"].values[0])
@@ -754,7 +760,7 @@ def identify_interface(
     )
 
     cci = _ensure_cci(adata)
-    cci["interface"] = interface_df
+    cci[KEY_INTERFACE] = interface_df
 
     return adata
 
@@ -804,10 +810,10 @@ def combine_interface(
     ct1, ct2 = cell_type_pair
     pair_key = f"{ct1}_{ct2}"
 
-    if "interface" not in cci:
+    if KEY_INTERFACE not in cci:
         raise ValueError("Run identify_interface() first.")
 
-    interface_df: pd.DataFrame = cci["interface"]
+    interface_df: pd.DataFrame = cci[KEY_INTERFACE]
     if "Interface" not in interface_df.index:
         raise ValueError("Run identify_interface() first.")
 
@@ -846,7 +852,7 @@ def combine_interface(
         )
         interface_df = pd.concat([interface_df, new_row])
 
-    cci["interface"] = interface_df
+    cci[KEY_INTERFACE] = interface_df
 
     return adata
 
@@ -910,7 +916,7 @@ def distance_to_interface(
             )
         return adata
 
-    interface_df = cci["interface"]
+    interface_df = cci[KEY_INTERFACE]
     spot_names = list(res_deconv.columns)
 
     # Interface (border) spots and Stroma core spots
@@ -1010,10 +1016,10 @@ def distance_to_interface(
         f"p={pvalue:.4g} (n_perm={n_permutation})"
     )
 
-    if "distance_to_interface" not in cci:
-        cci["distance_to_interface"] = {}
+    if KEY_DIST_TO_INTERFACE not in cci:
+        cci[KEY_DIST_TO_INTERFACE] = {}
 
-    cci["distance_to_interface"][pair_key] = {
+    cci[KEY_DIST_TO_INTERFACE][pair_key] = {
         "d_observed": d_observed,
         "d_permuted": d_permuted,
         "pvalue": pvalue,

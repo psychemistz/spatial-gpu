@@ -23,7 +23,7 @@ from scipy.spatial.distance import squareform
 from sklearn.metrics import silhouette_samples
 from statsmodels.stats.multitest import multipletests
 
-from spatialgpu.core.array_utils import to_dense_float64
+from spatialgpu.core.array_utils import filter_zero_genes, to_dense_float64
 from spatialgpu.deconvolution._keys import (
     COL_CELLTYPE,
     KEY_DECONV,
@@ -34,6 +34,7 @@ from spatialgpu.deconvolution._keys import (
     KEY_REF,
     LABEL_MALIGNANT,
     LABEL_UNIDENTIFIABLE,
+    OBSM_SPACET_PROPMAT,
     UNS_SPACET,
 )
 from spatialgpu.deconvolution.core import (
@@ -210,13 +211,7 @@ def deconvolution_matched_scrnaseq(
     spot_names = np.array(adata.obs_names)
 
     # Filter zero-sum genes
-    if sparse.issparse(counts):
-        gene_sums = np.asarray(counts.sum(axis=1)).ravel()
-    else:
-        gene_sums = counts.sum(axis=1)
-    nonzero_mask = gene_sums > 0
-    counts = counts[nonzero_mask]
-    gene_names = gene_names[nonzero_mask]
+    counts, gene_names = filter_zero_genes(counts, gene_names)
 
     if sc_include_malignant:
         # No malignant inference needed — all cell types are in the reference
@@ -265,7 +260,7 @@ def deconvolution_matched_scrnaseq(
         },
         KEY_PROPMAT_COLS: list(prop_mat.index),
     }
-    adata.obsm["spacet_propMat"] = prop_mat.T.reindex(adata.obs_names).values
+    adata.obsm[OBSM_SPACET_PROPMAT] = prop_mat.T.reindex(adata.obs_names).values
 
     return adata
 
@@ -366,13 +361,7 @@ def deconvolution_malignant_custom_scrnaseq(
     spot_names = np.array(adata.obs_names)
 
     # Filter zero-sum genes
-    if sparse.issparse(counts):
-        gene_sums = np.asarray(counts.sum(axis=1)).ravel()
-    else:
-        gene_sums = counts.sum(axis=1)
-    nonzero_mask = gene_sums > 0
-    counts = counts[nonzero_mask]
-    gene_names = gene_names[nonzero_mask]
+    counts, gene_names = filter_zero_genes(counts, gene_names)
 
     # --- Known cell fractions (non-malignant) ---
     known_cell_types = [k for k in lineage_tree_orig.keys() if k != malignant]
@@ -412,7 +401,7 @@ def deconvolution_malignant_custom_scrnaseq(
     deconv[KEY_MALREF] = ref_new
     adata.uns[UNS_SPACET][KEY_DECONV] = deconv
     adata.uns[UNS_SPACET][KEY_PROPMAT_COLS] = list(prop_mat_merged.index)
-    adata.obsm["spacet_propMat"] = prop_mat_merged.T.reindex(adata.obs_names).values
+    adata.obsm[OBSM_SPACET_PROPMAT] = prop_mat_merged.T.reindex(adata.obs_names).values
 
     return adata
 
@@ -609,13 +598,7 @@ def _prepare_counts(
     spot_names = np.array(adata.obs_names)
 
     # Filter zero-sum genes
-    if sparse.issparse(counts):
-        gene_sums = np.asarray(counts.sum(axis=1)).ravel()
-    else:
-        gene_sums = counts.sum(axis=1)
-    nonzero_mask = gene_sums > 0
-    counts = counts[nonzero_mask]
-    gene_names = gene_names[nonzero_mask]
+    counts, gene_names = filter_zero_genes(counts, gene_names)
 
     # Mouse-to-human gene conversion
     counts, gene_names = ensure_human_genes(adata, counts, gene_names)
@@ -828,7 +811,7 @@ def _merge_and_store_results(
     deconv[KEY_PROPMAT] = prop_mat_merged
     adata.uns[UNS_SPACET][KEY_DECONV] = deconv
     adata.uns[UNS_SPACET][KEY_PROPMAT_COLS] = list(prop_mat_merged.index)
-    adata.obsm["spacet_propMat"] = prop_mat_merged.T.reindex(adata.obs_names).values
+    adata.obsm[OBSM_SPACET_PROPMAT] = prop_mat_merged.T.reindex(adata.obs_names).values
 
 
 # ---------------------------------------------------------------------------
