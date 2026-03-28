@@ -29,7 +29,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def create_spacet_object_10x(visium_path: str | Path) -> ad.AnnData:
+def create_spacet_object_10x(
+    visium_path: str | Path,
+    organism: str = "human",
+) -> ad.AnnData:
     """Create an AnnData object from 10X Visium Space Ranger output.
 
     Reads the filtered feature-barcode matrix and spatial information from a
@@ -43,6 +46,8 @@ def create_spacet_object_10x(visium_path: str | Path) -> ad.AnnData:
         Path to the Space Ranger output folder. Must contain
         ``filtered_feature_bc_matrix/`` (or ``filtered_feature_bc_matrix.h5``)
         and ``spatial/`` subdirectories.
+    organism : str
+        Organism of the sample, e.g. ``"human"`` or ``"mouse"``.
 
     Returns
     -------
@@ -150,13 +155,15 @@ def create_spacet_object_10x(visium_path: str | Path) -> ad.AnnData:
     )
 
     adata.uns["spacet_platform"] = platform
+    adata.uns["spacet_organism"] = organism.lower()
     adata.uns["spacet"] = {}
 
     logger.info(
-        "Created SpaCET object: %d spots x %d genes (%s).",
+        "Created SpaCET object: %d spots x %d genes (%s, %s).",
         adata.n_obs,
         adata.n_vars,
         platform,
+        organism,
     )
 
     return adata
@@ -167,6 +174,7 @@ def create_spacet_object(
     spot_coordinates: pd.DataFrame,
     platform: str,
     image_path: str | Path | None = None,
+    organism: str = "human",
 ) -> ad.AnnData:
     """Create an AnnData object from a count matrix and spot coordinates.
 
@@ -184,6 +192,8 @@ def create_spacet_object(
         Platform identifier, e.g. ``"Visium"``, ``"OldST"``, ``"Slide-Seq"``.
     image_path : str, Path, or None
         Optional path to H&E image file.
+    organism : str
+        Organism of the sample, e.g. ``"human"`` or ``"mouse"``.
 
     Returns
     -------
@@ -260,6 +270,7 @@ def create_spacet_object(
     adata.obsm["spatial"] = np.column_stack([coord_x, coord_y])
 
     adata.uns["spacet_platform"] = platform
+    adata.uns["spacet_organism"] = organism.lower()
     adata.uns["spacet"] = {}
 
     if image_path is not None:

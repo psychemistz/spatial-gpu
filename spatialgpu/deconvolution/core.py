@@ -20,6 +20,7 @@ from spatialgpu.deconvolution.reference import (
     get_cancer_signature,
     load_comb_ref,
     load_ref_normal_lihc,
+    mouse2human_mat,
 )
 
 if TYPE_CHECKING:
@@ -307,6 +308,12 @@ def _deconvolution_python(
     nonzero_mask = gene_sums > 0
     counts = counts[nonzero_mask]
     gene_names = gene_names[nonzero_mask]
+
+    # Mouse-to-human gene conversion
+    organism = adata.uns.get("spacet_organism", "human")
+    if organism == "mouse":
+        logger.info("Converting mouse genes to human orthologs.")
+        counts, gene_names = mouse2human_mat(counts, gene_names)
 
     # Load reference
     ref = load_comb_ref()

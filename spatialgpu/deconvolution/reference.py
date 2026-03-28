@@ -206,3 +206,65 @@ def get_cancer_signature(
                 return (st, series)
 
     return ("seq_depth", pd.Series(dtype=np.float64))
+
+
+@lru_cache(maxsize=1)
+def _load_mouse2human_map() -> pd.DataFrame:
+    """Load the mouse-to-human gene mapping table (cached)."""
+    return pd.read_csv(_DATA_DIR / "Mouse2Human_filter.csv", index_col=0)
+
+
+def mouse2human_mat(
+    counts: np.ndarray,
+    gene_names: np.ndarray,
+) -> tuple:
+    """Convert mouse gene expression matrix to human orthologs.
+
+    Rows (genes) with mouse gene symbols are mapped to human orthologs.
+    When multiple mouse genes map to the same human gene, their expression
+    values are summed via sparse matrix aggregation.
+
+    Parameters
+    ----------
+    counts : sparse matrix or ndarray
+        Gene expression matrix (genes x spots).
+    gene_names : ndarray of str
+        Mouse gene symbols corresponding to rows of *counts*.
+
+    Returns
+    -------
+    tuple of (converted_counts, human_gene_names)
+        Expression matrix with human gene names and summed duplicates.
+    """
+    from scipy import sparse as sp
+
+    m2h = _load_mouse2human_map()[["mouse", "human"]]
+
+    # Match mouse gene names
+    mouse_to_human = dict(zip(m2h["mouse"], m2h["human"]))
+    keep_idx = []
+    human_names = []
+    for i, g in enumerate(gene_names):
+        if g in mouse_to_human:
+            keep_idx.append(i)
+            human_names.append(mouse_to_human[g])
+
+    if len(keep_idx) == 0:
+        raise ValueError("No mouse genes matched the mapping table.")
+
+    keep_idx = np.array(keep_idx)
+    human_names = np.array(human_names)
+
+    # Subset to matched genes
+    counts_sub = counts[keep_idx]
+
+    # Group by human gene and sum (sparse aggregation matrix)
+    unique_human, group_labels = np.unique(human_names, return_inverse=True)
+    n_human = len(unique_human)
+    agg = sp.csr_matrix(
+        (np.ones(len(group_labels)), (group_labels, np.arange(len(group_labels)))),
+        shape=(n_human, len(group_labels)),
+    )
+
+    out = agg @ counts_sub
+    return out, unique_human

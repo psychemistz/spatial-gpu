@@ -34,6 +34,7 @@ from spatialgpu.deconvolution.reference import (
     load_comb_ref,
     load_gene_set,
     load_lr_database,
+    mouse2human_mat,
     read_gmt,
     write_gmt,
 )
@@ -94,6 +95,7 @@ __all__ = [
     "load_gene_set",
     "load_lr_database",
     "get_cancer_signature",
+    "mouse2human_mat",
     "read_gmt",
     "write_gmt",
     # SecAct analysis

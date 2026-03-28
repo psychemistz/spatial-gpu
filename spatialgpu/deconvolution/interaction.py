@@ -21,7 +21,7 @@ import pandas as pd
 from scipy import sparse, stats
 from scipy.spatial.distance import cdist
 
-from spatialgpu.deconvolution.reference import load_lr_database
+from spatialgpu.deconvolution.reference import load_lr_database, mouse2human_mat
 
 if TYPE_CHECKING:
     import anndata as ad
@@ -205,6 +205,12 @@ def cci_lr_network_score(
     gene_names = np.array(adata.var_names)
     spot_names = np.array(adata.obs_names)
     n_spots = counts.shape[1]
+
+    # Mouse-to-human gene conversion
+    organism = adata.uns.get("spacet_organism", "human")
+    if organism == "mouse":
+        logger.info("Converting mouse genes to human orthologs.")
+        counts, gene_names = mouse2human_mat(counts, gene_names)
 
     # CPM + log2 normalization (shared with core._cpm_log2)
     from spatialgpu.deconvolution.core import _cpm_log2
@@ -981,9 +987,10 @@ def distance_to_interface(
     n_both = len(both_spots)
     d_permuted = np.zeros(n_permutation, dtype=np.float64)
 
+    use_replace = n_both >= len(single_spots)
     for i in range(n_permutation):
         rng = np.random.RandomState(i + 1)
-        sampled_idx = rng.choice(len(single_spots), size=n_both, replace=False)
+        sampled_idx = rng.choice(len(single_spots), size=n_both, replace=use_replace)
         d_permuted[i] = np.mean(single_min_dists[sampled_idx])
 
     pvalue = (np.sum(d_permuted <= d_observed) + 1) / (n_permutation + 1)
