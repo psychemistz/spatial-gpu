@@ -47,6 +47,7 @@ def deconvolution(
     signature_type: str | None = None,
     adjacent_normal: bool = False,
     n_jobs: int = 1,
+    solver: str = "auto",
 ) -> ad.AnnData:
     """Two-stage hierarchical cell type deconvolution.
 
@@ -65,6 +66,11 @@ def deconvolution(
         If True, skip malignant cell inference (for normal tissue).
     n_jobs : int
         Number of parallel jobs.
+    solver : str
+        Optimization solver for constrained deconvolution.
+        "auto" (default): NNLS for Level 1, constrOptim for Level 2.
+        "r_compat": constrOptim for all levels (matches R exactly, slower).
+        "fast": NNLS/trust-constr for all levels (fastest).
 
     Returns
     -------
@@ -73,7 +79,7 @@ def deconvolution(
         adata.uns['spacet'] : dict with malRes, Ref, etc.
     """
     prop_mat, mal_res = _deconvolution_python(
-        adata, cancer_type, signature_type, adjacent_normal, n_jobs
+        adata, cancer_type, signature_type, adjacent_normal, n_jobs, solver=solver
     )
 
     # Store results in AnnData
@@ -301,6 +307,7 @@ def _deconvolution_python(
     signature_type: str | None = None,
     adjacent_normal: bool = False,
     n_jobs: int = 1,
+    solver: str = "auto",
 ) -> tuple[pd.DataFrame, dict]:
     """Python fallback for full deconvolution pipeline."""
     counts = _get_counts_genes_by_spots(adata)
@@ -357,6 +364,7 @@ def _deconvolution_python(
             mal_ref=mal_res["malRef"],
             mode="standard",
             n_jobs=n_jobs,
+            solver=solver,
         )
     else:
         chunk_size = CHUNK_SIZE
@@ -375,6 +383,7 @@ def _deconvolution_python(
                 mal_ref=mal_res["malRef"],
                 mode="standard",
                 n_jobs=n_jobs,
+                solver=solver,
             )
             prop_mats.append(prop_sub)
         prop_mat = pd.concat(prop_mats, axis=1)
@@ -879,6 +888,7 @@ def _spatial_deconv(
     unidentifiable: bool = True,
     macrophage_other: bool = True,
     n_jobs: int = 1,
+    solver: str = "auto",
 ) -> pd.DataFrame:
     """Hierarchical constrained least-squares deconvolution.
 
@@ -899,6 +909,7 @@ def _spatial_deconv(
         unidentifiable,
         macrophage_other,
         n_jobs,
+        solver=solver,
     )
 
 
@@ -913,6 +924,7 @@ def _spatial_deconv_python(
     unidentifiable: bool = True,
     macrophage_other: bool = True,
     n_jobs: int = 1,
+    solver: str = "auto",
 ) -> pd.DataFrame:
     """Python fallback for hierarchical constrained deconvolution."""
     reference = ref["refProfiles"].copy()
@@ -1031,6 +1043,7 @@ def _spatial_deconv_python(
             ),
             pp_max_arr=1 - mal_prop_arr,
             n_jobs=n_jobs,
+            solver=solver,
         )
 
         prop_mat_l1 = pd.DataFrame(prop_l1, index=level1_types, columns=valid_spots)
@@ -1138,6 +1151,7 @@ def _spatial_deconv_python(
             pp_min_arr=pp_min_l2,
             pp_max_arr=pp_max_l2,
             n_jobs=n_jobs,
+            solver=solver,
         )
 
         sub_df = pd.DataFrame(prop_l2, index=subtypes_in_ref, columns=valid_spots)
@@ -1165,6 +1179,7 @@ def _solve_constrained_batch(
     pp_min_arr: np.ndarray,
     pp_max_arr: np.ndarray,
     n_jobs: int = 1,
+    solver: str = "auto",
 ) -> np.ndarray:
     """Solve constrained least squares for all spots.
 
@@ -1172,14 +1187,31 @@ def _solve_constrained_batch(
     1. Unweighted least squares
     2. Weighted by 1/(fitted + 1)
 
-    Uses NNLS when ppmin=0 (Level 1), trust-constr when ppmin>0 (Level 2).
+    Parameters
+    ----------
+    solver : str
+        "auto" (default): NNLS for ppmin=0, constrOptim for ppmin>0.
+        "r_compat": Use constrOptim for all levels (matches R exactly, slower).
+        "fast": Always use NNLS/trust-constr (fastest, lower R concordance).
     """
     has_lower_bound = np.any(pp_min_arr > 1e-10)
-    if has_lower_bound:
+
+    if solver == "r_compat":
         return _solve_constr_optim(
             A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr, n_jobs
         )
-    return _solve_nnls(A, B, n_cell, theta_sum, pp_max_arr, n_jobs)
+    elif solver == "fast":
+        if has_lower_bound:
+            return _solve_trust_constr(
+                A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr, n_jobs
+            )
+        return _solve_nnls(A, B, n_cell, theta_sum, pp_max_arr, n_jobs)
+    else:  # auto
+        if has_lower_bound:
+            return _solve_constr_optim(
+                A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr, n_jobs
+            )
+        return _solve_nnls(A, B, n_cell, theta_sum, pp_max_arr, n_jobs)
 
 
 def _solve_nnls(
