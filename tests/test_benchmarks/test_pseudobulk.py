@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from spatialgpu.benchmarks.pseudobulk import (
+    evaluate_deconvolution,
     generate_pseudobulk_dirichlet,
     generate_pseudobulk_titration,
     generate_semi_synthetic_scrna,
@@ -196,3 +197,57 @@ class TestGeneratePseudobulkTitration:
         non_target = gt.drop(columns=["target_fraction", "Malignant_BRCA"])
         remainder = 1.0 - gt["target_fraction"].values
         np.testing.assert_allclose(non_target.sum(axis=1).values, remainder, atol=1e-10)
+
+
+class TestEvaluateDeconvolution:
+    def test_perfect_estimation(self):
+        gt = pd.DataFrame(
+            {"A": [0.3, 0.5, 0.2], "B": [0.7, 0.5, 0.8]}, index=["S1", "S2", "S3"]
+        )
+        result = evaluate_deconvolution(gt.copy(), gt)
+        assert result["overall"]["pearson_r"] > 0.999
+        assert result["overall"]["rmse"] < 1e-10
+
+    def test_random_estimation(self):
+        rng = np.random.RandomState(42)
+        gt = pd.DataFrame(
+            rng.dirichlet([1, 1, 1], size=50),
+            columns=["A", "B", "C"],
+            index=[f"S{i}" for i in range(50)],
+        )
+        est = pd.DataFrame(
+            rng.dirichlet([1, 1, 1], size=50),
+            columns=["A", "B", "C"],
+            index=[f"S{i}" for i in range(50)],
+        )
+        result = evaluate_deconvolution(est, gt)
+        assert result["overall"]["pearson_r"] < 0.5
+        assert result["overall"]["rmse"] > 0.1
+
+    def test_per_type_keys(self):
+        gt = pd.DataFrame({"A": [0.3, 0.5], "B": [0.7, 0.5]}, index=["S1", "S2"])
+        result = evaluate_deconvolution(gt.copy(), gt)
+        assert "per_type" in result
+        assert "A" in result["per_type"].index
+        assert "pearson_r" in result["per_type"].columns
+
+    def test_rare_type_mae(self):
+        gt = pd.DataFrame(
+            {"A": [0.02, 0.03, 0.8], "B": [0.98, 0.97, 0.2]}, index=["S1", "S2", "S3"]
+        )
+        est = pd.DataFrame(
+            {"A": [0.05, 0.06, 0.8], "B": [0.95, 0.94, 0.2]}, index=["S1", "S2", "S3"]
+        )
+        result = evaluate_deconvolution(est, gt)
+        assert result["rare_type_mae"] > 0
+
+    def test_aligns_on_common_types(self):
+        gt = pd.DataFrame({"A": [0.3, 0.5], "B": [0.7, 0.5]}, index=["S1", "S2"])
+        est = pd.DataFrame({"A": [0.3, 0.5], "C": [0.7, 0.5]}, index=["S1", "S2"])
+        result = evaluate_deconvolution(est, gt)
+        assert len(result["per_type"]) == 1
+
+    def test_spearman_in_overall(self):
+        gt = pd.DataFrame({"A": [0.3, 0.5], "B": [0.7, 0.5]}, index=["S1", "S2"])
+        result = evaluate_deconvolution(gt.copy(), gt)
+        assert "spearman_rho" in result["overall"]

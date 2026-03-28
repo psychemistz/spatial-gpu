@@ -313,3 +313,104 @@ def generate_pseudobulk_titration(
     ground_truth["target_fraction"] = all_target_fracs
 
     return adata_bulk, ground_truth
+
+
+def _collapse_to_level1(prop_mat: pd.DataFrame, level1_types: list) -> pd.DataFrame:
+    """Collapse hierarchical propMat to Level 1 types.
+
+    The propMat from deconvolution_bulk has both Level 1 and Level 2 rows.
+    For evaluation against pseudobulk mixed at Level 1 granularity, we
+    keep only Level 1 rows.
+    """
+    available = [t for t in level1_types if t in prop_mat.index]
+    return prop_mat.loc[available]
+
+
+def evaluate_deconvolution(
+    estimated: pd.DataFrame,
+    ground_truth: pd.DataFrame,
+) -> dict:
+    """Evaluate deconvolution accuracy against known proportions.
+
+    Parameters
+    ----------
+    estimated
+        Estimated proportions (samples x cell_types) or (cell_types x samples).
+    ground_truth
+        True proportions (samples x cell_types).
+
+    Returns
+    -------
+    dict with keys: overall, per_type, rare_type_mae
+    """
+    from scipy import stats
+
+    est = estimated.copy()
+    gt = ground_truth.copy()
+
+    # Auto-transpose if needed
+    if est.shape[0] != gt.shape[0] and est.shape[1] == gt.shape[0]:
+        est = est.T
+    if est.shape[1] != gt.shape[1] and est.shape[0] == gt.shape[1]:
+        est = est.T
+
+    common_types = est.columns.intersection(gt.columns)
+    common_samples = est.index.intersection(gt.index)
+
+    if len(common_types) == 0:
+        raise ValueError("No common cell types between estimated and ground truth.")
+
+    n_gt_types = len(gt.columns)
+    if len(common_types) < 0.8 * n_gt_types:
+        logger.warning(
+            "evaluate_deconvolution: only %d/%d cell types overlap (%.0f%%).",
+            len(common_types),
+            n_gt_types,
+            100 * len(common_types) / n_gt_types,
+        )
+
+    est_aligned = est.loc[common_samples, common_types].values.astype(np.float64)
+    gt_aligned = gt.loc[common_samples, common_types].values.astype(np.float64)
+
+    est_flat = est_aligned.ravel()
+    gt_flat = gt_aligned.ravel()
+
+    pearson_r, _ = stats.pearsonr(est_flat, gt_flat)
+    spearman_rho, _ = stats.spearmanr(est_flat, gt_flat)
+    rmse = float(np.sqrt(np.mean((est_flat - gt_flat) ** 2)))
+
+    per_type_rows = []
+    for i, ct in enumerate(common_types):
+        e = est_aligned[:, i]
+        g = gt_aligned[:, i]
+        if np.std(g) < 1e-15 or np.std(e) < 1e-15:
+            r = np.nan
+        else:
+            r, _ = stats.pearsonr(e, g)
+        ct_rmse = float(np.sqrt(np.mean((e - g) ** 2)))
+        per_type_rows.append(
+            {
+                "cell_type": ct,
+                "pearson_r": r,
+                "rmse": ct_rmse,
+                "n_samples": len(common_samples),
+            }
+        )
+
+    per_type = pd.DataFrame(per_type_rows).set_index("cell_type")
+
+    rare_mask = gt_aligned < 0.05
+    if rare_mask.sum() > 0:
+        rare_mae = float(np.mean(np.abs(est_aligned[rare_mask] - gt_aligned[rare_mask])))
+    else:
+        rare_mae = 0.0
+
+    return {
+        "overall": {
+            "pearson_r": float(pearson_r),
+            "spearman_rho": float(spearman_rho),
+            "rmse": rmse,
+        },
+        "per_type": per_type,
+        "rare_type_mae": rare_mae,
+    }
