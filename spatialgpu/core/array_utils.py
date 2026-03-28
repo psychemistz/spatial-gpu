@@ -355,3 +355,18 @@ def sparse_to_dense_chunked(
         out[start:end] = xp.asarray(chunk)
 
     return out
+
+
+def ensure_dense(X: Union[np.ndarray, sparse.spmatrix]) -> np.ndarray:
+    """Convert sparse matrix to dense numpy array, or pass through dense arrays."""
+    if sparse.issparse(X):
+        return np.asarray(X.toarray())
+    return np.asarray(X)
+
+
+def sparse_sum(X: Union[np.ndarray, sparse.spmatrix], axis: int | None = None) -> np.ndarray:
+    """Sum over sparse or dense matrix, always returning a 1D numpy array."""
+    if sparse.issparse(X):
+        return np.asarray(X.sum(axis=axis)).ravel()
+    s = np.asarray(X).sum(axis=axis)
+    return np.atleast_1d(s).ravel()
