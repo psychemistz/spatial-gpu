@@ -35,3 +35,8 @@ COL_RECEIVER = "receiver"
 COL_SECRETED_PROTEIN = "secretedProtein"
 COL_CELLTYPE = "cellType"
 COL_COUNT = "count"
+
+# ── Biological cell type labels ────────────────────────────────────────
+LABEL_MALIGNANT = "Malignant"
+LABEL_UNIDENTIFIABLE = "Unidentifiable"
+LABEL_MACROPHAGE_OTHER = "Macrophage other"

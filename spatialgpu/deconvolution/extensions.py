@@ -32,6 +32,8 @@ from spatialgpu.deconvolution._keys import (
     KEY_PROPMAT,
     KEY_PROPMAT_COLS,
     KEY_REF,
+    LABEL_MALIGNANT,
+    LABEL_UNIDENTIFIABLE,
     UNS_SPACET,
 )
 from spatialgpu.deconvolution.core import (
@@ -53,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 def deconvolution_malignant(
     adata: ad.AnnData,
-    malignant: str = "Malignant",
+    malignant: str = LABEL_MALIGNANT,
     malignant_cutoff: float = 0.7,
     n_jobs: int = 1,
 ) -> ad.AnnData:
@@ -270,7 +272,7 @@ def deconvolution_matched_scrnaseq(
 
 def deconvolution_malignant_custom_scrnaseq(
     adata: ad.AnnData,
-    malignant: str = "Malignant",
+    malignant: str = LABEL_MALIGNANT,
     sc_counts: pd.DataFrame | np.ndarray | None = None,
     sc_annotation: pd.DataFrame | None = None,
     sc_lineage_tree: dict[str, list[str]] | None = None,
@@ -375,8 +377,8 @@ def deconvolution_malignant_custom_scrnaseq(
     # --- Known cell fractions (non-malignant) ---
     known_cell_types = [k for k in lineage_tree_orig.keys() if k != malignant]
     known_fractions = list(known_cell_types)
-    if "Unidentifiable" in res_deconv.index:
-        known_fractions.append("Unidentifiable")
+    if LABEL_UNIDENTIFIABLE in res_deconv.index:
+        known_fractions.append(LABEL_UNIDENTIFIABLE)
 
     mal_prop_known = res_deconv.loc[known_fractions]
 
@@ -749,7 +751,7 @@ def _build_malignant_reference(
     sig_genes: dict[str, list[str]] = {}
 
     # Overall malignant reference profile
-    ref_profiles["Malignant"] = cpm_mal.mean(axis=1)
+    ref_profiles[LABEL_MALIGNANT] = cpm_mal.mean(axis=1)
 
     for state in states:
         state_name = f"Malignant cell state {state}"
@@ -796,8 +798,8 @@ def _prepare_known_fractions(
     known_cell_types = [k for k in lineage_tree.keys() if k != malignant]
 
     known_fractions = list(known_cell_types)
-    if "Unidentifiable" in res_deconv.index:
-        known_fractions.append("Unidentifiable")
+    if LABEL_UNIDENTIFIABLE in res_deconv.index:
+        known_fractions.append(LABEL_UNIDENTIFIABLE)
 
     mal_prop_known = res_deconv.loc[known_fractions]
 

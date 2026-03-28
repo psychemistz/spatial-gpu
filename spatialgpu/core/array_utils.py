@@ -357,18 +357,19 @@ def sparse_to_dense_chunked(
     return out
 
 
-def ensure_dense(X: Union[np.ndarray, sparse.spmatrix]) -> np.ndarray:
+def ensure_dense(
+    X: Union[np.ndarray, sparse.spmatrix],
+    dtype: np.dtype | None = None,
+) -> np.ndarray:
     """Convert sparse matrix to dense numpy array, or pass through dense arrays."""
     if sparse.issparse(X):
-        return np.asarray(X.toarray())
-    return np.asarray(X)
+        return np.asarray(X.toarray(), dtype=dtype)
+    return np.asarray(X, dtype=dtype)
 
 
 def to_dense_float64(X: Union[np.ndarray, sparse.spmatrix]) -> np.ndarray:
     """Convert sparse or dense matrix to float64 dense array."""
-    if sparse.issparse(X):
-        return np.asarray(X.toarray(), dtype=np.float64)
-    return np.asarray(X, dtype=np.float64)
+    return ensure_dense(X, dtype=np.float64)
 
 
 def sparse_sum(

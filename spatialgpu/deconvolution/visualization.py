@@ -28,6 +28,9 @@ from spatialgpu.deconvolution._keys import (
     KEY_PROPMAT,
     KEY_SECACT,
     KEY_TESTRES,
+    LABEL_MACROPHAGE_OTHER,
+    LABEL_MALIGNANT,
+    LABEL_UNIDENTIFIABLE,
     OBSM_SPATIAL,
     UNS_SPACET,
 )
@@ -314,8 +317,8 @@ def visualize_colocalization(
     if prop_mat is not None and "Malignant cell state A" in prop_mat.index:
         states = [ct for ct in prop_mat.index if ct.startswith("Malignant cell state")]
         ct_order = states + _flatten_lineage_tree(lineage_tree)
-    elif prop_mat is not None and "Malignant" in prop_mat.index:
-        ct_order = ["Malignant"] + _flatten_lineage_tree(lineage_tree)
+    elif prop_mat is not None and LABEL_MALIGNANT in prop_mat.index:
+        ct_order = [LABEL_MALIGNANT] + _flatten_lineage_tree(lineage_tree)
     else:
         ct_order = _flatten_lineage_tree(lineage_tree)
     ct_order = list(dict.fromkeys(ct_order))  # unique, preserve order
@@ -953,8 +956,8 @@ def _prepare_most_abundant(
             all_cell_types = _flatten_lineage_tree(lineage_tree)
 
         # Add Malignant if present
-        if "Malignant" not in all_cell_types and "Malignant" in prop_mat.index:
-            all_cell_types = ["Malignant"] + all_cell_types
+        if LABEL_MALIGNANT not in all_cell_types and LABEL_MALIGNANT in prop_mat.index:
+            all_cell_types = [LABEL_MALIGNANT] + all_cell_types
 
         # Filter to available cell types
         available = [ct for ct in all_cell_types if ct in prop_mat.index]
@@ -1241,19 +1244,19 @@ def _plot_cell_type_composition(
     else:
         all_cell_types = _flatten_lineage_tree(lineage_tree)
 
-    if "Malignant" not in all_cell_types and "Malignant" in prop_mat.index:
-        all_cell_types = ["Malignant"] + all_cell_types
+    if LABEL_MALIGNANT not in all_cell_types and LABEL_MALIGNANT in prop_mat.index:
+        all_cell_types = [LABEL_MALIGNANT] + all_cell_types
 
     available = [ct for ct in all_cell_types if ct in prop_mat.index]
 
     # Fallback: if lineageTree doesn't match propMat, use all propMat types
     if len(available) <= 1:
-        exclude = {"Unidentifiable", "Macrophage other"}
+        exclude = {LABEL_UNIDENTIFIABLE, LABEL_MACROPHAGE_OTHER}
         available = [ct for ct in prop_mat.index if ct not in exclude]
 
     # Add Unidentifiable if present
-    if "Unidentifiable" in prop_mat.index:
-        available.append("Unidentifiable")
+    if LABEL_UNIDENTIFIABLE in prop_mat.index:
+        available.append(LABEL_UNIDENTIFIABLE)
 
     sub_mat = prop_mat.loc[available].values.T  # (n_spots, n_cell_types)
 

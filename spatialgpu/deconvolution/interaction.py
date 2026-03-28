@@ -29,6 +29,9 @@ from spatialgpu.deconvolution._keys import (
     KEY_PROPMAT,
     KEY_REF,
     KEY_TESTRES,
+    LABEL_MACROPHAGE_OTHER,
+    LABEL_MALIGNANT,
+    LABEL_UNIDENTIFIABLE,
     UNS_SPACET,
 )
 from spatialgpu.deconvolution.reference import ensure_human_genes, load_lr_database
@@ -84,7 +87,7 @@ def cci_colocalization(adata: ad.AnnData) -> ad.AnnData:
     res_deconv: pd.DataFrame = spacet[KEY_DECONV][KEY_PROPMAT].copy()
 
     # Remove helper rows
-    exclude = {"Unidentifiable", "Macrophage other"}
+    exclude = {LABEL_UNIDENTIFIABLE, LABEL_MACROPHAGE_OTHER}
     res_deconv = res_deconv.loc[~res_deconv.index.isin(exclude)]
 
     # Round to 2 decimals
@@ -662,7 +665,7 @@ def _cohens_d(group1: np.ndarray, group2: np.ndarray) -> float:
 
 def identify_interface(
     adata: ad.AnnData,
-    malignant: str = "Malignant",
+    malignant: str = LABEL_MALIGNANT,
     malignant_cutoff: float = 0.5,
 ) -> ad.AnnData:
     """Identify spots at the tumor-stroma interface (Visium only).

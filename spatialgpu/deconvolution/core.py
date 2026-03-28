@@ -16,12 +16,16 @@ import numpy as np
 import pandas as pd
 from scipy import sparse, stats
 
+from spatialgpu.core.array_utils import to_dense_float64
 from spatialgpu.deconvolution._keys import (
     KEY_DECONV,
     KEY_MALPROP,
     KEY_MALREF,
     KEY_PROPMAT,
     KEY_REF,
+    LABEL_MACROPHAGE_OTHER,
+    LABEL_MALIGNANT,
+    LABEL_UNIDENTIFIABLE,
     UNS_SPACET,
 )
 from spatialgpu.deconvolution.reference import (
@@ -589,9 +593,7 @@ def _cpm_log2_center(counts: sparse.spmatrix | np.ndarray) -> np.ndarray:
 
     Returns dense matrix (genes x spots).
     """
-    mat = _cpm_log2(counts)
-    if sparse.issparse(mat):
-        mat = mat.toarray()
+    mat = to_dense_float64(_cpm_log2(counts))
     row_means = mat.mean(axis=1, keepdims=True)
     mat -= row_means
     return mat
@@ -781,14 +783,9 @@ def _infer_mal_large(
     # Malignant reference from top spots
     top_idx = np.where(mal_prop >= 1.0)[0]
     mal_counts = counts[:, top_idx]
-    if sparse.issparse(mal_counts):
-        mal_col_sums = np.asarray(mal_counts.sum(axis=0)).ravel()
-        mal_cpm = (
-            mal_counts.toarray().astype(np.float64) / mal_col_sums[np.newaxis, :] * 1e6
-        )
-    else:
-        mal_col_sums = mal_counts.sum(axis=0)
-        mal_cpm = mal_counts.astype(np.float64) / mal_col_sums[np.newaxis, :] * 1e6
+    mal_dense = to_dense_float64(mal_counts)
+    mal_col_sums = np.asarray(mal_dense.sum(axis=0)).ravel()
+    mal_cpm = mal_dense / mal_col_sums[np.newaxis, :] * 1e6
     mal_ref = np.nanmean(mal_cpm, axis=1)
     mal_ref = pd.Series(mal_ref, index=gene_names)
 
@@ -908,13 +905,9 @@ def _intersect_and_normalize(
     ST_sub = ST[gene_idx]
 
     # CPM normalize ST
-    if sparse.issparse(ST_sub):
-        col_sums = np.asarray(ST_sub.sum(axis=0)).ravel()
-        ST_cpm = ST_sub.toarray().astype(np.float64)
-        ST_cpm = ST_cpm / col_sums[np.newaxis, :] * 1e6
-    else:
-        col_sums = ST_sub.sum(axis=0)
-        ST_cpm = ST_sub.astype(np.float64) / col_sums[np.newaxis, :] * 1e6
+    ST_cpm = to_dense_float64(ST_sub)
+    col_sums = ST_cpm.sum(axis=0)
+    ST_cpm = ST_cpm / col_sums[np.newaxis, :] * 1e6
 
     # CPM normalize reference
     ref_sub = reference.loc[olp_genes]
@@ -1008,13 +1001,16 @@ def _collect_signature_genes(
 
 def _gene_indices(sig_genes: list[str], olp_genes: np.ndarray) -> np.ndarray:
     """Return integer indices into *olp_genes* for each gene in *sig_genes*."""
-    return np.array([np.where(olp_genes == g)[0][0] for g in sig_genes])
+    gene_to_idx = {g: i for i, g in enumerate(olp_genes)}
+    return np.array([gene_to_idx[g] for g in sig_genes])
 
 
 def _ref_col_indices(types: list[str], ref_columns: pd.Index | list[str]) -> list[int]:
     """Return column indices in *ref_columns* for each type in *types*."""
-    col_list = list(ref_columns)
-    return [col_list.index(t) for t in types]
+    if isinstance(ref_columns, pd.Index):
+        return [ref_columns.get_loc(t) for t in types]
+    col_map = {t: i for i, t in enumerate(ref_columns)}
+    return [col_map[t] for t in types]
 
 
 def _normalize_level1(
@@ -1028,7 +1024,7 @@ def _normalize_level1(
         if mode == "standard":
             unid = 1 - prop_mat_l1.sum(axis=0)
             unid_row = pd.DataFrame(
-                [unid.values], index=["Unidentifiable"], columns=valid_spots
+                [unid.values], index=[LABEL_UNIDENTIFIABLE], columns=valid_spots
             )
             prop_mat_l1 = pd.concat([prop_mat_l1, unid_row])
         elif mode == "deconvWithSC_alt":
@@ -1085,7 +1081,9 @@ def _run_level1_deconvolution(
     prop_mat_l1 = pd.DataFrame(prop_l1, index=level1_types, columns=valid_spots)
 
     if mode in ("standard", "deconvWithSC_alt"):
-        mal_row = pd.DataFrame([mal_prop_arr], index=["Malignant"], columns=valid_spots)
+        mal_row = pd.DataFrame(
+            [mal_prop_arr], index=[LABEL_MALIGNANT], columns=valid_spots
+        )
         prop_mat_l1 = pd.concat([mal_row, prop_mat_l1])
 
     return _normalize_level1(prop_mat_l1, mode, unidentifiable, valid_spots)
@@ -1117,7 +1115,7 @@ def _run_level2_sublineages(
 
         logger.info(f"                  > {cell_spe}:")
 
-        subtypes_no_other = [s for s in subtypes if s != "Macrophage other"]
+        subtypes_no_other = [s for s in subtypes if s != LABEL_MACROPHAGE_OTHER]
         subtypes_in_ref = [s for s in subtypes_no_other if s in reference.columns]
         if len(subtypes_in_ref) == 0:
             continue
@@ -1173,7 +1171,7 @@ def _run_level2_sublineages(
             mac_other = prop_mat_l1.loc[cell_spe] - sub_df.sum(axis=0)
             mac_other_row = pd.DataFrame(
                 [mac_other.values],
-                index=["Macrophage other"],
+                index=[LABEL_MACROPHAGE_OTHER],
                 columns=valid_spots,
             )
             sub_df = pd.concat([sub_df, mac_other_row])
@@ -1201,9 +1199,10 @@ def _spatial_deconv(
     n_jobs: int = 1,
     solver: str = "auto",
 ) -> pd.DataFrame:
-    """Hierarchical constrained least-squares deconvolution.
+    """Dispatch spatial deconvolution to the appropriate backend.
 
-    Equivalent to SpaCET's SpatialDeconv() function.
+    Currently delegates to _spatial_deconv_python; serves as the
+    future extension point for GPU-accelerated deconvolution.
 
     Returns
     -------
@@ -1694,13 +1693,9 @@ def _compute_mal_ref(
 ) -> pd.Series:
     """Compute malignant reference (mean CPM of malignant spots)."""
     mal_counts = counts[:, spot_mal_idx]
-    if sparse.issparse(mal_counts):
-        mal_col_sums = np.asarray(mal_counts.sum(axis=0)).ravel()
-        mal_cpm = mal_counts.toarray().astype(np.float64)
-        mal_cpm = mal_cpm / mal_col_sums[np.newaxis, :] * 1e6
-    else:
-        mal_col_sums = mal_counts.sum(axis=0)
-        mal_cpm = mal_counts.astype(np.float64) / mal_col_sums[np.newaxis, :] * 1e6
+    mal_dense = to_dense_float64(mal_counts)
+    mal_col_sums = mal_dense.sum(axis=0)
+    mal_cpm = mal_dense / mal_col_sums[np.newaxis, :] * 1e6
     mal_ref = np.nanmean(mal_cpm, axis=1)
     return pd.Series(mal_ref, index=gene_names)
 

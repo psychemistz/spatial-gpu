@@ -705,13 +705,12 @@ def _compute_background_points(
     """
     if signal_mode == "sending":
         if gene in expr_new.index:
-            values = expr_new.loc[gene].values.copy()
-            values = np.clip(values, 0, 5)  # R: fig.df[fig.df[,3]>5,3] <- 5
+            values = np.clip(expr_new.loc[gene].values, 0, 5)
         else:
             values = np.zeros(n_spots)
     else:
         if gene in act_new.index:
-            values = act_new.loc[gene].values.copy()
+            values = act_new.loc[gene].values
         else:
             values = np.zeros(n_spots)
 
