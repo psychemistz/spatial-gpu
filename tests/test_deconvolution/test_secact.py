@@ -24,7 +24,7 @@ from spatialgpu.deconvolution.secact import (
     secact_spatial_ccc,
     secact_survival_data,
 )
-from spatialgpu.deconvolution.visualization import (
+from spatialgpu.deconvolution.visualization_secact import (
     visualize_secact_bar,
     visualize_secact_dotplot,
     visualize_secact_heatmap,

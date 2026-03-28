@@ -1,7 +1,6 @@
 """Tests for mouse-to-human gene conversion and solver modes."""
 
 import numpy as np
-import pandas as pd
 import pytest
 from scipy import sparse
 
@@ -10,7 +9,10 @@ class TestMouse2Human:
     """Tests for mouse2human_mat and ensure_human_genes."""
 
     def test_mouse2human_basic(self):
-        from spatialgpu.deconvolution.reference import mouse2human_mat, _load_mouse2human_map
+        from spatialgpu.deconvolution.reference import (
+            _load_mouse2human_map,
+            mouse2human_mat,
+        )
 
         m2h = _load_mouse2human_map()
         mouse_genes = m2h["mouse"].values[:10]
@@ -44,7 +46,11 @@ class TestMouse2Human:
 
     def test_mouse2human_aggregation(self):
         from collections import Counter
-        from spatialgpu.deconvolution.reference import _mouse2human_dict, mouse2human_mat
+
+        from spatialgpu.deconvolution.reference import (
+            _mouse2human_dict,
+            mouse2human_mat,
+        )
 
         m2h = _mouse2human_dict()
         human_counts = Counter(m2h.values())
@@ -58,12 +64,11 @@ class TestMouse2Human:
 
         assert len(out_genes) == 1
         assert out_genes[0] == dup_human
-        np.testing.assert_array_almost_equal(
-            np.asarray(out_counts).ravel(), [4.0, 6.0]
-        )
+        np.testing.assert_array_almost_equal(np.asarray(out_counts).ravel(), [4.0, 6.0])
 
     def test_ensure_human_genes_human(self):
         import anndata as ad
+
         from spatialgpu.deconvolution.reference import ensure_human_genes
 
         counts = np.ones((10, 5))
@@ -77,6 +82,7 @@ class TestMouse2Human:
 
     def test_ensure_human_genes_no_key(self):
         import anndata as ad
+
         from spatialgpu.deconvolution.reference import ensure_human_genes
 
         counts = np.ones((10, 5))
@@ -117,7 +123,9 @@ class TestSolverParameter:
         pp_max = np.full(5, 0.9)
         pp_min = np.zeros(5)
 
-        result = _solve_constrained_batch(A, B, 3, theta_sum, pp_min, pp_max, solver="auto")
+        result = _solve_constrained_batch(
+            A, B, 3, theta_sum, pp_min, pp_max, solver="auto"
+        )
         assert result.shape == (3, 5)
         assert np.all(result >= -1e-10)
 
@@ -132,7 +140,9 @@ class TestSolverParameter:
         pp_max = np.full(5, 0.9)
 
         for mode in ["auto", "r_compat", "fast"]:
-            result = _solve_constrained_batch(A, B, 3, theta_sum, pp_min, pp_max, solver=mode)
+            result = _solve_constrained_batch(
+                A, B, 3, theta_sum, pp_min, pp_max, solver=mode
+            )
             assert result.shape == (3, 5), f"Failed for solver={mode}"
             assert np.all(np.isfinite(result)), f"Non-finite for solver={mode}"
 
@@ -145,7 +155,9 @@ class TestSolverParameter:
         pp_min = np.array([0.0, 0.0])
         pp_max = np.array([0.01, 0.01])
 
-        result = _solve_constrained_batch(A, B, 3, theta_sum, pp_min, pp_max, solver="auto")
+        result = _solve_constrained_batch(
+            A, B, 3, theta_sum, pp_min, pp_max, solver="auto"
+        )
         for i in range(2):
             np.testing.assert_almost_equal(result[:, i].sum(), theta_sum[i], decimal=5)
 

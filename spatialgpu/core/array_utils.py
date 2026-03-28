@@ -364,7 +364,9 @@ def ensure_dense(X: Union[np.ndarray, sparse.spmatrix]) -> np.ndarray:
     return np.asarray(X)
 
 
-def sparse_sum(X: Union[np.ndarray, sparse.spmatrix], axis: int | None = None) -> np.ndarray:
+def sparse_sum(
+    X: Union[np.ndarray, sparse.spmatrix], axis: int | None = None
+) -> np.ndarray:
     """Sum over sparse or dense matrix, always returning a 1D numpy array."""
     if sparse.issparse(X):
         return np.asarray(X.sum(axis=axis)).ravel()
