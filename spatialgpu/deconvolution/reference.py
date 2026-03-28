@@ -165,7 +165,8 @@ def write_gmt(gmt: dict[str, list[str]], path: str | Path) -> None:
     """
     lines = []
     for name, genes in gmt.items():
-        lines.append(f"{name}\t\t{chr(9).join(genes)}")
+        genes_str = "\t".join(genes)
+        lines.append(f"{name}\t\t{genes_str}")
     Path(path).write_text("\n".join(lines) + "\n")
 
 
