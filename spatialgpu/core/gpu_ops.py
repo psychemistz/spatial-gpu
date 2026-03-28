@@ -393,11 +393,22 @@ def gpu_cdist(A, B):
     import cupy as cp
 
     # ||a - b||^2 = ||a||^2 + ||b||^2 - 2 * a @ b.T
+    # This expansion is fast but suffers from catastrophic cancellation when
+    # A and B share identical rows (e.g. self-distance).  We clamp negatives
+    # to zero *before* sqrt, but tiny positive residuals (~eps * ||a||^2) can
+    # survive and produce spurious ~1e-8 distances after sqrt.  To fix this
+    # we detect the self-distance case (A is B) and zero the diagonal.
     A_sq = (A * A).sum(axis=1, keepdims=True)  # (n, 1)
     B_sq = (B * B).sum(axis=1, keepdims=True)  # (m, 1)
     cross = A @ B.T  # (n, m)
     dist_sq = A_sq + B_sq.T - 2.0 * cross
-    return cp.sqrt(cp.maximum(dist_sq, 0.0))
+    dist_sq = cp.maximum(dist_sq, 0.0)
+
+    # Zero diagonal for self-distance to avoid floating-point artifacts
+    if A.data_ptr() == B.data_ptr():
+        cp.fill_diagonal(dist_sq, 0.0)
+
+    return cp.sqrt(dist_sq)
 
 
 def gpu_bipartite_edge_swap(mat, n_swaps=None, seed=None):
@@ -518,10 +529,64 @@ def gpu_nmf(V, n_components, seed=None, max_iter=500, tol=1e-4):
     k = n_components
     eps = 1e-16
 
-    # Initialize W and H from scaled random normal (absolute value)
-    avg = cp.sqrt(V.mean() / k)
-    W = cp.abs(avg * rng.randn(n, k))
-    H = cp.abs(avg * rng.randn(k, m))
+    # NNDSVD initialization (matches sklearn default) — gives a much better
+    # starting point than random init, producing lower reconstruction error.
+    # Compute truncated SVD on CPU (small k), then transfer factors to GPU.
+    V_cpu = cp.asnumpy(V)
+    from scipy.sparse.linalg import svds
+
+    # svds requires k < min(n, m)
+    k_svd = min(k, min(n, m) - 1)
+    U, S, Vt = svds(V_cpu, k=k_svd)
+    # svds returns in ascending order; reverse to descending
+    U = U[:, ::-1]
+    S = S[::-1]
+    Vt = Vt[::-1, :]
+
+    W_init = np.zeros((n, k), dtype=np.float64)
+    H_init = np.zeros((k, m), dtype=np.float64)
+
+    # First component from mean
+    avg = np.sqrt(V_cpu.mean() / k)
+    for j in range(min(k, k_svd)):
+        u = U[:, j]
+        v = Vt[j, :]
+        s = S[j]
+
+        # Split into positive and negative parts
+        u_pos = np.maximum(u, 0.0)
+        u_neg = np.maximum(-u, 0.0)
+        v_pos = np.maximum(v, 0.0)
+        v_neg = np.maximum(-v, 0.0)
+
+        n_u_pos = np.linalg.norm(u_pos)
+        n_u_neg = np.linalg.norm(u_neg)
+        n_v_pos = np.linalg.norm(v_pos)
+        n_v_neg = np.linalg.norm(v_neg)
+
+        pos_term = n_u_pos * n_v_pos
+        neg_term = n_u_neg * n_v_neg
+
+        if pos_term >= neg_term:
+            if n_u_pos > 0 and n_v_pos > 0:
+                W_init[:, j] = np.sqrt(s * pos_term) * u_pos / n_u_pos
+                H_init[j, :] = np.sqrt(s * pos_term) * v_pos / n_v_pos
+        else:
+            if n_u_neg > 0 and n_v_neg > 0:
+                W_init[:, j] = np.sqrt(s * neg_term) * u_neg / n_u_neg
+                H_init[j, :] = np.sqrt(s * neg_term) * v_neg / n_v_neg
+
+    # Fill remaining components (if k > k_svd) with small random values
+    for j in range(k_svd, k):
+        W_init[:, j] = avg * np.abs(rng.standard_normal(n).get())
+        H_init[j, :] = avg * np.abs(rng.standard_normal(m).get())
+
+    # Replace any zeros with small values to avoid stuck updates
+    W_init[W_init == 0] = avg * 0.01
+    H_init[H_init == 0] = avg * 0.01
+
+    W = cp.asarray(W_init)
+    H = cp.asarray(H_init)
 
     prev_err = None
 
