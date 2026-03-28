@@ -28,6 +28,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Threshold for switching between small-dataset clustering and large-dataset
+# direct-correlation approaches in malignant cell inference
+LARGE_DATASET_THRESHOLD = 20000
+
+# Number of spots per chunk for large-dataset processing
+CHUNK_SIZE = 5000
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -320,7 +327,7 @@ def _deconvolution_python(
         ref = _merge_references(ref, ref_normal)
 
     n_spots = counts.shape[1]
-    if n_spots > 20000:
+    if n_spots > LARGE_DATASET_THRESHOLD:
         ref_genes = set(ref["refProfiles"].index)
         keep_mask = np.array([g in ref_genes for g in gene_names])
         counts = counts[keep_mask]
@@ -340,7 +347,7 @@ def _deconvolution_python(
     # Stage 2
     logger.info("Stage 2. Hierarchically deconvolve non-malignant cell fraction.")
 
-    if n_spots <= 20000:
+    if n_spots <= LARGE_DATASET_THRESHOLD:
         prop_mat = _spatial_deconv(
             ST=counts,
             gene_names=gene_names,
@@ -352,7 +359,7 @@ def _deconvolution_python(
             n_jobs=n_jobs,
         )
     else:
-        chunk_size = 5000
+        chunk_size = CHUNK_SIZE
         n_chunks = int(np.ceil(n_spots / chunk_size))
         prop_mats = []
         for i in range(n_chunks):
@@ -517,7 +524,7 @@ def _infer_mal_cor(
     # CPM normalize, log2, center
     centered = _cpm_log2_center(counts)
 
-    if n_spots < 20000:
+    if n_spots < LARGE_DATASET_THRESHOLD:
         return _infer_mal_small(
             counts,
             centered,
@@ -729,7 +736,6 @@ def _infer_mal_large(
     gene_idx = np.array([np.where(gene_names == g)[0][0] for g in olp])
     sig_vals = sig.reindex(olp).values.reshape(-1, 1)
 
-    # Process in chunks of 5000
     mal_prop = _chunked_correlation(centered[gene_idx], sig_vals, spot_names)
 
     # Clip (use top 100, not 5%)
