@@ -10,7 +10,10 @@ import json
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import anndata as ad
 
 import numpy as np
 import pandas as pd
@@ -293,7 +296,7 @@ def mouse2human_mat(
 
 
 def ensure_human_genes(
-    adata: Any,
+    adata: ad.AnnData,
     counts: np.ndarray,
     gene_names: np.ndarray,
 ) -> tuple:

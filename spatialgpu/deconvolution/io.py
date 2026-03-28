@@ -23,11 +23,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-from spatialgpu.deconvolution.reference import _VALID_ORGANISMS
-
 
 def _validate_organism(organism: str) -> str:
     """Validate and normalize organism string."""
+    from spatialgpu.deconvolution.reference import _VALID_ORGANISMS
+
     org = organism.lower().strip()
     if org not in _VALID_ORGANISMS:
         raise ValueError(
