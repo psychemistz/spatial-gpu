@@ -6,7 +6,7 @@ Provides 10-100x speedup over Squidpy for large datasets.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from scipy import sparse
@@ -20,16 +20,16 @@ if TYPE_CHECKING:
 def spatial_neighbors(
     adata: ad.AnnData,
     n_neighbors: int = 6,
-    radius: Optional[float] = None,
+    radius: float | None = None,
     coord_type: Literal["grid", "generic"] = "generic",
     spatial_key: str = "spatial",
     key_added: str = "spatial",
     transform: Literal["spectral", "cosine", None] = None,
     n_rings: int = 1,
-    percentile: Optional[float] = None,
+    percentile: float | None = None,
     set_diag: bool = False,
     copy: bool = False,
-) -> Optional[ad.AnnData]:
+) -> ad.AnnData | None:
     """
     Build spatial neighbor graph with GPU acceleration.
 

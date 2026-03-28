@@ -7,7 +7,7 @@ Implements K, L, F, and G functions for spatial point pattern analysis.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from tqdm import tqdm
@@ -19,16 +19,16 @@ if TYPE_CHECKING:
 
 def ripley(
     adata: ad.AnnData,
-    cluster_key: Optional[str] = None,
+    cluster_key: str | None = None,
     mode: Literal["K", "L", "F", "G"] = "L",
     spatial_key: str = "spatial",
-    radii: Optional[Sequence[float]] = None,
+    radii: Sequence[float] | None = None,
     n_radii: int = 50,
     n_simulations: int = 100,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     copy: bool = False,
     show_progress: bool = True,
-) -> Optional[dict]:
+) -> dict | None:
     """
     Compute Ripley's statistics with GPU acceleration.
 
@@ -150,7 +150,7 @@ def _compute_ripley(
     mode: str,
     area: float,
     n_simulations: int,
-    seed: Optional[int],
+    seed: int | None,
     use_gpu: bool,
     show_progress: bool,
 ) -> dict:
@@ -171,7 +171,7 @@ def _compute_ripley_gpu(
     mode: str,
     area: float,
     n_simulations: int,
-    seed: Optional[int],
+    seed: int | None,
     show_progress: bool,
 ) -> dict:
     """GPU implementation of Ripley statistics."""
@@ -252,7 +252,7 @@ def _compute_ripley_cpu(
     mode: str,
     area: float,
     n_simulations: int,
-    seed: Optional[int],
+    seed: int | None,
     show_progress: bool,
 ) -> dict:
     """CPU implementation of Ripley statistics."""

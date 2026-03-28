@@ -5,7 +5,7 @@ Data readers for various spatial omics platforms.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -17,7 +17,7 @@ def read_visium(
     path: str | Path,
     count_file: str = "filtered_feature_bc_matrix.h5",
     spatial_key: str = "spatial",
-    library_id: Optional[str] = None,
+    library_id: str | None = None,
 ) -> ad.AnnData:
     """
     Read 10x Genomics Visium data.
@@ -141,7 +141,7 @@ def read_xenium(
 
 def read_cosmx(
     path: str | Path,
-    fov: Optional[int | list[int]] = None,
+    fov: int | list[int] | None = None,
     spatial_key: str = "spatial",
 ) -> ad.AnnData:
     """
@@ -234,7 +234,7 @@ def read_cosmx(
 
 def read_merscope(
     path: str | Path,
-    region: Optional[str] = None,
+    region: str | None = None,
     spatial_key: str = "spatial",
 ) -> ad.AnnData:
     """
@@ -322,11 +322,11 @@ def read_merscope(
 
 def read_spatial_csv(
     count_file: str | Path,
-    coord_file: Optional[str | Path] = None,
+    coord_file: str | Path | None = None,
     gene_col: str = "gene",
     x_col: str = "x",
     y_col: str = "y",
-    cell_col: Optional[str] = None,
+    cell_col: str | None = None,
     spatial_key: str = "spatial",
 ) -> ad.AnnData:
     """
@@ -386,7 +386,7 @@ def read_spatial_csv(
 
 def read_spatial_parquet(
     count_file: str | Path,
-    coord_file: Optional[str | Path] = None,
+    coord_file: str | Path | None = None,
     x_col: str = "x",
     y_col: str = "y",
     spatial_key: str = "spatial",

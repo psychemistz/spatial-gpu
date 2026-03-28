@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
+from spatialgpu.deconvolution._keys import OBSM_SPATIAL, UNS_SPACET
+
 if TYPE_CHECKING:
     import anndata as ad
 
@@ -162,13 +164,13 @@ def create_spacet_object_10x(
     )
 
     # Spatial coordinates for plotting (pixel_col, pixel_row) = (x, y)
-    adata.obsm["spatial"] = np.column_stack(
+    adata.obsm[OBSM_SPATIAL] = np.column_stack(
         [barcode_df["pixel_col"].values, barcode_df["pixel_row"].values]
     )
 
     adata.uns["spacet_platform"] = platform
     adata.uns["spacet_organism"] = _validate_organism(organism)
-    adata.uns["spacet"] = {}
+    adata.uns[UNS_SPACET] = {}
 
     logger.info(
         "Created SpaCET object: %d spots x %d genes (%s, %s).",
@@ -279,11 +281,11 @@ def create_spacet_object(
     )
 
     # Spatial coordinates
-    adata.obsm["spatial"] = np.column_stack([coord_x, coord_y])
+    adata.obsm[OBSM_SPATIAL] = np.column_stack([coord_x, coord_y])
 
     adata.uns["spacet_platform"] = platform
     adata.uns["spacet_organism"] = _validate_organism(organism)
-    adata.uns["spacet"] = {}
+    adata.uns[UNS_SPACET] = {}
 
     if image_path is not None:
         adata.uns["spacet_image_path"] = str(image_path)

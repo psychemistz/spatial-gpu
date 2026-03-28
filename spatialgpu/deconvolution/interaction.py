@@ -21,6 +21,16 @@ import pandas as pd
 from scipy import sparse, stats
 from scipy.spatial.distance import cdist
 
+from spatialgpu.deconvolution._keys import (
+    KEY_CCI,
+    KEY_DECONV,
+    KEY_GROUPMAT,
+    KEY_INTERACTION,
+    KEY_PROPMAT,
+    KEY_REF,
+    KEY_TESTRES,
+    UNS_SPACET,
+)
 from spatialgpu.deconvolution.reference import ensure_human_genes, load_lr_database
 
 if TYPE_CHECKING:
@@ -36,12 +46,12 @@ logger = logging.getLogger(__name__)
 
 def _ensure_cci(adata: ad.AnnData) -> dict:
     """Return adata.uns['spacet']['CCI'], creating it if absent."""
-    if "spacet" not in adata.uns:
+    if UNS_SPACET not in adata.uns:
         raise ValueError("No SpaCET results found. Run deconvolution() first.")
-    spacet = adata.uns["spacet"]
-    if "CCI" not in spacet:
-        spacet["CCI"] = {}
-    return spacet["CCI"]
+    spacet = adata.uns[UNS_SPACET]
+    if KEY_CCI not in spacet:
+        spacet[KEY_CCI] = {}
+    return spacet[KEY_CCI]
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +80,8 @@ def cci_colocalization(adata: ad.AnnData) -> ad.AnnData:
     AnnData with results stored in
         adata.uns['spacet']['CCI']['colocalization'] : pd.DataFrame
     """
-    spacet = adata.uns["spacet"]
-    res_deconv: pd.DataFrame = spacet["deconvolution"]["propMat"].copy()
+    spacet = adata.uns[UNS_SPACET]
+    res_deconv: pd.DataFrame = spacet[KEY_DECONV][KEY_PROPMAT].copy()
 
     # Remove helper rows
     exclude = {"Unidentifiable", "Macrophage other"}
@@ -117,7 +127,7 @@ def cci_colocalization(adata: ad.AnnData) -> ad.AnnData:
     summary_df["fraction_pv"] = summary_df["fraction_pv"].fillna(1.0)
 
     # --- Reference profile correlation ---
-    ref = spacet["deconvolution"]["Ref"]
+    ref = spacet[KEY_DECONV][KEY_REF]
     ref_profiles: pd.DataFrame = ref["refProfiles"]
     sig_genes: dict = ref["sigGenes"]
     lineage_tree: dict = ref["lineageTree"]
@@ -452,8 +462,8 @@ def cci_cell_type_pair(
     if len(cell_type_pair) != 2:
         raise ValueError("Please input a pair of cell-types.")
 
-    spacet = adata.uns["spacet"]
-    res_deconv: pd.DataFrame = spacet["deconvolution"]["propMat"]
+    spacet = adata.uns[UNS_SPACET]
+    res_deconv: pd.DataFrame = spacet[KEY_DECONV][KEY_PROPMAT]
 
     missing = [ct for ct in cell_type_pair if ct not in res_deconv.index]
     if missing:
@@ -469,17 +479,17 @@ def cci_cell_type_pair(
     spot_names = list(res_deconv.columns)
 
     # Initialize or retrieve interaction results
-    if "interaction" not in cci:
-        cci["interaction"] = {}
-    interaction = cci["interaction"]
+    if KEY_INTERACTION not in cci:
+        cci[KEY_INTERACTION] = {}
+    interaction = cci[KEY_INTERACTION]
 
-    if "groupMat" in interaction and len(interaction["groupMat"]) > 0:
-        group_mat = interaction["groupMat"]
+    if KEY_GROUPMAT in interaction and len(interaction[KEY_GROUPMAT]) > 0:
+        group_mat = interaction[KEY_GROUPMAT]
     else:
         group_mat = pd.DataFrame()
 
-    if "testRes" in interaction and len(interaction["testRes"]) > 0:
-        test_res = interaction["testRes"]
+    if KEY_TESTRES in interaction and len(interaction[KEY_TESTRES]) > 0:
+        test_res = interaction[KEY_TESTRES]
     else:
         test_res = pd.DataFrame()
 
@@ -563,9 +573,9 @@ def cci_cell_type_pair(
         )
         test_res.loc[pair_key, "Interaction"] = False
 
-    interaction["groupMat"] = group_mat
-    interaction["testRes"] = test_res
-    cci["interaction"] = interaction
+    interaction[KEY_GROUPMAT] = group_mat
+    interaction[KEY_TESTRES] = test_res
+    cci[KEY_INTERACTION] = interaction
 
     return adata
 
@@ -681,8 +691,8 @@ def identify_interface(
         adata.uns['spacet']['CCI']['interface'] : pd.DataFrame
             1-row DataFrame ("Interface") with values Tumor/Stroma/Interface.
     """
-    spacet = adata.uns["spacet"]
-    res_deconv: pd.DataFrame = spacet["deconvolution"]["propMat"]
+    spacet = adata.uns[UNS_SPACET]
+    res_deconv: pd.DataFrame = spacet[KEY_DECONV][KEY_PROPMAT]
 
     if malignant not in res_deconv.index:
         raise ValueError(
@@ -779,8 +789,8 @@ def combine_interface(
     if len(cell_type_pair) != 2:
         raise ValueError("Please input a pair of cell-types.")
 
-    spacet = adata.uns["spacet"]
-    res_deconv: pd.DataFrame = spacet["deconvolution"]["propMat"]
+    spacet = adata.uns[UNS_SPACET]
+    res_deconv: pd.DataFrame = spacet[KEY_DECONV][KEY_PROPMAT]
     cci = _ensure_cci(adata)
 
     missing = [ct for ct in cell_type_pair if ct not in res_deconv.index]
@@ -799,12 +809,12 @@ def combine_interface(
         raise ValueError("Run identify_interface() first.")
 
     if (
-        "interaction" not in cci
-        or pair_key not in cci["interaction"].get("testRes", pd.DataFrame()).index
+        KEY_INTERACTION not in cci
+        or pair_key not in cci[KEY_INTERACTION].get(KEY_TESTRES, pd.DataFrame()).index
     ):
         raise ValueError(f"Run cci_cell_type_pair() for {cell_type_pair} first.")
 
-    group_mat = cci["interaction"]["groupMat"]
+    group_mat = cci[KEY_INTERACTION][KEY_GROUPMAT]
     spot_names = list(res_deconv.columns)
 
     # Get "Both" spots
@@ -874,15 +884,15 @@ def distance_to_interface(
     if len(cell_type_pair) != 2:
         raise ValueError("Please input a pair of cell-types.")
 
-    spacet = adata.uns["spacet"]
-    res_deconv: pd.DataFrame = spacet["deconvolution"]["propMat"]
+    spacet = adata.uns[UNS_SPACET]
+    res_deconv: pd.DataFrame = spacet[KEY_DECONV][KEY_PROPMAT]
     cci = _ensure_cci(adata)
 
     cell_type_pair = sorted(cell_type_pair)
     ct1, ct2 = cell_type_pair
     pair_key = f"{ct1}_{ct2}"
 
-    test_res = cci["interaction"]["testRes"]
+    test_res = cci[KEY_INTERACTION][KEY_TESTRES]
     if not test_res.loc[pair_key, "Interaction"]:
         if pd.isna(test_res.loc[pair_key].get("groupCompare_pv", np.nan)):
             logger.info(
@@ -909,7 +919,7 @@ def distance_to_interface(
     ]
 
     # "Both" spots restricted to Stroma
-    group_mat = cci["interaction"]["groupMat"]
+    group_mat = cci[KEY_INTERACTION][KEY_GROUPMAT]
     pair_groups = group_mat.loc[pair_key, spot_names]
 
     both_spots = [

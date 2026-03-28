@@ -4,7 +4,7 @@ Utility functions for spatial graph operations.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import sparse
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 def get_spatial_coords(
     adata: ad.AnnData,
     spatial_key: str = "spatial",
-    library_id: Optional[str] = None,
+    library_id: str | None = None,
 ) -> NDArray:
     """
     Extract spatial coordinates from AnnData object.
@@ -107,8 +107,8 @@ def adjacency_to_edge_list(
 def edge_list_to_adjacency(
     sources: NDArray,
     targets: NDArray,
-    weights: Optional[NDArray] = None,
-    n_nodes: Optional[int] = None,
+    weights: NDArray | None = None,
+    n_nodes: int | None = None,
 ) -> sparse.csr_matrix:
     """
     Convert edge list to adjacency matrix.
@@ -220,7 +220,7 @@ def _compute_laplacian_gpu(
 def subsample_graph(
     adj: sparse.csr_matrix,
     n_samples: int,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> tuple[sparse.csr_matrix, NDArray]:
     """
     Subsample nodes from a graph.
@@ -279,8 +279,8 @@ def graph_connected_components(
 def filter_edges_by_distance(
     adj: sparse.csr_matrix,
     distances: sparse.csr_matrix,
-    min_dist: Optional[float] = None,
-    max_dist: Optional[float] = None,
+    min_dist: float | None = None,
+    max_dist: float | None = None,
 ) -> sparse.csr_matrix:
     """
     Filter graph edges by distance.

@@ -8,7 +8,7 @@ import gc
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Literal, Optional
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 import numpy as np
 
@@ -74,7 +74,7 @@ def benchmark(
     *args,
     n_runs: int = 5,
     warmup: int = 1,
-    name: Optional[str] = None,
+    name: str | None = None,
     **kwargs,
 ) -> BenchmarkResult:
     """
@@ -169,7 +169,7 @@ def compare_backends(
     *args,
     n_runs: int = 5,
     warmup: int = 1,
-    name: Optional[str] = None,
+    name: str | None = None,
     **kwargs,
 ) -> dict[str, BenchmarkResult]:
     """
@@ -245,7 +245,7 @@ def compare_backends(
 
 def benchmark_suite(
     adata: ad.AnnData,
-    operations: Optional[Sequence[str]] = None,
+    operations: Sequence[str] | None = None,
     n_runs: int = 5,
     compare: bool = True,
 ) -> dict[str, Any]:

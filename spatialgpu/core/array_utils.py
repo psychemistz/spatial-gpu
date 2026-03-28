@@ -364,6 +364,13 @@ def ensure_dense(X: Union[np.ndarray, sparse.spmatrix]) -> np.ndarray:
     return np.asarray(X)
 
 
+def to_dense_float64(X: Union[np.ndarray, sparse.spmatrix]) -> np.ndarray:
+    """Convert sparse or dense matrix to float64 dense array."""
+    if sparse.issparse(X):
+        return np.asarray(X.toarray(), dtype=np.float64)
+    return np.asarray(X, dtype=np.float64)
+
+
 def sparse_sum(
     X: Union[np.ndarray, sparse.spmatrix], axis: int | None = None
 ) -> np.ndarray:

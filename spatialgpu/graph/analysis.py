@@ -8,7 +8,7 @@ with significant speedups on GPU.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import sparse
@@ -24,10 +24,10 @@ def nhood_enrichment(
     cluster_key: str,
     connectivity_key: str = "spatial_connectivities",
     n_perms: int = 1000,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     copy: bool = False,
     show_progress: bool = True,
-) -> Optional[tuple[NDArray, NDArray]]:
+) -> tuple[NDArray, NDArray] | None:
     """
     Compute neighborhood enrichment with GPU acceleration.
 
@@ -108,7 +108,7 @@ def _nhood_enrichment_gpu(
     cluster_idx: NDArray,
     n_clusters: int,
     n_perms: int,
-    seed: Optional[int],
+    seed: int | None,
     show_progress: bool,
 ) -> tuple[NDArray, NDArray]:
     """GPU implementation of neighborhood enrichment."""
@@ -206,7 +206,7 @@ def _nhood_enrichment_cpu(
     cluster_idx: NDArray,
     n_clusters: int,
     n_perms: int,
-    seed: Optional[int],
+    seed: int | None,
     show_progress: bool,
 ) -> tuple[NDArray, NDArray]:
     """CPU implementation of neighborhood enrichment."""
@@ -257,11 +257,11 @@ def co_occurrence(
     adata: ad.AnnData,
     cluster_key: str,
     spatial_key: str = "spatial",
-    interval: Optional[Sequence[float]] = None,
+    interval: Sequence[float] | None = None,
     n_splits: int = 50,
     copy: bool = False,
     show_progress: bool = True,
-) -> Optional[tuple[NDArray, NDArray]]:
+) -> tuple[NDArray, NDArray] | None:
     """
     Compute spatial co-occurrence with GPU acceleration.
 
@@ -469,7 +469,7 @@ def interaction_matrix(
     connectivity_key: str = "spatial_connectivities",
     normalized: bool = True,
     copy: bool = False,
-) -> Optional[NDArray]:
+) -> NDArray | None:
     """
     Compute cell-cell interaction matrix.
 
@@ -533,7 +533,7 @@ def centrality_scores(
     connectivity_key: str = "spatial_connectivities",
     score_types: Sequence[str] = ("degree", "closeness", "betweenness"),
     copy: bool = False,
-) -> Optional[dict[str, NDArray]]:
+) -> dict[str, NDArray] | None:
     """
     Compute graph centrality scores per cluster.
 

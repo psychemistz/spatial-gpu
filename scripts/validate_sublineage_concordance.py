@@ -9,8 +9,9 @@ Usage:
     python scripts/validate_sublineage_concordance.py
 """
 
-import sys
 import logging
+import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -20,7 +21,10 @@ from scipy import sparse, stats
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("/data/parks34/projects/0sigdiscov/pkg_dev/spatial-gpu/validation_results/sublineage_concordance")
+DATA_DIR = Path(os.environ.get(
+    "SPACET_SUBLINEAGE_DIR",
+    "/data/parks34/projects/0sigdiscov/pkg_dev/spatial-gpu/validation_results/sublineage_concordance",
+))
 
 
 def load_r_outputs():

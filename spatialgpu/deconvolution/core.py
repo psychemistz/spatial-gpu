@@ -16,6 +16,14 @@ import numpy as np
 import pandas as pd
 from scipy import sparse, stats
 
+from spatialgpu.deconvolution._keys import (
+    KEY_DECONV,
+    KEY_MALPROP,
+    KEY_MALREF,
+    KEY_PROPMAT,
+    KEY_REF,
+    UNS_SPACET,
+)
 from spatialgpu.deconvolution.reference import (
     ensure_human_genes,
     get_cancer_signature,
@@ -84,9 +92,9 @@ def deconvolution(
 
     # Store results in AnnData
     adata.obsm["spacet_propMat"] = prop_mat.T.reindex(adata.obs_names).values
-    adata.uns["spacet"] = {
-        "deconvolution": {
-            "propMat": prop_mat,
+    adata.uns[UNS_SPACET] = {
+        KEY_DECONV: {
+            KEY_PROPMAT: prop_mat,
             "malRes": mal_res,
         },
         "propMat_columns": list(prop_mat.index),
@@ -95,7 +103,7 @@ def deconvolution(
     # Always store combined reference for downstream CCI analysis
     try:
         comb_ref = load_comb_ref()
-        adata.uns["spacet"]["deconvolution"]["Ref"] = comb_ref
+        adata.uns[UNS_SPACET][KEY_DECONV][KEY_REF] = comb_ref
     except Exception:
         logger.warning("Could not load combined reference for CCI.")
 
@@ -201,17 +209,17 @@ def deconvolution_bulk(
     # Store results
     adata.obsm["deconv_propMat"] = prop_mat.T.reindex(adata.obs_names).values
     adata.uns["deconv"] = {
-        "propMat": prop_mat,
-        "malProp": mal_prop_s,
+        KEY_PROPMAT: prop_mat,
+        KEY_MALPROP: mal_prop_s,
         "cancer_type": cancer_type,
     }
-    adata.uns.setdefault("spacet", {})["deconvolution"] = {
-        "propMat": prop_mat,
-        "malRes": {"malProp": mal_prop_s, "malRef": mal_ref},
+    adata.uns.setdefault(UNS_SPACET, {})[KEY_DECONV] = {
+        KEY_PROPMAT: prop_mat,
+        "malRes": {KEY_MALPROP: mal_prop_s, KEY_MALREF: mal_ref},
     }
 
     try:
-        adata.uns["spacet"]["deconvolution"]["Ref"] = load_comb_ref()
+        adata.uns[UNS_SPACET][KEY_DECONV][KEY_REF] = load_comb_ref()
     except Exception:
         pass
 
@@ -344,7 +352,7 @@ def _deconvolution_python(
     if adjacent_normal:
         logger.info("Stage 1. Infer malignant cell fraction (skip).")
         mal_prop = pd.Series(0.0, index=spot_names)
-        mal_res = {"malRef": None, "malProp": mal_prop}
+        mal_res = {KEY_MALREF: None, KEY_MALPROP: mal_prop}
     else:
         logger.info("Stage 1. Infer malignant cell fraction.")
         mal_res = _infer_mal_cor(
@@ -360,8 +368,8 @@ def _deconvolution_python(
             gene_names=gene_names,
             spot_names=spot_names,
             ref=ref,
-            mal_prop=mal_res["malProp"],
-            mal_ref=mal_res["malRef"],
+            mal_prop=mal_res[KEY_MALPROP],
+            mal_ref=mal_res[KEY_MALREF],
             mode="standard",
             n_jobs=n_jobs,
             solver=solver,
@@ -379,8 +387,8 @@ def _deconvolution_python(
                 gene_names=gene_names,
                 spot_names=spot_names[start:end],
                 ref=ref,
-                mal_prop=mal_res["malProp"].iloc[start:end],
-                mal_ref=mal_res["malRef"],
+                mal_prop=mal_res[KEY_MALPROP].iloc[start:end],
+                mal_ref=mal_res[KEY_MALREF],
                 mode="standard",
                 n_jobs=n_jobs,
                 solver=solver,
@@ -722,8 +730,8 @@ def _infer_mal_small(
     return {
         "sig": (sig_type_used, sig_ct_used),
         "stat_df": stat_df,
-        "malRef": mal_ref,
-        "malProp": mal_prop,
+        KEY_MALREF: mal_ref,
+        KEY_MALPROP: mal_prop,
     }
 
 
@@ -789,8 +797,8 @@ def _infer_mal_large(
     return {
         "sig": ("CNA", cancer_type),
         "stat_df": None,
-        "malRef": mal_ref,
-        "malProp": mal_prop,
+        KEY_MALREF: mal_ref,
+        KEY_MALPROP: mal_prop,
     }
 
 
@@ -873,7 +881,310 @@ def _compute_cluster_stats(
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: Hierarchical constrained deconvolution
+# Stage 2: Hierarchical constrained deconvolution — helpers
+# ---------------------------------------------------------------------------
+
+
+def _intersect_and_normalize(
+    ST: sparse.spmatrix | np.ndarray,
+    gene_names: np.ndarray,
+    reference: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, set[str]]:
+    """Intersect genes, subset ST, and CPM-normalize both matrices.
+
+    Returns
+    -------
+    ST_cpm : (n_genes, n_spots) float64 CPM-normalized expression matrix
+    ref_cpm : (n_genes, n_ref_types) float64 CPM-normalized reference
+    olp_genes : 1-D array of overlapping gene names
+    olp_set : set of overlapping gene names (for fast membership tests)
+    """
+    ref_gene_set = set(reference.index)
+    olp_mask = np.array([g in ref_gene_set for g in gene_names])
+    olp_genes = gene_names[olp_mask]
+    olp_set = set(olp_genes)
+    gene_idx = np.where(olp_mask)[0]
+
+    ST_sub = ST[gene_idx]
+
+    # CPM normalize ST
+    if sparse.issparse(ST_sub):
+        col_sums = np.asarray(ST_sub.sum(axis=0)).ravel()
+        ST_cpm = ST_sub.toarray().astype(np.float64)
+        ST_cpm = ST_cpm / col_sums[np.newaxis, :] * 1e6
+    else:
+        col_sums = ST_sub.sum(axis=0)
+        ST_cpm = ST_sub.astype(np.float64) / col_sums[np.newaxis, :] * 1e6
+
+    # CPM normalize reference
+    ref_sub = reference.loc[olp_genes]
+    ref_cpm = ref_sub.values.astype(np.float64)
+    ref_col_sums = ref_cpm.sum(axis=0)
+    ref_cpm = ref_cpm / ref_col_sums[np.newaxis, :] * 1e6
+
+    return ST_cpm, ref_cpm, olp_genes, olp_set
+
+
+def _remove_nan_spots(
+    ST_cpm: np.ndarray,
+    spot_names: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Drop spots whose first gene is NaN, return filtered matrix and names."""
+    nan_mask = ~np.isnan(ST_cpm[0, :])
+    return ST_cpm[:, nan_mask], (
+        spot_names[nan_mask] if isinstance(spot_names, np.ndarray) else spot_names
+    )
+
+
+def _subtract_malignant_contribution(
+    ST_cpm: np.ndarray,
+    valid_spots: np.ndarray,
+    mal_prop: pd.Series | pd.DataFrame,
+    mal_ref: pd.Series | pd.DataFrame | None,
+    olp_genes: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Subtract the malignant signal from the mixture.
+
+    Returns
+    -------
+    mixture_minus_mal : (n_genes, n_spots) residual expression
+    mal_prop_arr : (n_spots,) malignant proportion per spot
+    """
+    if isinstance(mal_prop, pd.DataFrame):
+        mal_prop_reindexed = mal_prop.reindex(columns=valid_spots, fill_value=0.0)
+        mal_prop_arr = mal_prop_reindexed.sum(axis=0).values.astype(np.float64)
+    else:
+        mal_prop_arr = mal_prop.reindex(valid_spots, fill_value=0.0).values.astype(
+            np.float64
+        )
+
+    if mal_prop_arr.sum() > 0 and mal_ref is not None:
+        if isinstance(mal_ref, pd.DataFrame):
+            shared_types = [t for t in mal_ref.columns if t in mal_prop_reindexed.index]
+            mal_ref_aligned = mal_ref[shared_types]
+            mal_prop_aligned = mal_prop_reindexed.loc[shared_types]
+            mal_ref_sub = mal_ref_aligned.reindex(olp_genes).values.astype(np.float64)
+            mal_ref_sub = np.nan_to_num(mal_ref_sub)
+            col_sums = mal_ref_sub.sum(axis=0)
+            col_sums[col_sums == 0] = 1
+            mal_ref_cpm = mal_ref_sub * 1e6 / col_sums
+            known_fracs = mal_prop_aligned.values  # (n_types, n_spots)
+            mixture_mal = mal_ref_cpm @ known_fracs
+            mixture_minus_mal = ST_cpm - mixture_mal
+        else:
+            mal_ref_sub = mal_ref.reindex(olp_genes).values.astype(np.float64)
+            if np.isnan(mal_ref_sub).any():
+                mal_ref_sub = np.nan_to_num(mal_ref_sub)
+            mal_ref_cpm = (
+                mal_ref_sub * 1e6 / mal_ref_sub.sum()
+                if mal_ref_sub.sum() > 0
+                else mal_ref_sub
+            )
+            mixture_mal = np.outer(mal_ref_cpm, mal_prop_arr)
+            mixture_minus_mal = ST_cpm - mixture_mal
+    else:
+        mixture_minus_mal = ST_cpm
+
+    return mixture_minus_mal, mal_prop_arr
+
+
+def _collect_signature_genes(
+    type_keys: list[str],
+    signature: dict[str, list[str]],
+    olp_set: set[str],
+) -> list[str]:
+    """Gather unique signature genes for *type_keys*, preserving first-occurrence order."""
+    seen: set[str] = set()
+    sig_genes: list[str] = []
+    for k in type_keys:
+        if k in signature:
+            for g in signature[k]:
+                if g not in seen:
+                    seen.add(g)
+                    if g in olp_set:
+                        sig_genes.append(g)
+    return sig_genes
+
+
+def _gene_indices(sig_genes: list[str], olp_genes: np.ndarray) -> np.ndarray:
+    """Return integer indices into *olp_genes* for each gene in *sig_genes*."""
+    return np.array([np.where(olp_genes == g)[0][0] for g in sig_genes])
+
+
+def _ref_col_indices(types: list[str], ref_columns: pd.Index | list[str]) -> list[int]:
+    """Return column indices in *ref_columns* for each type in *types*."""
+    col_list = list(ref_columns)
+    return [col_list.index(t) for t in types]
+
+
+def _normalize_level1(
+    prop_mat_l1: pd.DataFrame,
+    mode: str,
+    unidentifiable: bool,
+    valid_spots: np.ndarray,
+) -> pd.DataFrame:
+    """Apply mode-specific normalization after Level 1 deconvolution."""
+    if unidentifiable:
+        if mode == "standard":
+            unid = 1 - prop_mat_l1.sum(axis=0)
+            unid_row = pd.DataFrame(
+                [unid.values], index=["Unidentifiable"], columns=valid_spots
+            )
+            prop_mat_l1 = pd.concat([prop_mat_l1, unid_row])
+        elif mode == "deconvWithSC_alt":
+            non_mal = prop_mat_l1.iloc[1:]
+            non_mal_sums = non_mal.sum(axis=0)
+            non_mal_norm = non_mal / non_mal_sums * (1 - prop_mat_l1.iloc[0])
+            prop_mat_l1.iloc[1:] = non_mal_norm
+        elif mode == "deconvWithSC":
+            col_sums = prop_mat_l1.sum(axis=0)
+            prop_mat_l1 = prop_mat_l1 / col_sums
+    return prop_mat_l1
+
+
+def _run_level1_deconvolution(
+    mixture_minus_mal: np.ndarray,
+    ref_cpm: np.ndarray,
+    reference: pd.DataFrame,
+    signature: dict[str, list[str]],
+    olp_genes: np.ndarray,
+    olp_set: set[str],
+    level1_types: list[str],
+    mal_prop_arr: np.ndarray,
+    valid_spots: np.ndarray,
+    mode: str,
+    unidentifiable: bool,
+    n_jobs: int,
+    solver: str,
+) -> pd.DataFrame:
+    """Estimate major-lineage proportions (Level 1 of the hierarchy)."""
+    logger.info("Stage 2 - Level 1. Estimate the major lineage.")
+
+    sig_keys = list(level1_types) + (["T cell"] if "T cell" in signature else [])
+    sig_genes_l1 = _collect_signature_genes(sig_keys, signature, olp_set)
+    sig_idx = _gene_indices(sig_genes_l1, olp_genes)
+
+    mixture_l1 = mixture_minus_mal[sig_idx]
+    ref_l1 = ref_cpm[sig_idx][:, _ref_col_indices(level1_types, reference.columns)]
+
+    n_cell = ref_l1.shape[1]
+    n_spot = mixture_l1.shape[1]
+    theta_sum = (1 - mal_prop_arr) - 1e-5
+
+    prop_l1 = _solve_constrained_batch(
+        ref_l1,
+        mixture_l1,
+        n_cell,
+        theta_sum,
+        pp_min_arr=(np.zeros(n_spot) if unidentifiable else (1 - mal_prop_arr - 2e-5)),
+        pp_max_arr=1 - mal_prop_arr,
+        n_jobs=n_jobs,
+        solver=solver,
+    )
+
+    prop_mat_l1 = pd.DataFrame(prop_l1, index=level1_types, columns=valid_spots)
+
+    if mode in ("standard", "deconvWithSC_alt"):
+        mal_row = pd.DataFrame([mal_prop_arr], index=["Malignant"], columns=valid_spots)
+        prop_mat_l1 = pd.concat([mal_row, prop_mat_l1])
+
+    return _normalize_level1(prop_mat_l1, mode, unidentifiable, valid_spots)
+
+
+def _run_level2_sublineages(
+    prop_mat_l1: pd.DataFrame,
+    mixture_minus_mal: np.ndarray,
+    ref_cpm: np.ndarray,
+    reference: pd.DataFrame,
+    signature: dict[str, list[str]],
+    olp_genes: np.ndarray,
+    olp_set: set[str],
+    tree: dict[str, list[str]],
+    level1_types: list[str],
+    valid_spots: np.ndarray,
+    mode: str,
+    macrophage_other: bool,
+    n_jobs: int,
+    solver: str,
+) -> pd.DataFrame:
+    """Estimate sub-lineage proportions (Level 2) for each major lineage."""
+    if mode != "deconvMal":
+        logger.info("Stage 2 - Level 2. Estimate the sub lineage.")
+
+    for cell_spe, subtypes in tree.items():
+        if len(subtypes) < 2 or cell_spe not in prop_mat_l1.index:
+            continue
+
+        logger.info(f"                  > {cell_spe}:")
+
+        subtypes_no_other = [s for s in subtypes if s != "Macrophage other"]
+        subtypes_in_ref = [s for s in subtypes_no_other if s in reference.columns]
+        if len(subtypes_in_ref) == 0:
+            continue
+
+        # Subtract other lineages' contribution
+        other_types_in_l1 = [
+            t for t in level1_types if t != cell_spe and t in prop_mat_l1.index
+        ]
+        if other_types_in_l1:
+            other_ref_idx = _ref_col_indices(other_types_in_l1, reference.columns)
+            other_contribution = (
+                ref_cpm[:, other_ref_idx] @ prop_mat_l1.loc[other_types_in_l1].values
+            )
+            mixture_l2 = mixture_minus_mal - other_contribution
+        else:
+            mixture_l2 = mixture_minus_mal.copy()
+
+        # Signature genes for this lineage
+        sig_genes_l2 = _collect_signature_genes(subtypes_in_ref, signature, olp_set)
+        if len(sig_genes_l2) == 0:
+            continue
+
+        sig_idx_l2 = _gene_indices(sig_genes_l2, olp_genes)
+        ref_idx_l2 = _ref_col_indices(subtypes_in_ref, reference.columns)
+
+        mix_l2 = mixture_l2[sig_idx_l2]
+        ref_l2 = ref_cpm[sig_idx_l2][:, ref_idx_l2]
+
+        n_cell_l2 = ref_l2.shape[1]
+        theta_sum_l2 = prop_mat_l1.loc[cell_spe].values - 1e-5
+
+        if cell_spe == "Macrophage" and macrophage_other:
+            pp_min_l2 = np.zeros(len(valid_spots))
+        else:
+            pp_min_l2 = prop_mat_l1.loc[cell_spe].values - 2e-5
+
+        pp_max_l2 = prop_mat_l1.loc[cell_spe].values
+
+        prop_l2 = _solve_constrained_batch(
+            ref_l2,
+            mix_l2,
+            n_cell_l2,
+            theta_sum_l2,
+            pp_min_arr=pp_min_l2,
+            pp_max_arr=pp_max_l2,
+            n_jobs=n_jobs,
+            solver=solver,
+        )
+
+        sub_df = pd.DataFrame(prop_l2, index=subtypes_in_ref, columns=valid_spots)
+
+        if mode == "standard" and macrophage_other and cell_spe == "Macrophage":
+            mac_other = prop_mat_l1.loc[cell_spe] - sub_df.sum(axis=0)
+            mac_other_row = pd.DataFrame(
+                [mac_other.values],
+                index=["Macrophage other"],
+                columns=valid_spots,
+            )
+            sub_df = pd.concat([sub_df, mac_other_row])
+
+        prop_mat_l1 = pd.concat([prop_mat_l1, sub_df])
+
+    return prop_mat_l1
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: Hierarchical constrained deconvolution — entry points
 # ---------------------------------------------------------------------------
 
 
@@ -931,146 +1242,46 @@ def _spatial_deconv_python(
     signature = ref["sigGenes"].copy()
     tree = ref["lineageTree"].copy()
 
-    # Intersect genes (preserve order from gene_names, matching R's intersect)
-    ref_gene_set = set(reference.index)
-    olp_mask = np.array([g in ref_gene_set for g in gene_names])
-    olp_genes = gene_names[olp_mask]
-    olp_set = set(olp_genes)
-    gene_idx = np.where(olp_mask)[0]
-
-    ST_sub = ST[gene_idx]
+    # Intersect genes, subset, and CPM-normalize
+    ST_cpm, ref_cpm, olp_genes, olp_set = _intersect_and_normalize(
+        ST,
+        gene_names,
+        reference.copy(),
+    )
     reference = reference.loc[olp_genes]
 
-    # CPM normalize ST and reference
-    if sparse.issparse(ST_sub):
-        col_sums = np.asarray(ST_sub.sum(axis=0)).ravel()
-        ST_cpm = ST_sub.toarray().astype(np.float64)
-        ST_cpm = ST_cpm / col_sums[np.newaxis, :] * 1e6
-    else:
-        col_sums = ST_sub.sum(axis=0)
-        ST_cpm = ST_sub.astype(np.float64) / col_sums[np.newaxis, :] * 1e6
+    # Drop NaN spots
+    ST_cpm, valid_spots = _remove_nan_spots(ST_cpm, spot_names)
 
-    ref_cpm = reference.values.astype(np.float64)
-    ref_col_sums = ref_cpm.sum(axis=0)
-    ref_cpm = ref_cpm / ref_col_sums[np.newaxis, :] * 1e6
-
-    # Remove NaN spots
-    nan_mask = ~np.isnan(ST_cpm[0, :])
-    ST_cpm = ST_cpm[:, nan_mask]
-    valid_spots = (
-        spot_names[nan_mask] if isinstance(spot_names, np.ndarray) else spot_names
+    # Subtract malignant contribution from mixture
+    mixture_minus_mal, mal_prop_arr = _subtract_malignant_contribution(
+        ST_cpm,
+        valid_spots,
+        mal_prop,
+        mal_ref,
+        olp_genes,
     )
-
-    # Subtract malignant contribution
-    # In deconvMal mode, mal_prop is a DataFrame (cell_types × spots)
-    # representing known fractions; mal_prop_arr = colSums = total known fraction
-    if isinstance(mal_prop, pd.DataFrame):
-        mal_prop_reindexed = mal_prop.reindex(columns=valid_spots, fill_value=0.0)
-        mal_prop_arr = mal_prop_reindexed.sum(axis=0).values.astype(np.float64)
-    else:
-        mal_prop_arr = mal_prop.reindex(valid_spots, fill_value=0.0).values.astype(
-            np.float64
-        )
-
-    if mal_prop_arr.sum() > 0 and mal_ref is not None:
-        if isinstance(mal_ref, pd.DataFrame):
-            # Multi-column reference: subtract sum of all known contributions
-            # Align: only use fraction rows that have matching reference columns
-            shared_types = [t for t in mal_ref.columns if t in mal_prop_reindexed.index]
-            mal_ref_aligned = mal_ref[shared_types]
-            mal_prop_aligned = mal_prop_reindexed.loc[shared_types]
-            mal_ref_sub = mal_ref_aligned.reindex(olp_genes).values.astype(np.float64)
-            mal_ref_sub = np.nan_to_num(mal_ref_sub)
-            # Compute CPM per column and weight by known fractions
-            col_sums = mal_ref_sub.sum(axis=0)
-            col_sums[col_sums == 0] = 1
-            mal_ref_cpm = mal_ref_sub * 1e6 / col_sums
-            # Each known cell type contributes: ref_cpm * fraction
-            known_fracs = mal_prop_aligned.values  # (n_types, n_spots)
-            mixture_mal = mal_ref_cpm @ known_fracs
-            mixture_minus_mal = ST_cpm - mixture_mal
-        else:
-            mal_ref_sub = mal_ref.reindex(olp_genes).values.astype(np.float64)
-            if np.isnan(mal_ref_sub).any():
-                mal_ref_sub = np.nan_to_num(mal_ref_sub)
-            mal_ref_cpm = (
-                mal_ref_sub * 1e6 / mal_ref_sub.sum()
-                if mal_ref_sub.sum() > 0
-                else mal_ref_sub
-            )
-            mixture_mal = np.outer(mal_ref_cpm, mal_prop_arr)
-            mixture_minus_mal = ST_cpm - mixture_mal
-    else:
-        mixture_minus_mal = ST_cpm
 
     # Level 1: Major lineages
     level1_types = [t for t in tree.keys() if t in reference.columns]
 
     if mode != "deconvMal":
-        logger.info("Stage 2 - Level 1. Estimate the major lineage.")
-
-        # Get signature genes for level 1 (preserve first-occurrence order like R's unique)
-        sig_keys = list(level1_types) + (["T cell"] if "T cell" in signature else [])
-        seen = set()
-        sig_genes_l1 = []
-        for k in sig_keys:
-            if k in signature:
-                for g in signature[k]:
-                    if g not in seen:
-                        seen.add(g)
-                        if g in olp_set:
-                            sig_genes_l1.append(g)
-
-        sig_idx = np.array([np.where(olp_genes == g)[0][0] for g in sig_genes_l1])
-
-        mixture_l1 = mixture_minus_mal[sig_idx]
-        ref_l1 = ref_cpm[sig_idx][
-            :, [list(reference.columns).index(t) for t in level1_types]
-        ]
-
-        n_cell = ref_l1.shape[1]
-
-        theta_sum = (1 - mal_prop_arr) - 1e-5
-
-        n_spot = mixture_l1.shape[1]
-        prop_l1 = _solve_constrained_batch(
-            ref_l1,
-            mixture_l1,
-            n_cell,
-            theta_sum,
-            pp_min_arr=(
-                np.zeros(n_spot) if unidentifiable else (1 - mal_prop_arr - 2e-5)
-            ),
-            pp_max_arr=1 - mal_prop_arr,
-            n_jobs=n_jobs,
-            solver=solver,
+        prop_mat_l1 = _run_level1_deconvolution(
+            mixture_minus_mal,
+            ref_cpm,
+            reference,
+            signature,
+            olp_genes,
+            olp_set,
+            level1_types,
+            mal_prop_arr,
+            valid_spots,
+            mode,
+            unidentifiable,
+            n_jobs,
+            solver,
         )
-
-        prop_mat_l1 = pd.DataFrame(prop_l1, index=level1_types, columns=valid_spots)
-
-        if mode in ("standard", "deconvWithSC_alt"):
-            mal_row = pd.DataFrame(
-                [mal_prop_arr], index=["Malignant"], columns=valid_spots
-            )
-            prop_mat_l1 = pd.concat([mal_row, prop_mat_l1])
-
-        if unidentifiable:
-            if mode == "standard":
-                unid = 1 - prop_mat_l1.sum(axis=0)
-                unid_row = pd.DataFrame(
-                    [unid.values], index=["Unidentifiable"], columns=valid_spots
-                )
-                prop_mat_l1 = pd.concat([prop_mat_l1, unid_row])
-            elif mode == "deconvWithSC_alt":
-                non_mal = prop_mat_l1.iloc[1:]
-                non_mal_sums = non_mal.sum(axis=0)
-                non_mal_norm = non_mal / non_mal_sums * (1 - prop_mat_l1.iloc[0])
-                prop_mat_l1.iloc[1:] = non_mal_norm
-            elif mode == "deconvWithSC":
-                col_sums = prop_mat_l1.sum(axis=0)
-                prop_mat_l1 = prop_mat_l1 / col_sums
     else:
-        # deconvMal mode
         prop_mat_l1 = pd.DataFrame(
             (
                 1 - mal_prop_arr.reshape(1, -1)
@@ -1082,93 +1293,25 @@ def _spatial_deconv_python(
         )
 
     # Level 2: Sublineages
-    if mode != "deconvMal":
-        logger.info("Stage 2 - Level 2. Estimate the sub lineage.")
-
-    for cell_spe, subtypes in tree.items():
-        if len(subtypes) < 2:
-            continue
-        if cell_spe not in prop_mat_l1.index:
-            continue
-
-        logger.info(f"                  > {cell_spe}:")
-
-        subtypes_no_other = [s for s in subtypes if s != "Macrophage other"]
-        subtypes_in_ref = [s for s in subtypes_no_other if s in reference.columns]
-        if len(subtypes_in_ref) == 0:
-            continue
-
-        # Subtract other lineages' contribution
-        other_types = [t for t in level1_types if t != cell_spe]
-        other_types_in_l1 = [t for t in other_types if t in prop_mat_l1.index]
-
-        if other_types_in_l1:
-            other_ref_idx = [
-                list(reference.columns).index(t) for t in other_types_in_l1
-            ]
-            other_contribution = (
-                ref_cpm[:, other_ref_idx] @ prop_mat_l1.loc[other_types_in_l1].values
-            )
-            mixture_l2 = mixture_minus_mal - other_contribution
-        else:
-            mixture_l2 = mixture_minus_mal.copy()
-
-        # Get signature genes for this lineage (preserve first-occurrence order)
-        seen_l2 = set()
-        sig_genes_l2 = []
-        for st in subtypes_in_ref:
-            if st in signature:
-                for g in signature[st]:
-                    if g not in seen_l2:
-                        seen_l2.add(g)
-                        if g in olp_set:
-                            sig_genes_l2.append(g)
-
-        if len(sig_genes_l2) == 0:
-            continue
-
-        sig_idx_l2 = np.array([np.where(olp_genes == g)[0][0] for g in sig_genes_l2])
-        ref_idx_l2 = [list(reference.columns).index(s) for s in subtypes_in_ref]
-
-        mix_l2 = mixture_l2[sig_idx_l2]
-        ref_l2 = ref_cpm[sig_idx_l2][:, ref_idx_l2]
-
-        n_cell_l2 = ref_l2.shape[1]
-        theta_sum_l2 = prop_mat_l1.loc[cell_spe].values - 1e-5
-
-        if cell_spe == "Macrophage" and macrophage_other:
-            pp_min_l2 = np.zeros(len(valid_spots))
-        else:
-            pp_min_l2 = prop_mat_l1.loc[cell_spe].values - 2e-5
-
-        pp_max_l2 = prop_mat_l1.loc[cell_spe].values
-
-        prop_l2 = _solve_constrained_batch(
-            ref_l2,
-            mix_l2,
-            n_cell_l2,
-            theta_sum_l2,
-            pp_min_arr=pp_min_l2,
-            pp_max_arr=pp_max_l2,
-            n_jobs=n_jobs,
-            solver=solver,
-        )
-
-        sub_df = pd.DataFrame(prop_l2, index=subtypes_in_ref, columns=valid_spots)
-
-        if mode == "standard" and macrophage_other and cell_spe == "Macrophage":
-            mac_other = prop_mat_l1.loc[cell_spe] - sub_df.sum(axis=0)
-            mac_other_row = pd.DataFrame(
-                [mac_other.values], index=["Macrophage other"], columns=valid_spots
-            )
-            sub_df = pd.concat([sub_df, mac_other_row])
-
-        prop_mat_l1 = pd.concat([prop_mat_l1, sub_df])
+    prop_mat_l1 = _run_level2_sublineages(
+        prop_mat_l1,
+        mixture_minus_mal,
+        ref_cpm,
+        reference,
+        signature,
+        olp_genes,
+        olp_set,
+        tree,
+        level1_types,
+        valid_spots,
+        mode,
+        macrophage_other,
+        n_jobs,
+        solver,
+    )
 
     # Post-processing: clip [0, 1]
-    prop_mat = prop_mat_l1.clip(0, 1)
-
-    return prop_mat
+    return prop_mat_l1.clip(0, 1)
 
 
 def _solve_constrained_batch(

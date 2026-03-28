@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
+from spatialgpu.core.array_utils import to_dense_float64
+
 logger = logging.getLogger(__name__)
 
 
@@ -163,10 +165,7 @@ def _get_pcs(
     n_pcs: int = 30,
 ) -> np.ndarray:
     """PCA matching R's MUDAN::getPcs() + fastPca()."""
-    if sparse.issparse(mat):
-        m = mat.T.toarray().astype(np.float64)
-    else:
-        m = mat.T.astype(np.float64)
+    m = to_dense_float64(mat.T)
 
     col_means = m.mean(axis=0)
     m = m - col_means

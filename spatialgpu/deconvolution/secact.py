@@ -15,13 +15,14 @@ from __future__ import annotations
 import importlib
 import logging
 import warnings
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 from scipy import sparse, stats
 from scipy.spatial import KDTree
 
+from spatialgpu.deconvolution._keys import KEY_SECACT, UNS_SPACET
 from spatialgpu.deconvolution.spatial_correlation import cal_weights
 
 if TYPE_CHECKING:
@@ -49,12 +50,12 @@ def _import_secactpy():
 
 def _ensure_secact(adata: ad.AnnData) -> dict:
     """Return adata.uns['spacet']['SecAct_output'], creating if absent."""
-    if "spacet" not in adata.uns:
-        adata.uns["spacet"] = {}
-    spacet = adata.uns["spacet"]
-    if "SecAct_output" not in spacet:
-        spacet["SecAct_output"] = {}
-    return spacet["SecAct_output"]
+    if UNS_SPACET not in adata.uns:
+        adata.uns[UNS_SPACET] = {}
+    spacet = adata.uns[UNS_SPACET]
+    if KEY_SECACT not in spacet:
+        spacet[KEY_SECACT] = {}
+    return spacet[KEY_SECACT]
 
 
 def _get_expression_matrix(adata: ad.AnnData) -> pd.DataFrame:
@@ -63,8 +64,6 @@ def _get_expression_matrix(adata: ad.AnnData) -> pd.DataFrame:
     if sparse.issparse(X):
         dense_gb = X.shape[0] * X.shape[1] * 8 / 1e9
         if dense_gb > 4:
-            import warnings
-
             warnings.warn(
                 f"Densifying {X.shape} sparse expression matrix ({dense_gb:.1f} GB). "
                 f"Consider subsetting genes.",
@@ -118,8 +117,8 @@ def secact_inference(
     sig_matrix: str = "secact",
     scale_factor: float = 1e5,
     is_spot_level: bool = True,
-    cell_type_col: Optional[str] = None,
-    is_group_sig: Optional[bool] = None,
+    cell_type_col: str | None = None,
+    is_group_sig: bool | None = None,
     is_group_cor: float = 0.9,
     lambda_: float = 5e5,
     n_rand: int = 1000,
@@ -482,6 +481,243 @@ def _scalar1(v: np.ndarray) -> np.ndarray:
     return v / norm
 
 
+def _prepare_velocity_data(
+    adata: ad.AnnData,
+    scale_factor: float,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Extract clipped activity z-scores and normalized expression.
+
+    Returns (act, expr) where act has negatives clipped to 0 and
+    expr is TPM-normalized + log2-transformed.
+    """
+    secact_out = _ensure_secact(adata)
+    if "SecretedProteinActivity" not in secact_out:
+        raise ValueError("Run secact_inference() first.")
+
+    act = secact_out["SecretedProteinActivity"]["zscore"].copy()
+    act = act.clip(lower=0)
+
+    expr = _get_expression_matrix(adata)
+    expr.index = _transfer_symbol(expr.index.tolist())
+    expr = _rm_duplicates(expr)
+    expr = _normalize_tpm(expr, scale_factor)
+
+    return act, expr
+
+
+def _densify_weights(weights, is_gpu: bool):
+    """Convert spatial weight matrix to dense (GPU or CPU).
+
+    Parameters
+    ----------
+    weights : sparse or dense array
+        Spatial weight matrix from ``cal_weights``.
+    is_gpu : bool
+        Whether GPU backend is active.
+
+    Returns
+    -------
+    Dense weight matrix (cupy array on GPU, numpy array on CPU).
+    """
+    if is_gpu:
+        import cupy as cp
+
+        if sparse.issparse(weights):
+            return cp.asarray(weights.toarray())
+        return cp.asarray(weights)
+
+    if sparse.issparse(weights):
+        dense_gb = weights.shape[0] * weights.shape[1] * 8 / 1e9
+        if dense_gb > 4:
+            warnings.warn(
+                f"Densifying {weights.shape} weight matrix ({dense_gb:.1f} GB). "
+                f"Consider reducing spot count.",
+                ResourceWarning,
+                stacklevel=2,
+            )
+        return weights.toarray()
+    return np.asarray(weights)
+
+
+def _build_weighted_matrix(
+    gene: str,
+    expr_new: pd.DataFrame,
+    act_new: pd.DataFrame,
+    weights_dense,
+    n_spots: int,
+    is_gpu: bool,
+) -> np.ndarray:
+    """Build weighted matrix: W[i,j] = weights[i,j] * expr[gene,i] * act[gene,j].
+
+    Returns a numpy (n_spots, n_spots) array regardless of backend.
+    """
+    if gene not in expr_new.index:
+        return np.zeros((n_spots, n_spots))
+
+    expr_gene = expr_new.loc[gene].values
+    w_sub = weights_dense[:n_spots, :n_spots]
+
+    if is_gpu:
+        import cupy as cp
+
+        expr_gpu = cp.asarray(expr_gene)
+        result_gpu = w_sub * expr_gpu[:, cp.newaxis]
+        if gene in act_new.index:
+            act_gpu = cp.asarray(act_new.loc[gene].values)
+            result_gpu = result_gpu * act_gpu[cp.newaxis, :]
+        else:
+            result_gpu = cp.zeros_like(result_gpu)
+        return cp.asnumpy(result_gpu)
+
+    # CPU path
+    result = w_sub * expr_gene[:, np.newaxis]
+    if gene in act_new.index:
+        result = result * act_new.loc[gene].values[np.newaxis, :]
+    else:
+        result = np.zeros_like(result)
+    return result
+
+
+def _compute_velocity_arrows(
+    weights_new: np.ndarray,
+    coords: np.ndarray,
+    n_spots: int,
+    signal_mode: str,
+) -> pd.DataFrame:
+    """Compute source-to-sink velocity arrows for each spot.
+
+    Parameters
+    ----------
+    weights_new : ndarray (n_spots, n_spots)
+        Gene-weighted spatial matrix.
+    coords : ndarray (n_spots, 2)
+        Spot spatial coordinates.
+    n_spots : int
+        Number of spots.
+    signal_mode : str
+        "sending" or "receiving".
+
+    Returns
+    -------
+    DataFrame with columns x_start, y_start, x_change, y_change,
+    x_end, y_end, vec_len.
+    """
+    _EMPTY_COLS = [
+        "x_start",
+        "y_start",
+        "x_change",
+        "y_change",
+        "x_end",
+        "y_end",
+        "vec_len",
+    ]
+    arrows = []
+
+    for i in range(n_spots):
+        if signal_mode == "sending":
+            w_slice = weights_new[i, :]
+        else:
+            w_slice = weights_new[:, i]
+
+        vector_len = np.sum(w_slice)
+        if vector_len == 0:
+            continue
+
+        neighbors_mask = w_slice > 0
+        if not neighbors_mask.any():
+            continue
+
+        if signal_mode == "sending":
+            neighbor_coords = coords[neighbors_mask] - coords[i]
+        else:
+            neighbor_coords = coords[i] - coords[neighbors_mask]
+        neighbor_values = w_slice[neighbors_mask]
+
+        # Normalize each neighbor direction to unit vector
+        norms = np.sqrt(np.sum(neighbor_coords**2, axis=1, keepdims=True))
+        norms[norms == 0] = 1
+        neighbor_unit = neighbor_coords / norms
+
+        # Weight by value and average
+        weighted_dirs = neighbor_unit * neighbor_values[:, np.newaxis]
+        avg_dir = np.mean(weighted_dirs, axis=0)
+        avg_dir = _scalar1(avg_dir) * vector_len
+
+        if signal_mode == "sending":
+            x_start, y_start = coords[i, 0], coords[i, 1]
+            x_end = x_start + avg_dir[0]
+            y_end = y_start + avg_dir[1]
+        else:
+            x_end, y_end = coords[i, 0], coords[i, 1]
+            x_start = x_end - avg_dir[0]
+            y_start = y_end - avg_dir[1]
+
+        arrows.append(
+            {
+                "x_start": x_start,
+                "y_start": y_start,
+                "x_change": avg_dir[0],
+                "y_change": avg_dir[1],
+                "x_end": x_end,
+                "y_end": y_end,
+                "vec_len": np.sqrt(avg_dir[0] ** 2 + avg_dir[1] ** 2),
+            }
+        )
+
+    if not arrows:
+        return pd.DataFrame(columns=_EMPTY_COLS)
+    return pd.DataFrame(arrows)
+
+
+def _normalize_arrows(arrow_df: pd.DataFrame) -> pd.DataFrame:
+    """Scale arrow lengths for display (R convention: max displacement 10).
+
+    Modifies the DataFrame in place and returns it.
+    """
+    if len(arrow_df) == 0:
+        return arrow_df
+
+    max_dx = max(arrow_df["x_change"].abs().max(), 1e-10)
+    max_dy = max(arrow_df["y_change"].abs().max(), 1e-10)
+    arrow_df["x_change"] = arrow_df["x_change"] * 10 / max_dx
+    arrow_df["y_change"] = arrow_df["y_change"] * 10 / max_dy
+    arrow_df["x_end"] = arrow_df["x_start"] + arrow_df["x_change"]
+    arrow_df["y_end"] = arrow_df["y_start"] + arrow_df["y_change"]
+
+    # Arrow head size: small for weak, large for strong
+    arrow_df.loc[arrow_df["vec_len"] < 0.1, "vec_len"] = 0.01
+    arrow_df.loc[arrow_df["vec_len"] >= 0.1, "vec_len"] = 0.08
+    return arrow_df
+
+
+def _compute_background_points(
+    gene: str,
+    signal_mode: str,
+    expr_new: pd.DataFrame,
+    act_new: pd.DataFrame,
+    coords: np.ndarray,
+    n_spots: int,
+) -> pd.DataFrame:
+    """Build background point values for velocity plot coloring.
+
+    For "sending" mode, uses expression (clipped to [0, 5]).
+    For "receiving" mode, uses activity z-score.
+    """
+    if signal_mode == "sending":
+        if gene in expr_new.index:
+            values = expr_new.loc[gene].values.copy()
+            values = np.clip(values, 0, 5)  # R: fig.df[fig.df[,3]>5,3] <- 5
+        else:
+            values = np.zeros(n_spots)
+    else:
+        if gene in act_new.index:
+            values = act_new.loc[gene].values.copy()
+        else:
+            values = np.zeros(n_spots)
+
+    return pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1], "value": values})
+
+
 def secact_signaling_velocity(
     adata: ad.AnnData,
     gene: str,
@@ -521,88 +757,33 @@ def secact_signaling_velocity(
         - 'gene': str
         - 'signal_mode': str
     """
-    secact_out = _ensure_secact(adata)
-    if "SecretedProteinActivity" not in secact_out:
-        raise ValueError("Run secact_inference() first.")
-
-    act = secact_out["SecretedProteinActivity"]["zscore"].copy()
-    act = act.clip(lower=0)
-
-    expr = _get_expression_matrix(adata)
-    expr.index = _transfer_symbol(expr.index.tolist())
-    expr = _rm_duplicates(expr)
-    expr = _normalize_tpm(expr, scale_factor)
-
-    # Spatial weights
     from spatialgpu.core.backend import get_backend as _get_backend
 
-    _backend = _get_backend()
-
-    weights = cal_weights(adata, radius=radius, sigma=sigma, diag_as_zero=True)
-    if _backend.is_gpu_active:
-        import cupy as cp
-
-        if sparse.issparse(weights):
-            weights_dense = cp.asarray(weights.toarray())
-        else:
-            weights_dense = cp.asarray(weights)
-    else:
-        if sparse.issparse(weights):
-            dense_gb = weights.shape[0] * weights.shape[1] * 8 / 1e9
-            if dense_gb > 4:
-                import warnings
-
-                warnings.warn(
-                    f"Densifying {weights.shape} weight matrix ({dense_gb:.1f} GB). "
-                    f"Consider reducing spot count.",
-                    ResourceWarning,
-                    stacklevel=2,
-                )
-            weights_dense = weights.toarray()
-        else:
-            weights_dense = np.asarray(weights)
+    # 1. Prepare data
+    act, expr = _prepare_velocity_data(adata, scale_factor)
 
     spot_names = adata.obs_names.tolist()
     common_spots = [s for s in spot_names if s in act.columns and s in expr.columns]
     n_spots = len(common_spots)
-
     act_new = act[common_spots]
     expr_new = expr[common_spots]
 
-    # Build weighted matrix: weights_new[i,j] = weights[i,j] * expr[gene, i] * act[gene, j]
-    if _backend.is_gpu_active:
-        import cupy as cp
+    # 2. Spatial weights → dense
+    _backend = _get_backend()
+    weights = cal_weights(adata, radius=radius, sigma=sigma, diag_as_zero=True)
+    weights_dense = _densify_weights(weights, is_gpu=_backend.is_gpu_active)
 
-        if gene not in expr_new.index:
-            weights_new = np.zeros((n_spots, n_spots))
-        else:
-            expr_gene = expr_new.loc[gene].values  # (n_spots,)
-            _expr_gene_gpu = cp.asarray(expr_gene)
-            _w_sub = weights_dense[:n_spots, :n_spots]
-            weights_new_gpu = _w_sub * _expr_gene_gpu[:, cp.newaxis]
-            if gene in act_new.index:
-                act_gene = act_new.loc[gene].values  # (n_spots,)
-                _act_gene_gpu = cp.asarray(act_gene)
-                weights_new_gpu = weights_new_gpu * _act_gene_gpu[cp.newaxis, :]
-            else:
-                weights_new_gpu = cp.zeros_like(weights_new_gpu)
-            weights_new = cp.asnumpy(weights_new_gpu)
-    else:
-        if gene not in expr_new.index:
-            weights_new = np.zeros((n_spots, n_spots))
-        else:
-            expr_gene = expr_new.loc[gene].values  # (n_spots,)
-            # weights_new = weights * expr[gene, :]  (row-wise multiply)
-            weights_new = weights_dense[:n_spots, :n_spots] * expr_gene[:, np.newaxis]
+    # 3. Gene-weighted matrix: W[i,j] = weights[i,j] * expr[gene,i] * act[gene,j]
+    weights_new = _build_weighted_matrix(
+        gene,
+        expr_new,
+        act_new,
+        weights_dense,
+        n_spots,
+        is_gpu=_backend.is_gpu_active,
+    )
 
-        # Then multiply columns by act[gene, :]
-        if gene in act_new.index:
-            act_gene = act_new.loc[gene].values  # (n_spots,)
-            weights_new = weights_new * act_gene[np.newaxis, :]
-        else:
-            weights_new = np.zeros_like(weights_new)
-
-    # Coordinates
+    # 4. Compute velocity arrows
     coords = np.column_stack(
         [
             adata.obs["coordinate_x_um"].values,
@@ -610,123 +791,21 @@ def secact_signaling_velocity(
         ]
     )[:n_spots]
 
-    # Compute arrows
-    arrows = []
+    arrow_df = _compute_velocity_arrows(weights_new, coords, n_spots, signal_mode)
+    arrow_df = _normalize_arrows(arrow_df)
 
-    if signal_mode == "sending":
-        for i in range(n_spots):
-            vector_len = np.sum(weights_new[i, :])
-            if vector_len == 0:
-                continue
-
-            neighbors_mask = weights_new[i, :] > 0
-            if not neighbors_mask.any():
-                continue
-
-            neighbor_coords = coords[neighbors_mask] - coords[i]
-            neighbor_values = weights_new[i, neighbors_mask]
-
-            # Normalize each neighbor direction to unit vector
-            norms = np.sqrt(np.sum(neighbor_coords**2, axis=1, keepdims=True))
-            norms[norms == 0] = 1
-            neighbor_unit = neighbor_coords / norms
-
-            # Weight by value and average
-            weighted_dirs = neighbor_unit * neighbor_values[:, np.newaxis]
-            avg_dir = np.mean(weighted_dirs, axis=0)
-            avg_dir = _scalar1(avg_dir)
-            avg_dir = avg_dir * vector_len
-
-            arrows.append(
-                {
-                    "x_start": coords[i, 0],
-                    "y_start": coords[i, 1],
-                    "x_change": avg_dir[0],
-                    "y_change": avg_dir[1],
-                    "x_end": coords[i, 0] + avg_dir[0],
-                    "y_end": coords[i, 1] + avg_dir[1],
-                    "vec_len": np.sqrt(avg_dir[0] ** 2 + avg_dir[1] ** 2),
-                }
-            )
-    else:  # receiving
-        for i in range(n_spots):
-            vector_len = np.sum(weights_new[:, i])
-            if vector_len == 0:
-                continue
-
-            neighbors_mask = weights_new[:, i] > 0
-            if not neighbors_mask.any():
-                continue
-
-            neighbor_coords = coords[i] - coords[neighbors_mask]
-            neighbor_values = weights_new[neighbors_mask, i]
-
-            norms = np.sqrt(np.sum(neighbor_coords**2, axis=1, keepdims=True))
-            norms[norms == 0] = 1
-            neighbor_unit = neighbor_coords / norms
-
-            weighted_dirs = neighbor_unit * neighbor_values[:, np.newaxis]
-            avg_dir = np.mean(weighted_dirs, axis=0)
-            avg_dir = _scalar1(avg_dir)
-            avg_dir = avg_dir * vector_len
-
-            arrows.append(
-                {
-                    "x_start": coords[i, 0] - avg_dir[0],
-                    "y_start": coords[i, 1] - avg_dir[1],
-                    "x_change": avg_dir[0],
-                    "y_change": avg_dir[1],
-                    "x_end": coords[i, 0],
-                    "y_end": coords[i, 1],
-                    "vec_len": np.sqrt(avg_dir[0] ** 2 + avg_dir[1] ** 2),
-                }
-            )
-
-    arrow_df = (
-        pd.DataFrame(arrows)
-        if arrows
-        else pd.DataFrame(
-            columns=[
-                "x_start",
-                "y_start",
-                "x_change",
-                "y_change",
-                "x_end",
-                "y_end",
-                "vec_len",
-            ]
-        )
+    # 5. Background points for coloring
+    points_df = _compute_background_points(
+        gene,
+        signal_mode,
+        expr_new,
+        act_new,
+        coords,
+        n_spots,
     )
 
-    # Normalize arrow lengths for display (R: scale to max 10)
-    if len(arrow_df) > 0:
-        max_dx = max(arrow_df["x_change"].abs().max(), 1e-10)
-        max_dy = max(arrow_df["y_change"].abs().max(), 1e-10)
-        arrow_df["x_change"] = arrow_df["x_change"] * 10 / max_dx
-        arrow_df["y_change"] = arrow_df["y_change"] * 10 / max_dy
-        arrow_df["x_end"] = arrow_df["x_start"] + arrow_df["x_change"]
-        arrow_df["y_end"] = arrow_df["y_start"] + arrow_df["y_change"]
-
-        # Arrow head size: small for weak, large for strong
-        arrow_df.loc[arrow_df["vec_len"] < 0.1, "vec_len"] = 0.01
-        arrow_df.loc[arrow_df["vec_len"] >= 0.1, "vec_len"] = 0.08
-
-    # Background point values
-    if signal_mode == "sending":
-        if gene in expr_new.index:
-            values = expr_new.loc[gene].values.copy()
-            values = np.clip(values, 0, 5)  # R: fig.df[fig.df[,3]>5,3] <- 5
-        else:
-            values = np.zeros(n_spots)
-    else:
-        if gene in act_new.index:
-            values = act_new.loc[gene].values.copy()
-        else:
-            values = np.zeros(n_spots)
-
-    points_df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1], "value": values})
-
-    # Store in adata
+    # 6. Store and return
+    secact_out = _ensure_secact(adata)
     secact_out.setdefault("velocity", {})[gene] = {
         "arrows": arrow_df,
         "points": points_df,

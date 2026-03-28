@@ -476,9 +476,10 @@ def main():
         create_comparison(r_plots, py_plots, comparison_path)
 
         # Copy R vignette reference images
-        ref_dir = (
+        ref_dir = os.environ.get(
+            "SPACET_VIGNETTE_IMG_DIR",
             "/Users/seongyongpark/project/psychemist/"
-            "SpaCET/vignettes/img"
+            "SpaCET/vignettes/img",
         )
         if os.path.isdir(ref_dir):
             ref_dest = os.path.join(

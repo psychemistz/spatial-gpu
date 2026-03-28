@@ -6,6 +6,7 @@ error vs R for both major and minor lineage cell types.
 """
 from __future__ import annotations
 
+import os
 import time
 
 import anndata as ad
@@ -15,8 +16,8 @@ from scipy import sparse
 
 from spatialgpu.deconvolution.core import deconvolution
 
-VST_DIR = "/Users/seongyongpark/project/psychemist/sigdiscov/dataset/visium"
-VAL_DIR = "/Users/seongyongpark/project/psychemist/spatial-gpu/validation"
+VST_DIR = os.environ.get("SPACET_VST_DIR", "/Users/seongyongpark/project/psychemist/sigdiscov/dataset/visium")
+VAL_DIR = os.environ.get("SPACET_VAL_DIR", "/Users/seongyongpark/project/psychemist/spatial-gpu/validation")
 
 
 def load_vst_dataset(i: int) -> ad.AnnData:

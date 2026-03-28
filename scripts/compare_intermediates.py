@@ -2,7 +2,9 @@
 """Compare Python intermediate deconvolution values with R's saved intermediates."""
 from __future__ import annotations
 
+import os
 import sys
+
 sys.path.insert(0, ".")
 
 import numpy as np
@@ -10,7 +12,7 @@ import pandas as pd
 from scipy import sparse
 
 INT_DIR = "validation/intermediates"
-VST_DIR = "/Users/seongyongpark/project/psychemist/sigdiscov/dataset/visium"
+VST_DIR = os.environ.get("SPACET_VST_DIR", "/Users/seongyongpark/project/psychemist/sigdiscov/dataset/visium")
 
 # ---- Load VST1 dataset (same as compare_r_vs_python.py) ----
 import anndata as ad

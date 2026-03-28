@@ -10,12 +10,9 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from typing import Optional
 
 
 class BackendType(Enum):
@@ -79,7 +76,7 @@ class Backend:
     <BackendType.CPU: 1>
     """
 
-    _instance: Optional[Backend] = None
+    _instance: Backend | None = None
     _initialized: bool = False
 
     def __new__(cls) -> Backend:
@@ -93,7 +90,7 @@ class Backend:
 
         self._backend_type: BackendType = BackendType.CPU
         self._gpu_available: bool = False
-        self._gpu_info: Optional[GPUInfo] = None
+        self._gpu_info: GPUInfo | None = None
         self._device_id: int = 0
 
         # Lazy-loaded modules
@@ -169,7 +166,7 @@ class Backend:
         return self._backend_type == BackendType.CUDA
 
     @property
-    def device_info(self) -> Optional[GPUInfo]:
+    def device_info(self) -> GPUInfo | None:
         """Information about the active GPU device."""
         return self._gpu_info
 
@@ -340,7 +337,7 @@ class Backend:
 
 
 # Global backend instance
-_backend: Optional[Backend] = None
+_backend: Backend | None = None
 
 
 def get_backend() -> Backend:

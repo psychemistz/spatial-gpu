@@ -5,7 +5,7 @@ Data writers for spatial omics data.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -105,8 +105,8 @@ def write_spatial_csv(
 def export_to_spatialdata(
     adata: ad.AnnData,
     spatial_key: str = "spatial",
-    image: Optional[any] = None,
-    masks: Optional[any] = None,
+    image: any | None = None,
+    masks: any | None = None,
 ) -> sd.SpatialData:
     """
     Export to SpatialData format.

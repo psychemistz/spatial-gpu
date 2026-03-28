@@ -19,6 +19,19 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.patches import Wedge
 from scipy import sparse
 
+from spatialgpu.deconvolution._keys import (
+    KEY_CCI,
+    KEY_DECONV,
+    KEY_GENESET,
+    KEY_GROUPMAT,
+    KEY_INTERACTION,
+    KEY_PROPMAT,
+    KEY_SECACT,
+    KEY_TESTRES,
+    OBSM_SPATIAL,
+    UNS_SPACET,
+)
+
 if TYPE_CHECKING:
     import anndata as ad
 
@@ -281,8 +294,8 @@ def visualize_colocalization(
     -------
     matplotlib Figure
     """
-    spacet = adata.uns.get("spacet", {})
-    cci = spacet.get("CCI", {})
+    spacet = adata.uns.get(UNS_SPACET, {})
+    cci = spacet.get(KEY_CCI, {})
     summary_df = cci.get("colocalization")
     if summary_df is None:
         raise ValueError("Run cci_colocalization() first.")
@@ -293,8 +306,8 @@ def visualize_colocalization(
     summary_df.loc[summary_df["fraction_product"] > 0.02, "fraction_product"] = 0.02
 
     # Determine cell type order
-    deconv = spacet.get("deconvolution", {})
-    prop_mat = deconv.get("propMat")
+    deconv = spacet.get(KEY_DECONV, {})
+    prop_mat = deconv.get(KEY_PROPMAT)
     ref = deconv.get("Ref", {})
     lineage_tree = ref.get("lineageTree", {})
 
@@ -440,11 +453,11 @@ def visualize_cell_type_pair(
     -------
     matplotlib Figure
     """
-    spacet = adata.uns.get("spacet", {})
-    cci = spacet.get("CCI", {})
-    interaction = cci.get("interaction", {})
-    test_res = interaction.get("testRes")
-    group_mat = interaction.get("groupMat")
+    spacet = adata.uns.get(UNS_SPACET, {})
+    cci = spacet.get(KEY_CCI, {})
+    interaction = cci.get(KEY_INTERACTION, {})
+    test_res = interaction.get(KEY_TESTRES)
+    group_mat = interaction.get(KEY_GROUPMAT)
 
     if test_res is None or group_mat is None:
         raise ValueError("Run cci_cell_type_pair() first.")
@@ -457,8 +470,8 @@ def visualize_cell_type_pair(
             f"Cell-type pair '{pair_key}' not found " "in interaction results."
         )
 
-    deconv = spacet.get("deconvolution", {})
-    prop_mat = deconv.get("propMat")
+    deconv = spacet.get(KEY_DECONV, {})
+    prop_mat = deconv.get(KEY_PROPMAT)
     coords = _get_spot_coordinates(adata)
 
     rho = test_res.loc[pair_key, "colocalization_rho"]
@@ -624,12 +637,12 @@ def visualize_distance_to_interface(
     -------
     matplotlib Figure
     """
-    spacet = adata.uns.get("spacet", {})
-    cci = spacet.get("CCI", {})
+    spacet = adata.uns.get(UNS_SPACET, {})
+    cci = spacet.get(KEY_CCI, {})
     interface = cci.get("interface")
-    interaction = cci.get("interaction", {})
-    test_res = interaction.get("testRes")
-    group_mat = interaction.get("groupMat")
+    interaction = cci.get(KEY_INTERACTION, {})
+    test_res = interaction.get(KEY_TESTRES)
+    group_mat = interaction.get(KEY_GROUPMAT)
 
     if interface is None:
         raise ValueError("Run identify_interface() first.")
@@ -742,8 +755,8 @@ def _get_spot_coordinates(adata: ad.AnnData) -> np.ndarray:
     For Visium data with 'rowxcol' format spot IDs, applies the same
     coordinate transformation as R's visualSpatial (coord_flip equivalent).
     """
-    if "spatial" in adata.obsm:
-        return adata.obsm["spatial"]
+    if OBSM_SPATIAL in adata.obsm:
+        return adata.obsm[OBSM_SPATIAL]
 
     # Parse from "row x col" spot IDs
     coords = []
@@ -759,7 +772,7 @@ def _get_spot_coordinates(adata: ad.AnnData) -> np.ndarray:
 
     # Apply Visium-like coord_flip: R does x=xDiml-coordi[,1], y=coordi[,2]
     # This flips the x-axis to match tissue orientation
-    platform = adata.uns.get("spacet", {}).get("platform", "")
+    platform = adata.uns.get(UNS_SPACET, {}).get("platform", "")
     if "visium" in str(platform).lower():
         x_max = coords[:, 0].max()
         coords[:, 0] = x_max - coords[:, 0]
@@ -774,47 +787,100 @@ def _prepare_data(
     scale_type_gene: str,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
     """Prepare values dict, legend name, and discrete flag."""
-    spacet = adata.uns.get("spacet", {})
+    spacet = adata.uns.get(UNS_SPACET, {})
 
-    if spatial_type == "QualityControl":
-        if "UMI" not in adata.obs.columns:
-            raise ValueError("Run quality_control() first.")
-        mat = {
-            "UMI": adata.obs["UMI"].values.astype(float),
-            "Gene": adata.obs["Gene"].values.astype(float),
-        }
-        if spatial_features:
-            mat = {k: v for k, v in mat.items() if k in spatial_features}
-        return mat, "Count", False
+    # Dispatch table: spatial_type -> (handler, args)
+    # Handlers that need adata pass it explicitly; others use spacet or both.
+    _dispatch: dict[str, tuple] = {
+        "QualityControl": (_prepare_quality_control, (adata, spatial_features)),
+        "GeneExpression": (
+            _prepare_gene_expression,
+            (adata, spatial_features, scale_type_gene),
+        ),
+        "CellFraction": (_prepare_cell_fraction, (adata, spatial_features, spacet)),
+        "MostAbundantCellType": (
+            _prepare_most_abundant,
+            (adata, spatial_features, spacet),
+        ),
+        "LRNetworkScore": (_prepare_lr_network_score, (spatial_features, spacet)),
+        "Interface": (_prepare_interface, (spatial_features, spacet)),
+        "GeneSetScore": (_prepare_gene_set_score, (spatial_features, spacet)),
+        "SecretedProteinActivity": (
+            _prepare_secreted_protein_activity,
+            (spatial_features, spacet),
+        ),
+        "SignalingPattern": (_prepare_signaling_pattern, (spatial_features, spacet)),
+        "metaData": (_prepare_metadata, (adata, spatial_features)),
+    }
 
-    elif spatial_type == "GeneExpression":
-        return _prepare_gene_expression(adata, spatial_features, scale_type_gene)
+    handler_args = _dispatch.get(spatial_type)
+    if handler_args is None:
+        return {}, "", False
 
-    elif spatial_type == "CellFraction":
-        return _prepare_cell_fraction(adata, spatial_features, spacet)
+    handler, args = handler_args
+    return handler(*args)
 
-    elif spatial_type == "MostAbundantCellType":
-        return _prepare_most_abundant(adata, spatial_features, spacet)
 
-    elif spatial_type == "LRNetworkScore":
-        return _prepare_lr_network_score(spatial_features, spacet)
+def _prepare_quality_control(
+    adata: ad.AnnData,
+    spatial_features: list[str] | None,
+) -> tuple[dict[str, np.ndarray], str, bool]:
+    """Prepare QualityControl data."""
+    if "UMI" not in adata.obs.columns:
+        raise ValueError("Run quality_control() first.")
+    mat = {
+        "UMI": adata.obs["UMI"].values.astype(float),
+        "Gene": adata.obs["Gene"].values.astype(float),
+    }
+    if spatial_features:
+        mat = {k: v for k, v in mat.items() if k in spatial_features}
+    return mat, "Count", False
 
-    elif spatial_type == "Interface":
-        return _prepare_interface(spatial_features, spacet)
 
-    elif spatial_type == "GeneSetScore":
-        return _prepare_gene_set_score(spatial_features, spacet)
+def _get_column_float64(X, idx: int) -> np.ndarray:
+    """Extract a single column from X as a dense float64 array."""
+    if sparse.issparse(X):
+        return np.asarray(X[:, idx].todense()).ravel().astype(np.float64)
+    return X[:, idx].astype(np.float64)
 
-    elif spatial_type == "SecretedProteinActivity":
-        return _prepare_secreted_protein_activity(spatial_features, spacet)
 
-    elif spatial_type == "SignalingPattern":
-        return _prepare_signaling_pattern(spatial_features, spacet)
+def _row_sums(X) -> np.ndarray:
+    """Compute row sums, handling both sparse and dense matrices."""
+    if sparse.issparse(X):
+        return np.asarray(X.sum(axis=1)).ravel()
+    return X.sum(axis=1)
 
-    elif spatial_type == "metaData":
-        return _prepare_metadata(adata, spatial_features)
 
-    return {}, "", False
+_SCALE_LEGEND: dict[str, str] = {
+    "RawCounts": "Counts",
+    "LogRawCounts": "LogCounts",
+    "LogTPM/10": "LogTPM/10",
+    "LogTPM": "LogTPM",
+}
+
+# TPM multipliers: scale_type -> factor
+_TPM_FACTOR: dict[str, float] = {
+    "LogTPM/10": 1e5,
+    "LogTPM": 1e6,
+}
+
+
+def _scale_gene_values(
+    vals: np.ndarray,
+    scale_type_gene: str,
+    X,
+) -> np.ndarray:
+    """Apply gene scaling (log, TPM normalization) to raw count values."""
+    if scale_type_gene == "LogRawCounts":
+        return np.log2(vals + 1)
+
+    tpm_factor = _TPM_FACTOR.get(scale_type_gene)
+    if tpm_factor is not None:
+        vals = vals / _row_sums(X) * tpm_factor
+        return np.log2(vals + 1)
+
+    # "RawCounts" or unrecognized -- return as-is
+    return vals
 
 
 def _prepare_gene_expression(
@@ -826,44 +892,17 @@ def _prepare_gene_expression(
         raise ValueError("spatial_features required for GeneExpression.")
 
     X = adata.X
-    gene_names = np.array(adata.var_names)
-    gene_to_idx = {g: i for i, g in enumerate(gene_names)}
+    gene_to_idx = {g: i for i, g in enumerate(adata.var_names)}
 
     mat = {}
     for gene in spatial_features:
         if gene not in gene_to_idx:
             logger.warning("Gene '%s' not found, skipping.", gene)
             continue
-        idx = gene_to_idx[gene]
-        if sparse.issparse(X):
-            vals = np.asarray(X[:, idx].todense()).ravel().astype(np.float64)
-        else:
-            vals = X[:, idx].astype(np.float64)
+        vals = _get_column_float64(X, gene_to_idx[gene])
+        mat[gene] = _scale_gene_values(vals, scale_type_gene, X)
 
-        if scale_type_gene == "LogRawCounts":
-            vals = np.log2(vals + 1)
-        elif scale_type_gene == "LogTPM/10":
-            if sparse.issparse(X):
-                row_sums = np.asarray(X.sum(axis=1)).ravel()
-            else:
-                row_sums = X.sum(axis=1)
-            vals = vals / row_sums * 1e5
-            vals = np.log2(vals + 1)
-        elif scale_type_gene == "LogTPM":
-            if sparse.issparse(X):
-                row_sums = np.asarray(X.sum(axis=1)).ravel()
-            else:
-                row_sums = X.sum(axis=1)
-            vals = vals / row_sums * 1e6
-            vals = np.log2(vals + 1)
-        mat[gene] = vals
-
-    legend = {
-        "RawCounts": "Counts",
-        "LogRawCounts": "LogCounts",
-        "LogTPM/10": "LogTPM/10",
-        "LogTPM": "LogTPM",
-    }.get(scale_type_gene, "Expression")
+    legend = _SCALE_LEGEND.get(scale_type_gene, "Expression")
     return mat, legend, False
 
 
@@ -872,8 +911,8 @@ def _prepare_cell_fraction(
     spatial_features: list[str] | None,
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
-    deconv = spacet.get("deconvolution", {})
-    prop_mat = deconv.get("propMat")
+    deconv = spacet.get(KEY_DECONV, {})
+    prop_mat = deconv.get(KEY_PROPMAT)
     if prop_mat is None:
         raise ValueError("Run deconvolution() first.")
 
@@ -892,8 +931,8 @@ def _prepare_most_abundant(
     spatial_features: list[str] | None,
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
-    deconv = spacet.get("deconvolution", {})
-    prop_mat = deconv.get("propMat")
+    deconv = spacet.get(KEY_DECONV, {})
+    prop_mat = deconv.get(KEY_PROPMAT)
     if prop_mat is None:
         raise ValueError("Run deconvolution() first.")
 
@@ -932,7 +971,7 @@ def _prepare_lr_network_score(
     spatial_features: list[str] | None,
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
-    cci = spacet.get("CCI", {})
+    cci = spacet.get(KEY_CCI, {})
     lr_score = cci.get("LRNetworkScore")
     if lr_score is None:
         raise ValueError("Run cci_lr_network_score() first.")
@@ -968,7 +1007,7 @@ def _prepare_interface(
     spatial_features: list[str] | None,
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
-    cci = spacet.get("CCI", {})
+    cci = spacet.get(KEY_CCI, {})
     interface_df = cci.get("interface")
     if interface_df is None:
         raise ValueError("Run identify_interface() first.")
@@ -987,7 +1026,7 @@ def _prepare_gene_set_score(
     spatial_features: list[str] | None,
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
-    gs_scores = spacet.get("GeneSetScore")
+    gs_scores = spacet.get(KEY_GENESET)
     if gs_scores is None:
         raise ValueError("Run gene_set_score() first.")
 
@@ -1005,7 +1044,7 @@ def _prepare_secreted_protein_activity(
     spatial_features: list[str] | None,
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
-    sec_act = spacet.get("SecAct_output", {})
+    sec_act = spacet.get(KEY_SECACT, {})
     spa = sec_act.get("SecretedProteinActivity", {})
     zscore = spa.get("zscore")
     if zscore is None:
@@ -1026,7 +1065,7 @@ def _prepare_signaling_pattern(
     spatial_features: list[str] | None,
     spacet: dict,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
-    sec_act = spacet.get("SecAct_output", {})
+    sec_act = spacet.get(KEY_SECACT, {})
     pattern = sec_act.get("pattern", {})
     signal_h = pattern.get("signal_H")
     if signal_h is None:
@@ -1049,7 +1088,7 @@ def _prepare_metadata(
     adata: ad.AnnData,
     spatial_features: list[str] | None,
 ) -> tuple[dict[str, np.ndarray], str, bool]:
-    spacet = adata.uns.get("spacet", {})
+    spacet = adata.uns.get(UNS_SPACET, {})
     meta = spacet.get("metaData")
 
     if spatial_features is None:
@@ -1181,9 +1220,9 @@ def _plot_cell_type_composition(
 
     Equivalent to R's scatterpie::geom_scatterpie().
     """
-    spacet = adata.uns.get("spacet", {})
-    deconv = spacet.get("deconvolution", {})
-    prop_mat = deconv.get("propMat")
+    spacet = adata.uns.get(UNS_SPACET, {})
+    deconv = spacet.get(KEY_DECONV, {})
+    prop_mat = deconv.get(KEY_PROPMAT)
     if prop_mat is None:
         raise ValueError("Run deconvolution() first.")
 

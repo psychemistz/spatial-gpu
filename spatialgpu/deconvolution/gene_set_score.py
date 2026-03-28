@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
+from spatialgpu.deconvolution._keys import KEY_GENESET, UNS_SPACET
 from spatialgpu.deconvolution.reference import load_gene_set
 
 if TYPE_CHECKING:
@@ -54,13 +55,13 @@ def gene_set_score(
     scores = _ucell_score(adata, gmt)
 
     # Store results
-    if "spacet" not in adata.uns:
-        adata.uns["spacet"] = {}
-    if adata.uns["spacet"].get("GeneSetScore") is None:
-        adata.uns["spacet"]["GeneSetScore"] = scores
+    if UNS_SPACET not in adata.uns:
+        adata.uns[UNS_SPACET] = {}
+    if adata.uns[UNS_SPACET].get(KEY_GENESET) is None:
+        adata.uns[UNS_SPACET][KEY_GENESET] = scores
     else:
-        existing = adata.uns["spacet"]["GeneSetScore"]
-        adata.uns["spacet"]["GeneSetScore"] = pd.concat([existing, scores])
+        existing = adata.uns[UNS_SPACET][KEY_GENESET]
+        adata.uns[UNS_SPACET][KEY_GENESET] = pd.concat([existing, scores])
 
     return adata
 

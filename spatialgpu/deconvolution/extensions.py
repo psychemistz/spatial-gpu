@@ -23,6 +23,17 @@ from scipy.spatial.distance import squareform
 from sklearn.metrics import silhouette_samples
 from statsmodels.stats.multitest import multipletests
 
+from spatialgpu.core.array_utils import to_dense_float64
+from spatialgpu.deconvolution._keys import (
+    COL_CELLTYPE,
+    KEY_DECONV,
+    KEY_MALPROP,
+    KEY_MALREF,
+    KEY_PROPMAT,
+    KEY_PROPMAT_COLS,
+    KEY_REF,
+    UNS_SPACET,
+)
 from spatialgpu.deconvolution.core import (
     _get_counts_genes_by_spots,
     _spatial_deconv,
@@ -70,185 +81,37 @@ def deconvolution_malignant(
     AnnData with updated ``adata.uns['spacet']['deconvolution']['propMat']``
     including malignant cell state sub-fractions.
     """
-    import scanpy as sc
-
     # --- Validation ---
-    if "spacet" not in adata.uns or "deconvolution" not in adata.uns["spacet"]:
-        raise ValueError(
-            "Please run deconvolution first using spatialgpu.deconvolution.core.deconvolution."
-        )
-
-    deconv = adata.uns["spacet"]["deconvolution"]
-    res_deconv: pd.DataFrame = deconv["propMat"]  # cell_types x spots
-
-    if malignant not in res_deconv.index:
-        raise ValueError(
-            f"Malignant cell type '{malignant}' not found in deconvolution results. "
-            f"Available types: {list(res_deconv.index)}"
-        )
-
-    lineage_tree = deconv["Ref"]["lineageTree"]
-    if malignant in lineage_tree and len(lineage_tree[malignant]) > 1:
-        raise ValueError(
-            "Deconvolution results already include multiple malignant cell states. "
-            "Further deconvolution is not recommended."
-        )
-
-    if not 0 <= malignant_cutoff <= 1:
-        raise ValueError("malignant_cutoff must be between 0 and 1.")
+    deconv, res_deconv, lineage_tree = _validate_malignant_inputs(
+        adata, malignant, malignant_cutoff
+    )
 
     # --- Get counts (genes x spots) ---
-    counts = _get_counts_genes_by_spots(adata)
-    gene_names = np.array(adata.var_names)
-    spot_names = np.array(adata.obs_names)
+    counts, gene_names, spot_names = _prepare_counts(adata)
 
-    # Filter zero-sum genes
-    if sparse.issparse(counts):
-        gene_sums = np.asarray(counts.sum(axis=1)).ravel()
-    else:
-        gene_sums = counts.sum(axis=1)
-    nonzero_mask = gene_sums > 0
-    counts = counts[nonzero_mask]
-    gene_names = gene_names[nonzero_mask]
-
-    # Mouse-to-human gene conversion
-    counts, gene_names = ensure_human_genes(adata, counts, gene_names)
-
-    # --- Select malignant spots ---
-    mal_fractions = res_deconv.loc[malignant]
-    mal_spot_mask = mal_fractions >= malignant_cutoff
-    mal_spots = mal_fractions.index[mal_spot_mask].values
-
-    if len(mal_spots) < 3:
-        raise ValueError(
-            f"Only {len(mal_spots)} spots have malignant fraction >= {malignant_cutoff}. "
-            "Consider lowering the cutoff."
+    # --- Select malignant spots and CPM-normalize ---
+    mal_spots, cpm_mal, log_mal, counts_mal, mal_spot_idx = (
+        _select_and_normalize_malignant_spots(
+            res_deconv, malignant, malignant_cutoff, counts, spot_names, gene_names
         )
-
-    mal_spot_idx = np.array([np.where(spot_names == s)[0][0] for s in mal_spots])
-
-    # --- CPM normalize malignant spots (1e5, matching R) ---
-    counts_mal = counts[:, mal_spot_idx]
-    if sparse.issparse(counts_mal):
-        counts_mal_dense = counts_mal.toarray().astype(np.float64)
-    else:
-        counts_mal_dense = counts_mal.astype(np.float64)
-
-    col_sums_mal = counts_mal_dense.sum(axis=0)
-    col_sums_mal[col_sums_mal == 0] = 1.0
-    cpm_mal = counts_mal_dense / col_sums_mal[np.newaxis, :] * 1e5
-    log_mal = np.log2(cpm_mal + 1)
-
-    # --- Clustering within malignant spots ---
-    np.random.seed(123)
-    logger.info("Clustering malignant spots.")
-
-    # Create temporary AnnData for scanpy processing (spots x genes)
-    if sparse.issparse(counts_mal):
-        adata_tmp = sc.AnnData(X=counts_mal.T.tocsr())
-    else:
-        adata_tmp = sc.AnnData(X=counts_mal.T.copy())
-    adata_tmp.var_names = pd.Index(gene_names)
-    adata_tmp.obs_names = pd.Index(mal_spots)
-
-    # Variance normalization + HVG + PCA (MUDAN equivalent)
-    sc.pp.normalize_total(adata_tmp, target_sum=1e4)
-    sc.pp.log1p(adata_tmp)
-    n_hvg = min(3000, len(gene_names))
-    sc.pp.highly_variable_genes(adata_tmp, n_top_genes=n_hvg)
-    adata_tmp = adata_tmp[:, adata_tmp.var.highly_variable].copy()
-    sc.pp.scale(adata_tmp, max_value=10)
-    n_comps = min(30, adata_tmp.shape[1] - 1)
-    sc.tl.pca(adata_tmp, n_comps=n_comps)
-    pcs = adata_tmp.obsm["X_pca"]
-
-    # Hierarchical clustering with Ward's method on correlation distance
-    corr_matrix = np.corrcoef(pcs)
-    corr_matrix = np.clip(corr_matrix, -1, 1)
-    dist_matrix = 1 - corr_matrix
-    np.fill_diagonal(dist_matrix, 0)
-    dist_matrix = np.maximum(dist_matrix, 0)
-
-    condensed = squareform(dist_matrix, checks=False)
-    Z = linkage(condensed, method="ward")
-
-    # Silhouette analysis for k=2:9 — use MAX silhouette (not max decrease)
-    cluster_numbers = list(range(2, 10))
-    sil_scores: list[float] = []
-    for k in cluster_numbers:
-        labels = fcluster(Z, t=k, criterion="maxclust")
-        sil = silhouette_samples(dist_matrix, labels, metric="precomputed")
-        sil_scores.append(float(np.mean(sil)))
-
-    max_n = cluster_numbers[int(np.argmax(sil_scores))]
-
-    clustering_raw = fcluster(Z, t=max_n, criterion="maxclust")
-    # Convert numeric cluster labels to letters (A, B, C, ...)
-    clustering_letters = np.array(
-        [string.ascii_uppercase[c - 1] for c in clustering_raw]
     )
-    content = pd.Series(clustering_letters, index=mal_spots)
 
-    states = sorted(content.unique())
-    logger.info(f"Identified {len(states)} malignant cell states.")
+    # --- Cluster malignant spots into states ---
+    states, content = _cluster_malignant_spots(
+        counts_mal, gene_names, mal_spots, cpm_mal
+    )
 
-    # --- Build new reference ---
-    ref_profiles = pd.DataFrame(index=gene_names, dtype=np.float64)
-    sig_genes: dict[str, list[str]] = {}
-
-    # Overall malignant reference profile
-    ref_profiles["Malignant"] = cpm_mal.mean(axis=1)
-
-    for state in states:
-        state_name = f"Malignant cell state {state}"
-        state_mask = (content == state).values
-        ref_profiles[state_name] = cpm_mal[:, state_mask].mean(axis=1)
-
-        # --- DE analysis: find marker genes for this state ---
-        temp_markers: list[str] = []
-        for other_state in states:
-            if other_state == state:
-                continue
-
-            other_mask = (content == other_state).values
-            markers = _de_ttest(log_mal, gene_names, state_mask, other_mask, n_top=500)
-            temp_markers.extend(markers)
-
-        # Signature genes: appear in exactly 1 comparison
-        # (R code: tempMarkers==1, which means unique to one comparison)
-        marker_counts = pd.Series(temp_markers).value_counts()
-        sig_genes[state_name] = list(marker_counts[marker_counts == 1].index)
-
-    lineage_tree_new: dict[str, list[str]] = {
-        malignant: [f"Malignant cell state {s}" for s in states]
-    }
-    ref_new = {
-        "refProfiles": ref_profiles,
-        "sigGenes": sig_genes,
-        "lineageTree": lineage_tree_new,
-    }
+    # --- Build new reference from clustered states ---
+    ref_new = _build_malignant_reference(
+        gene_names, cpm_mal, log_mal, states, content, malignant
+    )
 
     # --- Re-deconvolve malignant fraction ---
-    # Known cell types = everything except the malignant lineage
-    known_cell_types = [k for k in lineage_tree.keys() if k != malignant]
+    mal_prop_known, mal_ref_known = _prepare_known_fractions(
+        deconv, res_deconv, lineage_tree, malignant
+    )
 
-    known_fractions = list(known_cell_types)
-    if "Unidentifiable" in res_deconv.index:
-        known_fractions.append("Unidentifiable")
-
-    mal_prop_known = res_deconv.loc[known_fractions]
-
-    # Known cell reference profiles
-    orig_ref = deconv["Ref"]["refProfiles"]
-    if isinstance(orig_ref, pd.DataFrame):
-        known_cols = [c for c in known_cell_types if c in orig_ref.columns]
-        mal_ref_known = orig_ref[known_cols]
-    else:
-        mal_ref_known = None
-
-    # Re-deconvolve
     logger.info("Re-deconvolving malignant cell states.")
-
     prop_mat_new = _spatial_deconv(
         ST=counts,
         gene_names=gene_names,
@@ -260,16 +123,8 @@ def deconvolution_malignant(
         n_jobs=n_jobs,
     )
 
-    # Merge: keep existing rows, add new state rows (exclude "Malignant"
-    # row from prop_mat_new since it's already in res_deconv)
-    new_rows = prop_mat_new.loc[~prop_mat_new.index.isin([malignant])]
-    prop_mat_merged = pd.concat([res_deconv, new_rows])
-
-    # Update adata
-    deconv["propMat"] = prop_mat_merged
-    adata.uns["spacet"]["deconvolution"] = deconv
-    adata.uns["spacet"]["propMat_columns"] = list(prop_mat_merged.index)
-    adata.obsm["spacet_propMat"] = prop_mat_merged.T.reindex(adata.obs_names).values
+    # --- Merge results and store ---
+    _merge_and_store_results(adata, deconv, res_deconv, prop_mat_new, malignant)
 
     return adata
 
@@ -392,8 +247,8 @@ def deconvolution_matched_scrnaseq(
             gene_names=gene_names,
             spot_names=spot_names,
             ref=ref,
-            mal_prop=mal_res["malProp"],
-            mal_ref=mal_res["malRef"],
+            mal_prop=mal_res[KEY_MALPROP],
+            mal_ref=mal_res[KEY_MALREF],
             mode="deconvWithSC_alt",
             unidentifiable=True,
             macrophage_other=False,
@@ -401,12 +256,12 @@ def deconvolution_matched_scrnaseq(
         )
 
     # Store results
-    adata.uns["spacet"] = {
-        "deconvolution": {
-            "propMat": prop_mat,
-            "Ref": ref,
+    adata.uns[UNS_SPACET] = {
+        KEY_DECONV: {
+            KEY_PROPMAT: prop_mat,
+            KEY_REF: ref,
         },
-        "propMat_columns": list(prop_mat.index),
+        KEY_PROPMAT_COLS: list(prop_mat.index),
     }
     adata.obsm["spacet_propMat"] = prop_mat.T.reindex(adata.obs_names).values
 
@@ -451,20 +306,20 @@ def deconvolution_malignant_custom_scrnaseq(
     AnnData with updated deconvolution results.
     """
     # --- Validation ---
-    if "spacet" not in adata.uns or "deconvolution" not in adata.uns["spacet"]:
+    if UNS_SPACET not in adata.uns or KEY_DECONV not in adata.uns[UNS_SPACET]:
         raise ValueError(
             "Please run deconvolution first using spatialgpu.deconvolution.core.deconvolution."
         )
 
-    deconv = adata.uns["spacet"]["deconvolution"]
-    res_deconv: pd.DataFrame = deconv["propMat"]
+    deconv = adata.uns[UNS_SPACET][KEY_DECONV]
+    res_deconv: pd.DataFrame = deconv[KEY_PROPMAT]
 
     if malignant not in res_deconv.index:
         raise ValueError(
             f"Malignant cell type '{malignant}' not found in deconvolution results."
         )
 
-    lineage_tree_orig = deconv["Ref"]["lineageTree"]
+    lineage_tree_orig = deconv[KEY_REF]["lineageTree"]
     if malignant in lineage_tree_orig and len(lineage_tree_orig[malignant]) > 1:
         raise ValueError(
             "Deconvolution results already include multiple malignant cell states."
@@ -526,7 +381,7 @@ def deconvolution_malignant_custom_scrnaseq(
     mal_prop_known = res_deconv.loc[known_fractions]
 
     # Known cell reference
-    orig_ref = deconv["Ref"]["refProfiles"]
+    orig_ref = deconv[KEY_REF]["refProfiles"]
     if isinstance(orig_ref, pd.DataFrame):
         known_cols = [c for c in known_cell_types if c in orig_ref.columns]
         mal_ref_known = orig_ref[known_cols]
@@ -551,10 +406,10 @@ def deconvolution_malignant_custom_scrnaseq(
     prop_mat_merged = pd.concat([res_deconv, new_rows])
 
     # Update adata
-    deconv["propMat"] = prop_mat_merged
-    deconv["malRef"] = ref_new
-    adata.uns["spacet"]["deconvolution"] = deconv
-    adata.uns["spacet"]["propMat_columns"] = list(prop_mat_merged.index)
+    deconv[KEY_PROPMAT] = prop_mat_merged
+    deconv[KEY_MALREF] = ref_new
+    adata.uns[UNS_SPACET][KEY_DECONV] = deconv
+    adata.uns[UNS_SPACET][KEY_PROPMAT_COLS] = list(prop_mat_merged.index)
     adata.obsm["spacet_propMat"] = prop_mat_merged.T.reindex(adata.obs_names).values
 
     return adata
@@ -600,21 +455,21 @@ def generate_ref(
         raise TypeError("sc_counts must be a pd.DataFrame with gene names as index.")
 
     # Build cell ID -> cell type mapping
-    if "cellID" not in sc_annotation.columns or "cellType" not in sc_annotation.columns:
+    if (
+        "cellID" not in sc_annotation.columns
+        or COL_CELLTYPE not in sc_annotation.columns
+    ):
         raise ValueError("sc_annotation must have 'cellID' and 'cellType' columns.")
     sc_annotation = sc_annotation.copy()
     sc_annotation.index = sc_annotation["cellID"].astype(str).values
 
     # Ensure consistent ordering
-    cell_types = sc_annotation["cellType"].values.astype(str)
+    cell_types = sc_annotation[COL_CELLTYPE].values.astype(str)
 
     gene_names = np.array(sc_counts.index)
 
     # --- CPM normalization (1e5) ---
-    if sparse.issparse(sc_counts.values):
-        counts_dense = sc_counts.values.toarray().astype(np.float64)
-    else:
-        counts_dense = sc_counts.values.astype(np.float64)
+    counts_dense = to_dense_float64(sc_counts.values)
 
     col_sums = counts_dense.sum(axis=0)
     col_sums[col_sums == 0] = 1.0
@@ -696,7 +551,286 @@ def generate_ref(
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# Internal helpers — deconvolution_malignant
+# ---------------------------------------------------------------------------
+
+
+def _validate_malignant_inputs(
+    adata: ad.AnnData,
+    malignant: str,
+    malignant_cutoff: float,
+) -> tuple[dict, pd.DataFrame, dict]:
+    """Validate prerequisites for malignant deconvolution.
+
+    Returns
+    -------
+    tuple of (deconv dict, propMat DataFrame, lineageTree dict).
+    """
+    if UNS_SPACET not in adata.uns or KEY_DECONV not in adata.uns[UNS_SPACET]:
+        raise ValueError(
+            "Please run deconvolution first using spatialgpu.deconvolution.core.deconvolution."
+        )
+
+    deconv = adata.uns[UNS_SPACET][KEY_DECONV]
+    res_deconv: pd.DataFrame = deconv[KEY_PROPMAT]  # cell_types x spots
+
+    if malignant not in res_deconv.index:
+        raise ValueError(
+            f"Malignant cell type '{malignant}' not found in deconvolution results. "
+            f"Available types: {list(res_deconv.index)}"
+        )
+
+    lineage_tree = deconv[KEY_REF]["lineageTree"]
+    if malignant in lineage_tree and len(lineage_tree[malignant]) > 1:
+        raise ValueError(
+            "Deconvolution results already include multiple malignant cell states. "
+            "Further deconvolution is not recommended."
+        )
+
+    if not 0 <= malignant_cutoff <= 1:
+        raise ValueError("malignant_cutoff must be between 0 and 1.")
+
+    return deconv, res_deconv, lineage_tree
+
+
+def _prepare_counts(
+    adata: ad.AnnData,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Get counts (genes x spots), filter zero-sum genes, convert mouse genes.
+
+    Returns
+    -------
+    tuple of (counts, gene_names, spot_names).
+    """
+    counts = _get_counts_genes_by_spots(adata)
+    gene_names = np.array(adata.var_names)
+    spot_names = np.array(adata.obs_names)
+
+    # Filter zero-sum genes
+    if sparse.issparse(counts):
+        gene_sums = np.asarray(counts.sum(axis=1)).ravel()
+    else:
+        gene_sums = counts.sum(axis=1)
+    nonzero_mask = gene_sums > 0
+    counts = counts[nonzero_mask]
+    gene_names = gene_names[nonzero_mask]
+
+    # Mouse-to-human gene conversion
+    counts, gene_names = ensure_human_genes(adata, counts, gene_names)
+
+    return counts, gene_names, spot_names
+
+
+def _select_and_normalize_malignant_spots(
+    res_deconv: pd.DataFrame,
+    malignant: str,
+    malignant_cutoff: float,
+    counts: np.ndarray,
+    spot_names: np.ndarray,
+    gene_names: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Select spots with high malignant fraction and CPM-normalize them.
+
+    Returns
+    -------
+    tuple of (mal_spots, cpm_mal, log_mal, counts_mal, mal_spot_idx).
+    """
+    mal_fractions = res_deconv.loc[malignant]
+    mal_spot_mask = mal_fractions >= malignant_cutoff
+    mal_spots = mal_fractions.index[mal_spot_mask].values
+
+    if len(mal_spots) < 3:
+        raise ValueError(
+            f"Only {len(mal_spots)} spots have malignant fraction >= {malignant_cutoff}. "
+            "Consider lowering the cutoff."
+        )
+
+    mal_spot_idx = np.array([np.where(spot_names == s)[0][0] for s in mal_spots])
+
+    # CPM normalize malignant spots (1e5, matching R)
+    counts_mal = counts[:, mal_spot_idx]
+    counts_mal_dense = to_dense_float64(counts_mal)
+
+    col_sums_mal = counts_mal_dense.sum(axis=0)
+    col_sums_mal[col_sums_mal == 0] = 1.0
+    cpm_mal = counts_mal_dense / col_sums_mal[np.newaxis, :] * 1e5
+    log_mal = np.log2(cpm_mal + 1)
+
+    return mal_spots, cpm_mal, log_mal, counts_mal, mal_spot_idx
+
+
+def _cluster_malignant_spots(
+    counts_mal: np.ndarray,
+    gene_names: np.ndarray,
+    mal_spots: np.ndarray,
+    cpm_mal: np.ndarray,
+) -> tuple[list[str], pd.Series]:
+    """Cluster malignant spots via HVG + PCA + hierarchical clustering.
+
+    Uses scanpy for preprocessing, Ward's linkage on correlation distance,
+    and silhouette analysis to pick the optimal number of clusters (k=2..9).
+
+    Returns
+    -------
+    tuple of (states sorted list, content Series mapping spots to state letters).
+    """
+    import scanpy as sc
+
+    np.random.seed(123)
+    logger.info("Clustering malignant spots.")
+
+    # Create temporary AnnData for scanpy processing (spots x genes)
+    if sparse.issparse(counts_mal):
+        adata_tmp = sc.AnnData(X=counts_mal.T.tocsr())
+    else:
+        adata_tmp = sc.AnnData(X=counts_mal.T.copy())
+    adata_tmp.var_names = pd.Index(gene_names)
+    adata_tmp.obs_names = pd.Index(mal_spots)
+
+    # Variance normalization + HVG + PCA (MUDAN equivalent)
+    sc.pp.normalize_total(adata_tmp, target_sum=1e4)
+    sc.pp.log1p(adata_tmp)
+    n_hvg = min(3000, len(gene_names))
+    sc.pp.highly_variable_genes(adata_tmp, n_top_genes=n_hvg)
+    adata_tmp = adata_tmp[:, adata_tmp.var.highly_variable].copy()
+    sc.pp.scale(adata_tmp, max_value=10)
+    n_comps = min(30, adata_tmp.shape[1] - 1)
+    sc.tl.pca(adata_tmp, n_comps=n_comps)
+    pcs = adata_tmp.obsm["X_pca"]
+
+    # Hierarchical clustering with Ward's method on correlation distance
+    corr_matrix = np.corrcoef(pcs)
+    corr_matrix = np.clip(corr_matrix, -1, 1)
+    dist_matrix = 1 - corr_matrix
+    np.fill_diagonal(dist_matrix, 0)
+    dist_matrix = np.maximum(dist_matrix, 0)
+
+    condensed = squareform(dist_matrix, checks=False)
+    Z = linkage(condensed, method="ward")
+
+    # Silhouette analysis for k=2:9 — use MAX silhouette (not max decrease)
+    cluster_numbers = list(range(2, 10))
+    sil_scores: list[float] = []
+    for k in cluster_numbers:
+        labels = fcluster(Z, t=k, criterion="maxclust")
+        sil = silhouette_samples(dist_matrix, labels, metric="precomputed")
+        sil_scores.append(float(np.mean(sil)))
+
+    max_n = cluster_numbers[int(np.argmax(sil_scores))]
+
+    clustering_raw = fcluster(Z, t=max_n, criterion="maxclust")
+    # Convert numeric cluster labels to letters (A, B, C, ...)
+    clustering_letters = np.array(
+        [string.ascii_uppercase[c - 1] for c in clustering_raw]
+    )
+    content = pd.Series(clustering_letters, index=mal_spots)
+
+    states = sorted(content.unique())
+    logger.info(f"Identified {len(states)} malignant cell states.")
+
+    return states, content
+
+
+def _build_malignant_reference(
+    gene_names: np.ndarray,
+    cpm_mal: np.ndarray,
+    log_mal: np.ndarray,
+    states: list[str],
+    content: pd.Series,
+    malignant: str,
+) -> dict[str, Any]:
+    """Build reference profiles and signature genes for malignant states.
+
+    Returns
+    -------
+    dict with keys ``refProfiles``, ``sigGenes``, ``lineageTree``.
+    """
+    ref_profiles = pd.DataFrame(index=gene_names, dtype=np.float64)
+    sig_genes: dict[str, list[str]] = {}
+
+    # Overall malignant reference profile
+    ref_profiles["Malignant"] = cpm_mal.mean(axis=1)
+
+    for state in states:
+        state_name = f"Malignant cell state {state}"
+        state_mask = (content == state).values
+        ref_profiles[state_name] = cpm_mal[:, state_mask].mean(axis=1)
+
+        # DE analysis: find marker genes for this state
+        temp_markers: list[str] = []
+        for other_state in states:
+            if other_state == state:
+                continue
+
+            other_mask = (content == other_state).values
+            markers = _de_ttest(log_mal, gene_names, state_mask, other_mask, n_top=500)
+            temp_markers.extend(markers)
+
+        # Signature genes: appear in exactly 1 comparison
+        # (R code: tempMarkers==1, which means unique to one comparison)
+        marker_counts = pd.Series(temp_markers).value_counts()
+        sig_genes[state_name] = list(marker_counts[marker_counts == 1].index)
+
+    lineage_tree_new: dict[str, list[str]] = {
+        malignant: [f"Malignant cell state {s}" for s in states]
+    }
+    return {
+        "refProfiles": ref_profiles,
+        "sigGenes": sig_genes,
+        "lineageTree": lineage_tree_new,
+    }
+
+
+def _prepare_known_fractions(
+    deconv: dict,
+    res_deconv: pd.DataFrame,
+    lineage_tree: dict,
+    malignant: str,
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """Extract known (non-malignant) fractions and reference for re-deconvolution.
+
+    Returns
+    -------
+    tuple of (mal_prop_known DataFrame, mal_ref_known DataFrame or None).
+    """
+    known_cell_types = [k for k in lineage_tree.keys() if k != malignant]
+
+    known_fractions = list(known_cell_types)
+    if "Unidentifiable" in res_deconv.index:
+        known_fractions.append("Unidentifiable")
+
+    mal_prop_known = res_deconv.loc[known_fractions]
+
+    # Known cell reference profiles
+    orig_ref = deconv[KEY_REF]["refProfiles"]
+    if isinstance(orig_ref, pd.DataFrame):
+        known_cols = [c for c in known_cell_types if c in orig_ref.columns]
+        mal_ref_known = orig_ref[known_cols]
+    else:
+        mal_ref_known = None
+
+    return mal_prop_known, mal_ref_known
+
+
+def _merge_and_store_results(
+    adata: ad.AnnData,
+    deconv: dict,
+    res_deconv: pd.DataFrame,
+    prop_mat_new: pd.DataFrame,
+    malignant: str,
+) -> None:
+    """Merge new malignant state rows into existing results and update adata."""
+    new_rows = prop_mat_new.loc[~prop_mat_new.index.isin([malignant])]
+    prop_mat_merged = pd.concat([res_deconv, new_rows])
+
+    deconv[KEY_PROPMAT] = prop_mat_merged
+    adata.uns[UNS_SPACET][KEY_DECONV] = deconv
+    adata.uns[UNS_SPACET][KEY_PROPMAT_COLS] = list(prop_mat_merged.index)
+    adata.obsm["spacet_propMat"] = prop_mat_merged.T.reindex(adata.obs_names).values
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers — DE analysis and scRNA-seq utilities
 # ---------------------------------------------------------------------------
 
 
@@ -817,7 +951,7 @@ def _validate_sc_inputs(
     else:
         raise ValueError("sc_annotation must have a 'cellID' column.")
 
-    if "cellType" not in sc_annotation.columns:
+    if COL_CELLTYPE not in sc_annotation.columns:
         raise ValueError("sc_annotation must have a 'cellType' column.")
 
     # Check dimensions
@@ -852,7 +986,7 @@ def _validate_sc_inputs(
         else:
             all_cell_types.extend(subtypes)
 
-    unique_anno_types = set(sc_annotation["cellType"].astype(str).unique())
+    unique_anno_types = set(sc_annotation[COL_CELLTYPE].astype(str).unique())
     missing = [ct for ct in all_cell_types if ct not in unique_anno_types]
     if missing:
         raise ValueError(
@@ -887,7 +1021,7 @@ def _downsample_cells(
     np.random.seed(123)
 
     cell_ids = sc_annotation["cellID"].astype(str).values
-    cell_types = sc_annotation["cellType"].astype(str).values
+    cell_types = sc_annotation[COL_CELLTYPE].astype(str).values
 
     # Group cell IDs by cell type
     type_to_ids: dict[str, list[str]] = {}

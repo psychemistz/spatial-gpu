@@ -7,7 +7,7 @@ Provides publication-quality plots for spatial omics data.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -19,17 +19,17 @@ if TYPE_CHECKING:
 
 def spatial_scatter(
     adata: ad.AnnData,
-    color: Optional[str] = None,
+    color: str | None = None,
     spatial_key: str = "spatial",
     spot_size: float = 1.0,
     alpha: float = 1.0,
     cmap: str = "viridis",
-    palette: Optional[str | Sequence[str]] = None,
+    palette: str | Sequence[str] | None = None,
     show_legend: bool = True,
-    title: Optional[str] = None,
-    ax: Optional[Axes] = None,
+    title: str | None = None,
+    ax: Axes | None = None,
     figsize: tuple[float, float] = (8, 8),
-    save: Optional[str] = None,
+    save: str | None = None,
     **kwargs,
 ) -> Axes:
     """
@@ -182,7 +182,7 @@ def spatial_heatmap(
     spot_size: float = 1.0,
     cmap: str = "viridis",
     figsize_per_gene: tuple[float, float] = (4, 4),
-    save: Optional[str] = None,
+    save: str | None = None,
     **kwargs,
 ) -> Figure:
     """
@@ -268,13 +268,13 @@ def nhood_enrichment_plot(
     adata: ad.AnnData,
     cluster_key: str,
     mode: Literal["zscore", "count"] = "zscore",
-    ax: Optional[Axes] = None,
+    ax: Axes | None = None,
     figsize: tuple[float, float] = (8, 8),
     cmap: str = "RdBu_r",
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
     annot: bool = True,
-    save: Optional[str] = None,
+    save: str | None = None,
     **kwargs,
 ) -> Axes:
     """
@@ -361,10 +361,10 @@ def nhood_enrichment_plot(
 def co_occurrence_plot(
     adata: ad.AnnData,
     cluster_key: str,
-    clusters: Optional[Sequence[str]] = None,
-    ax: Optional[Axes] = None,
+    clusters: Sequence[str] | None = None,
+    ax: Axes | None = None,
     figsize: tuple[float, float] = (10, 6),
-    save: Optional[str] = None,
+    save: str | None = None,
     **kwargs,
 ) -> Axes:
     """
@@ -446,11 +446,11 @@ def co_occurrence_plot(
 def interaction_matrix_plot(
     adata: ad.AnnData,
     cluster_key: str,
-    ax: Optional[Axes] = None,
+    ax: Axes | None = None,
     figsize: tuple[float, float] = (8, 8),
     cmap: str = "viridis",
     annot: bool = True,
-    save: Optional[str] = None,
+    save: str | None = None,
     **kwargs,
 ) -> Axes:
     """
@@ -520,10 +520,10 @@ def interaction_matrix_plot(
 
 def ripley_plot(
     adata: ad.AnnData,
-    cluster: Optional[str] = None,
-    ax: Optional[Axes] = None,
+    cluster: str | None = None,
+    ax: Axes | None = None,
     figsize: tuple[float, float] = (8, 6),
-    save: Optional[str] = None,
+    save: str | None = None,
     **kwargs,
 ) -> Axes:
     """

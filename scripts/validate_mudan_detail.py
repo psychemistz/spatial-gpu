@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 """Detailed step-by-step comparison of normalizeVariance internals."""
 
+import os
 import sys
+
 sys.path.insert(0, ".")
 
 import numpy as np
 import pandas as pd
 from scipy import sparse, stats
 
-VST_DIR = "/Users/seongyongpark/project/psychemist/sigdiscov/dataset/visium"
+VST_DIR = os.environ.get("SPACET_VST_DIR", "/Users/seongyongpark/project/psychemist/sigdiscov/dataset/visium")
 R_DIR = "validation/mudan_intermediates"
 
 

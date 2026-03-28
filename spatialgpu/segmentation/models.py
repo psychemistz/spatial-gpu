@@ -6,7 +6,7 @@ Provides GPU-accelerated wrappers for popular segmentation models.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -65,7 +65,7 @@ class CellposeModel(BaseSegmentationModel):
         self,
         device: str = "auto",
         model_type: str = "cyto2",
-        gpu: Optional[bool] = None,
+        gpu: bool | None = None,
         **kwargs,
     ):
         super().__init__(device=device)
@@ -100,8 +100,8 @@ class CellposeModel(BaseSegmentationModel):
     def segment(
         self,
         image: NDArray,
-        diameter: Optional[float] = None,
-        channels: Optional[list[int]] = None,
+        diameter: float | None = None,
+        channels: list[int] | None = None,
         flow_threshold: float = 0.4,
         cellprob_threshold: float = 0.0,
         **kwargs,
@@ -210,8 +210,8 @@ class StarDistModel(BaseSegmentationModel):
     def segment(
         self,
         image: NDArray,
-        diameter: Optional[float] = None,
-        channels: Optional[list[int]] = None,
+        diameter: float | None = None,
+        channels: list[int] | None = None,
         prob_thresh: float = 0.5,
         nms_thresh: float = 0.4,
         **kwargs,
@@ -298,8 +298,8 @@ class EnsembleModel(BaseSegmentationModel):
     def segment(
         self,
         image: NDArray,
-        diameter: Optional[float] = None,
-        channels: Optional[list[int]] = None,
+        diameter: float | None = None,
+        channels: list[int] | None = None,
         **kwargs,
     ) -> SegmentationResult:
         """

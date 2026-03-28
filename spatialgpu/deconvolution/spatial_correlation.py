@@ -17,6 +17,8 @@ import pandas as pd
 from scipy import sparse
 from scipy.spatial import KDTree
 
+from spatialgpu.core.array_utils import to_dense_float64
+from spatialgpu.deconvolution._keys import KEY_SPATIAL_CORR, UNS_SPACET
 from spatialgpu.deconvolution.reference import load_lr_database
 
 if TYPE_CHECKING:
@@ -182,29 +184,72 @@ def spatial_correlation(
           ``p.Moran_I``, ``p.Moran_Z``, ``p.Moran_P``, ``p.Moran_Padj``
         - Pairwise: dense matrix of pairwise Moran's I values
     """
-    from statsmodels.stats.multitest import multipletests
+    # ---- Validate inputs and prepare weight matrix ----
+    W, adata_sub = _validate_and_prepare_weights(adata, mode, W)
 
-    valid_modes = ("univariate", "bivariate", "pairwise")
-    if mode not in valid_modes:
-        raise ValueError(f"Invalid mode '{mode}'. Must be one of {valid_modes}.")
+    # ---- Step 1: Normalize with VST-equivalent ----
+    logger.info(
+        "Step 1: Normalize count matrix with variance stabilizing transformation."
+    )
+    mat = _vst_normalize(adata_sub)  # genes x spots (dense, float64)
 
-    # Compute weight matrix if not provided
+    # ---- Step 2: Filter genes and resolve items ----
+    logger.info("Step 2: Calculate Moran's I.")
+    gene_names = np.array(adata_sub.var_names)
+    mat, gene_names, item_df = _filter_genes_and_resolve_items(
+        mat, gene_names, mode, item
+    )
+
+    # ---- Step 3: Standardize each gene (z-score with population std) ----
+    _zscore_rows(mat)
+
+    # ---- Step 4: Compute Moran's I ----
+    W_sum = W.sum()
+
+    if mode in ("univariate", "bivariate"):
+        gene_to_idx = {g: i for i, g in enumerate(gene_names)}
+        result_df = _compute_permutation_moran(
+            mat, W, W_sum, mode, gene_names, item_df, gene_to_idx, n_permutation
+        )
+    else:
+        result_df = _compute_pairwise_moran(mat, W, W_sum, gene_names)
+
+    # ---- Store results ----
+    _store_result(adata, mode, result_df)
+
+    return adata
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+_VALID_MODES = ("univariate", "bivariate", "pairwise")
+_PERMUTATION_SEED = 123456
+
+
+def _validate_and_prepare_weights(
+    adata: ad.AnnData,
+    mode: str,
+    W: sparse.spmatrix | None,
+) -> tuple[sparse.csr_matrix, ad.AnnData]:
+    """Validate mode, compute/ensure W is sparse, and remove island spots.
+
+    Returns the (possibly subsetted) weight matrix and AnnData view.
+    """
+    if mode not in _VALID_MODES:
+        raise ValueError(f"Invalid mode '{mode}'. Must be one of {_VALID_MODES}.")
+
     if W is None:
         W = cal_weights(adata)
-
-    # Ensure W is sparse
     if not sparse.issparse(W):
         W = sparse.csr_matrix(W)
 
     # Remove island spots (zero row/col sums)
-    if sparse.issparse(W):
-        col_sums = np.asarray(W.sum(axis=0)).ravel()
-        row_sums = np.asarray(W.sum(axis=1)).ravel()
-    else:
-        col_sums = np.asarray(W.sum(axis=0)).ravel()
-        row_sums = np.asarray(W.sum(axis=1)).ravel()
-
+    col_sums = np.asarray(W.sum(axis=0)).ravel()
+    row_sums = np.asarray(W.sum(axis=1)).ravel()
     valid_mask = (col_sums > 0) & (row_sums > 0)
+
     if not valid_mask.all():
         n_removed = (~valid_mask).sum()
         logger.info("Removing %d island spots with zero weight sums.", n_removed)
@@ -214,27 +259,25 @@ def spatial_correlation(
     else:
         adata_sub = adata
 
-    # ---- Step 1: Normalize with VST-equivalent ----
-    logger.info(
-        "Step 1: Normalize count matrix with variance stabilizing transformation."
-    )
-    mat = _vst_normalize(adata_sub)
-    # mat is genes x spots (dense, float64)
+    return W, adata_sub
 
-    # ---- Step 2: Filter genes and prepare items ----
-    logger.info("Step 2: Calculate Moran's I.")
 
-    gene_names = np.array(adata_sub.var_names)
+def _filter_genes_and_resolve_items(
+    mat: np.ndarray,
+    gene_names: np.ndarray,
+    mode: str,
+    item: np.ndarray | pd.DataFrame | list[str] | None,
+) -> tuple[np.ndarray, np.ndarray, pd.DataFrame | None]:
+    """Filter the expression matrix to relevant genes and resolve item pairs.
+
+    Returns (filtered_mat, filtered_gene_names, item_df_or_None).
+    For univariate/pairwise modes, item_df is None.
+    """
+    item_df = None
 
     if item is not None:
         if mode == "bivariate":
-            if isinstance(item, pd.DataFrame):
-                item_df = item.copy()
-                item_df.columns = ["L", "R"]
-            else:
-                item_arr = np.asarray(item)
-                item_df = pd.DataFrame({"L": item_arr[:, 0], "R": item_arr[:, 1]})
-            # Collect all genes referenced in pairs
+            item_df = _parse_bivariate_item(item)
             all_genes_needed = set(item_df["L"].values) | set(item_df["R"].values)
             gene_mask = np.isin(gene_names, list(all_genes_needed))
             mat = mat[gene_mask]
@@ -245,31 +288,12 @@ def spatial_correlation(
             gene_mask = np.isin(gene_names, item_genes)
             mat = mat[gene_mask]
             gene_names = gene_names[gene_mask]
-    else:
-        if mode == "bivariate":
-            # Load Ramilowski2015 L-R database
-            lr_db = load_lr_database()
-            # Columns vary; typically col index 1 = ligand, 3 = receptor
-            lr_cols = lr_db.columns
-            if len(lr_cols) >= 4:
-                item_df = pd.DataFrame(
-                    {
-                        "L": lr_db.iloc[:, 1].values,
-                        "R": lr_db.iloc[:, 3].values,
-                    }
-                )
-            else:
-                item_df = pd.DataFrame(
-                    {
-                        "L": lr_db.iloc[:, 0].values,
-                        "R": lr_db.iloc[:, 1].values,
-                    }
-                )
-            # Filter to genes present in the expression data
-            all_genes_needed = set(item_df["L"].values) | set(item_df["R"].values)
-            gene_mask = np.isin(gene_names, list(all_genes_needed))
-            mat = mat[gene_mask]
-            gene_names = gene_names[gene_mask]
+    elif mode == "bivariate":
+        item_df = _load_default_lr_pairs()
+        all_genes_needed = set(item_df["L"].values) | set(item_df["R"].values)
+        gene_mask = np.isin(gene_names, list(all_genes_needed))
+        mat = mat[gene_mask]
+        gene_names = gene_names[gene_mask]
 
     # For bivariate, filter pairs to those with both genes present
     if mode == "bivariate":
@@ -282,9 +306,34 @@ def spatial_correlation(
             )
         logger.info("Testing %d ligand-receptor pairs.", len(item_df))
 
-    # ---- Step 3: Standardize each gene (z-score with population std) ----
-    N = mat.shape[1]
+    return mat, gene_names, item_df
 
+
+def _parse_bivariate_item(item: np.ndarray | pd.DataFrame) -> pd.DataFrame:
+    """Convert a user-supplied bivariate item to a DataFrame with L/R columns."""
+    if isinstance(item, pd.DataFrame):
+        item_df = item.copy()
+        item_df.columns = ["L", "R"]
+    else:
+        item_arr = np.asarray(item)
+        item_df = pd.DataFrame({"L": item_arr[:, 0], "R": item_arr[:, 1]})
+    return item_df
+
+
+def _load_default_lr_pairs() -> pd.DataFrame:
+    """Load the Ramilowski2015 L-R database and return as L/R DataFrame."""
+    lr_db = load_lr_database()
+    lr_cols = lr_db.columns
+    if len(lr_cols) >= 4:
+        return pd.DataFrame(
+            {"L": lr_db.iloc[:, 1].values, "R": lr_db.iloc[:, 3].values}
+        )
+    return pd.DataFrame({"L": lr_db.iloc[:, 0].values, "R": lr_db.iloc[:, 1].values})
+
+
+def _zscore_rows(mat: np.ndarray) -> None:
+    """Standardize each row of *mat* in-place (population std, zero-std safe)."""
+    N = mat.shape[1]
     row_means = mat.mean(axis=1, keepdims=True)
     mat -= row_means
     row_std = np.sqrt(np.sum(mat**2, axis=1, keepdims=True) / N)
@@ -293,152 +342,190 @@ def spatial_correlation(
     mat /= row_std
     mat[zero_std, :] = 0.0
 
-    # Build gene name -> row index mapping
-    gene_to_idx = {g: i for i, g in enumerate(gene_names)}
 
-    # ---- Step 4: Compute Moran's I ----
-    W_sum = W.sum()
+def _moran_permutation_univariate(
+    mat: np.ndarray,
+    W: sparse.spmatrix,
+    n_perm: int,
+    rng: np.random.RandomState,
+) -> np.ndarray:
+    """Run permutation test for univariate Moran's I.
 
-    if mode in ("univariate", "bivariate"):
-        n_perm = n_permutation
-        rng = np.random.RandomState(123456)
+    Returns an (n_genes, n_perm + 1) array where the last column is observed.
+    """
+    N = mat.shape[1]
+    n_items = mat.shape[0]
+    moran_perm = np.full((n_items, n_perm + 1), np.nan, dtype=np.float64)
 
-        if mode == "univariate":
-            n_items = mat.shape[0]
-            item_names = gene_names.copy()
-
-            # Allocate permutation matrix: items x (n_perm + 1)
-            moran_perm = np.full((n_items, n_perm + 1), np.nan, dtype=np.float64)
-
-            # Permutations
-            for p in range(n_perm):
-                random_order = rng.permutation(N)
-                X_perm = mat[:, random_order]
-                XW = X_perm @ W
-                if sparse.issparse(XW):
-                    XW = np.asarray(XW.todense())
-                moran_perm[:, p] = np.sum(XW * X_perm, axis=1)
-
-            # Observed (last column)
-            XW_obs = mat @ W
-            if sparse.issparse(XW_obs):
-                XW_obs = np.asarray(XW_obs.todense())
-            moran_perm[:, n_perm] = np.sum(XW_obs * mat, axis=1)
-
-        else:  # bivariate
-            n_items = len(item_df)
-            item_names = np.array(
-                [
-                    f"{lig}_{rec}"
-                    for lig, rec in zip(item_df["L"].values, item_df["R"].values)
-                ]
-            )
-
-            # Get row indices for ligands and receptors
-            l_indices = np.array([gene_to_idx[g] for g in item_df["L"].values])
-            r_indices = np.array([gene_to_idx[g] for g in item_df["R"].values])
-
-            moran_perm = np.full((n_items, n_perm + 1), np.nan, dtype=np.float64)
-
-            for p in range(n_perm):
-                random_order = rng.permutation(N)
-                X_perm = mat[:, random_order]
-                X_perm_L = X_perm[l_indices, :]
-                X_perm_R = X_perm[r_indices, :]
-
-                XW = X_perm_L @ W
-                if sparse.issparse(XW):
-                    XW = np.asarray(XW.todense())
-                moran_perm[:, p] = np.sum(XW * X_perm_R, axis=1)
-
-            # Observed
-            XW_obs = mat[l_indices, :] @ W
-            if sparse.issparse(XW_obs):
-                XW_obs = np.asarray(XW_obs.todense())
-            moran_perm[:, n_perm] = np.sum(XW_obs * mat[r_indices, :], axis=1)
-
-        # Normalize by sum of weights
-        moran_perm /= W_sum
-
-        # Extract statistics
-        moran_I = moran_perm[:, n_perm]
-
-        # Z-score: (observed - mean(permutations)) / std(permutations)
-        perm_mean = np.mean(moran_perm[:, :n_perm], axis=1)
-        perm_std = np.std(moran_perm[:, :n_perm], axis=1, ddof=1)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            moran_Z = np.where(
-                perm_std > 0,
-                (moran_I - perm_mean) / perm_std,
-                0.0,
-            )
-
-        # P-value: (count of permutations >= observed + 1) / (n_perm + 1)
-        observed = moran_perm[:, n_perm].reshape(-1, 1)
-        perm_values = moran_perm[:, :n_perm]
-        moran_P = (np.sum(perm_values >= observed, axis=1) + 1) / (n_perm + 1)
-
-        # BH adjustment
-        _, moran_Padj, _, _ = multipletests(moran_P, method="fdr_bh")
-
-        result_df = pd.DataFrame(
-            {
-                "p.Moran_I": moran_I,
-                "p.Moran_Z": moran_Z,
-                "p.Moran_P": moran_P,
-                "p.Moran_Padj": moran_Padj,
-            },
-            index=item_names,
-        )
-
-        # Sort by adjusted p-value ascending, then Moran's I descending
-        result_df = result_df.sort_values(
-            by=["p.Moran_Padj", "p.Moran_I"],
-            ascending=[True, False],
-        )
-
-        logger.info(
-            "Moran's I (%s): %d items tested, %d significant (Padj < 0.05).",
-            mode,
-            len(result_df),
-            (result_df["p.Moran_Padj"] < 0.05).sum(),
-        )
-
-    else:  # pairwise
-        # Pairwise Moran's I: I_matrix = (Z @ W @ Z.T) / sum(W)
-        XW = mat @ W
+    for p in range(n_perm):
+        random_order = rng.permutation(N)
+        X_perm = mat[:, random_order]
+        XW = X_perm @ W
         if sparse.issparse(XW):
             XW = np.asarray(XW.todense())
+        moran_perm[:, p] = np.sum(XW * X_perm, axis=1)
 
-        # XWX = XW @ mat.T  (equivalent to tcrossprod(XW, mat) in R)
-        moran_matrix = XW @ mat.T / W_sum
+    # Observed (last column)
+    XW_obs = mat @ W
+    if sparse.issparse(XW_obs):
+        XW_obs = np.asarray(XW_obs.todense())
+    moran_perm[:, n_perm] = np.sum(XW_obs * mat, axis=1)
 
-        result_df = pd.DataFrame(
-            moran_matrix,
-            index=gene_names,
-            columns=gene_names,
+    return moran_perm
+
+
+def _moran_permutation_bivariate(
+    mat: np.ndarray,
+    W: sparse.spmatrix,
+    l_indices: np.ndarray,
+    r_indices: np.ndarray,
+    n_perm: int,
+    rng: np.random.RandomState,
+) -> np.ndarray:
+    """Run permutation test for bivariate Moran's I.
+
+    Returns an (n_pairs, n_perm + 1) array where the last column is observed.
+    """
+    N = mat.shape[1]
+    n_items = len(l_indices)
+    moran_perm = np.full((n_items, n_perm + 1), np.nan, dtype=np.float64)
+
+    for p in range(n_perm):
+        random_order = rng.permutation(N)
+        X_perm = mat[:, random_order]
+        X_perm_L = X_perm[l_indices, :]
+        X_perm_R = X_perm[r_indices, :]
+
+        XW = X_perm_L @ W
+        if sparse.issparse(XW):
+            XW = np.asarray(XW.todense())
+        moran_perm[:, p] = np.sum(XW * X_perm_R, axis=1)
+
+    # Observed (last column)
+    XW_obs = mat[l_indices, :] @ W
+    if sparse.issparse(XW_obs):
+        XW_obs = np.asarray(XW_obs.todense())
+    moran_perm[:, n_perm] = np.sum(XW_obs * mat[r_indices, :], axis=1)
+
+    return moran_perm
+
+
+def _moran_pvalues(
+    moran_perm: np.ndarray,
+    n_perm: int,
+    item_names: np.ndarray,
+    mode: str,
+) -> pd.DataFrame:
+    """Compute Z-scores, p-values, BH adjustment, and return a result DataFrame."""
+    from statsmodels.stats.multitest import multipletests
+
+    moran_I = moran_perm[:, n_perm]
+
+    # Z-score: (observed - mean(permutations)) / std(permutations)
+    perm_mean = np.mean(moran_perm[:, :n_perm], axis=1)
+    perm_std = np.std(moran_perm[:, :n_perm], axis=1, ddof=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        moran_Z = np.where(perm_std > 0, (moran_I - perm_mean) / perm_std, 0.0)
+
+    # P-value: (count of permutations >= observed + 1) / (n_perm + 1)
+    observed = moran_I.reshape(-1, 1)
+    perm_values = moran_perm[:, :n_perm]
+    moran_P = (np.sum(perm_values >= observed, axis=1) + 1) / (n_perm + 1)
+
+    # BH adjustment
+    _, moran_Padj, _, _ = multipletests(moran_P, method="fdr_bh")
+
+    result_df = pd.DataFrame(
+        {
+            "p.Moran_I": moran_I,
+            "p.Moran_Z": moran_Z,
+            "p.Moran_P": moran_P,
+            "p.Moran_Padj": moran_Padj,
+        },
+        index=item_names,
+    )
+
+    result_df = result_df.sort_values(
+        by=["p.Moran_Padj", "p.Moran_I"],
+        ascending=[True, False],
+    )
+
+    logger.info(
+        "Moran's I (%s): %d items tested, %d significant (Padj < 0.05).",
+        mode,
+        len(result_df),
+        (result_df["p.Moran_Padj"] < 0.05).sum(),
+    )
+
+    return result_df
+
+
+def _compute_permutation_moran(
+    mat: np.ndarray,
+    W: sparse.spmatrix,
+    W_sum: float,
+    mode: str,
+    gene_names: np.ndarray,
+    item_df: pd.DataFrame | None,
+    gene_to_idx: dict[str, int],
+    n_permutation: int,
+) -> pd.DataFrame:
+    """Orchestrate univariate or bivariate permutation Moran's I."""
+    rng = np.random.RandomState(_PERMUTATION_SEED)
+
+    if mode == "univariate":
+        item_names = gene_names.copy()
+        moran_perm = _moran_permutation_univariate(mat, W, n_permutation, rng)
+    else:  # bivariate
+        item_names = np.array(
+            [
+                f"{lig}_{rec}"
+                for lig, rec in zip(item_df["L"].values, item_df["R"].values)
+            ]
+        )
+        l_indices = np.array([gene_to_idx[g] for g in item_df["L"].values])
+        r_indices = np.array([gene_to_idx[g] for g in item_df["R"].values])
+        moran_perm = _moran_permutation_bivariate(
+            mat, W, l_indices, r_indices, n_permutation, rng
         )
 
-        logger.info(
-            "Pairwise Moran's I: %d x %d matrix computed.",
-            result_df.shape[0],
-            result_df.shape[1],
-        )
+    # Normalize by sum of weights
+    moran_perm /= W_sum
 
-    # Store results
-    if "spacet" not in adata.uns:
-        adata.uns["spacet"] = {}
-    if "SpatialCorrelation" not in adata.uns["spacet"]:
-        adata.uns["spacet"]["SpatialCorrelation"] = {}
-
-    adata.uns["spacet"]["SpatialCorrelation"][mode] = result_df
-
-    return adata
+    return _moran_pvalues(moran_perm, n_permutation, item_names, mode)
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
+def _compute_pairwise_moran(
+    mat: np.ndarray,
+    W: sparse.spmatrix,
+    W_sum: float,
+    gene_names: np.ndarray,
+) -> pd.DataFrame:
+    """Compute pairwise Moran's I matrix: I = (Z @ W @ Z.T) / sum(W)."""
+    XW = mat @ W
+    if sparse.issparse(XW):
+        XW = np.asarray(XW.todense())
+
+    moran_matrix = XW @ mat.T / W_sum
+
+    result_df = pd.DataFrame(moran_matrix, index=gene_names, columns=gene_names)
+
+    logger.info(
+        "Pairwise Moran's I: %d x %d matrix computed.",
+        result_df.shape[0],
+        result_df.shape[1],
+    )
+
+    return result_df
+
+
+def _store_result(adata: ad.AnnData, mode: str, result_df: pd.DataFrame) -> None:
+    """Store correlation results into adata.uns['spacet']['SpatialCorrelation']."""
+    if UNS_SPACET not in adata.uns:
+        adata.uns[UNS_SPACET] = {}
+    if KEY_SPATIAL_CORR not in adata.uns[UNS_SPACET]:
+        adata.uns[UNS_SPACET][KEY_SPATIAL_CORR] = {}
+    adata.uns[UNS_SPACET][KEY_SPATIAL_CORR][mode] = result_df
 
 
 def _cal_weights_gpu(coords, n_spots, radius, sigma, diag_as_zero):
@@ -512,10 +599,7 @@ def _vst_normalize_python(adata: ad.AnnData) -> np.ndarray:
     sc.pp.log1p(adata_norm)
 
     X = adata_norm.X
-    if sparse.issparse(X):
-        mat = X.toarray().T.astype(np.float64)
-    else:
-        mat = X.T.astype(np.float64)
+    mat = to_dense_float64(X).T
 
     n_expressing = np.sum(mat > 0, axis=1)
     keep_mask = n_expressing >= 5

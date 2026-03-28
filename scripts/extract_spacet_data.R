@@ -16,7 +16,12 @@
 library(Matrix)
 library(jsonlite)
 
-spacet_path <- system.file("extdata", package = "SpaCET")
+# Use source repo extdata (installed package may be incomplete)
+spacet_path <- Sys.getenv("SPACET_EXTDATA_PATH", unset = "/vf/users/parks34/projects/0sigdiscov/pkg_dev/spacet/inst/extdata")
+if (!dir.exists(spacet_path)) {
+  spacet_path <- system.file("extdata", package = "SpaCET")
+}
+cat("Using SpaCET extdata path:", spacet_path, "\n")
 
 # ============================================================================
 # 1. oldST_PDAC — ST data + matched scRNA-seq

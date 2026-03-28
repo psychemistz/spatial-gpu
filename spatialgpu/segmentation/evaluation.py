@@ -8,7 +8,7 @@ or using unsupervised quality metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -53,7 +53,7 @@ class SegmentationMetrics:
     n_false_positive: int
     n_false_negative: int
     mean_matched_iou: float
-    per_cell_iou: Optional[NDArray] = None
+    per_cell_iou: NDArray | None = None
 
 
 def evaluate_segmentation(
@@ -311,7 +311,7 @@ def _compute_iou_matrix_gpu(
 
 def compute_quality_metrics(
     segmentation: SegmentationResult,
-    image: Optional[NDArray] = None,
+    image: NDArray | None = None,
 ) -> dict:
     """
     Compute unsupervised segmentation quality metrics.

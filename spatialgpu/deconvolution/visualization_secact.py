@@ -17,6 +17,15 @@ import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 
+from spatialgpu.deconvolution._keys import (
+    COL_COUNT,
+    COL_RECEIVER,
+    COL_SECRETED_PROTEIN,
+    COL_SENDER,
+    KEY_SECACT,
+    UNS_SPACET,
+)
+
 if TYPE_CHECKING:
     import anndata as ad
 
@@ -41,6 +50,32 @@ _SECACT_VELOCITY_CONTOUR_COLORS = [
     "#ff6633",
     "#cc3300",
 ]
+
+
+def _get_secact_ccc(adata: ad.AnnData) -> pd.DataFrame:
+    """Retrieve SecretedProteinCCC results from adata.uns, raising if absent."""
+    spacet = adata.uns.get(UNS_SPACET, {})
+    secact_out = spacet.get(KEY_SECACT, {})
+    ccc = secact_out.get("SecretedProteinCCC")
+    if ccc is None or len(ccc) == 0:
+        raise ValueError("No CCC results. Run secact_spatial_ccc() first.")
+    return ccc
+
+
+def _build_ccc_count_matrix(ccc: pd.DataFrame) -> pd.DataFrame:
+    """Build sender x receiver count matrix from CCC results."""
+    all_types = sorted(set(ccc[COL_SENDER].tolist() + ccc[COL_RECEIVER].tolist()))
+    mat = pd.DataFrame(0, index=all_types, columns=all_types, dtype=float)
+    for _, row in ccc.iterrows():
+        s, r = row[COL_SENDER], row[COL_RECEIVER]
+        mat.loc[s, r] += 1
+    return mat
+
+
+def _default_cell_type_colors(labels: list[str]) -> dict[str, tuple]:
+    """Generate default tab20 color palette for cell type labels."""
+    tab20 = plt.cm.tab20(np.linspace(0, 1, max(20, len(labels))))
+    return {lb: tab20[i] for i, lb in enumerate(labels)}
 
 
 def visualize_secact_heatmap(
@@ -79,18 +114,9 @@ def visualize_secact_heatmap(
     """
     from matplotlib.gridspec import GridSpec
 
-    spacet = adata.uns.get("spacet", {})
-    secact_out = spacet.get("SecAct_output", {})
-    ccc = secact_out.get("SecretedProteinCCC")
-    if ccc is None or len(ccc) == 0:
-        raise ValueError("No CCC results. Run secact_spatial_ccc() first.")
-
-    # Build sender × receiver count matrix
-    all_types = sorted(set(ccc["sender"].tolist() + ccc["receiver"].tolist()))
-    mat = pd.DataFrame(0, index=all_types, columns=all_types, dtype=float)
-    for _, row in ccc.iterrows():
-        s, r = row["sender"], row["receiver"]
-        mat.loc[s, r] += 1
+    ccc = _get_secact_ccc(adata)
+    mat = _build_ccc_count_matrix(ccc)
+    all_types = list(mat.index)
 
     # Set diagonal to NaN
     for ct in all_types:
@@ -103,8 +129,7 @@ def visualize_secact_heatmap(
         mat = mat[mat.sum(axis=0).sort_values(ascending=False).index]
 
     if colors_cell_type is None:
-        tab20 = plt.cm.tab20(np.linspace(0, 1, max(20, len(all_types))))
-        colors_cell_type = {ct: tab20[i] for i, ct in enumerate(all_types)}
+        colors_cell_type = _default_cell_type_colors(all_types)
 
     fig = plt.figure(figsize=figsize)
     gs = GridSpec(
@@ -194,26 +219,16 @@ def visualize_secact_circle(
     -------
     matplotlib Figure
     """
-    spacet = adata.uns.get("spacet", {})
-    secact_out = spacet.get("SecAct_output", {})
-    ccc = secact_out.get("SecretedProteinCCC")
-    if ccc is None or len(ccc) == 0:
-        raise ValueError("No CCC results. Run secact_spatial_ccc() first.")
-
-    # Build count matrix
-    all_types = sorted(set(ccc["sender"].tolist() + ccc["receiver"].tolist()))
-    mat = pd.DataFrame(0, index=all_types, columns=all_types, dtype=float)
-    for _, row in ccc.iterrows():
-        s, r = row["sender"], row["receiver"]
-        mat.loc[s, r] += 1
+    ccc = _get_secact_ccc(adata)
+    mat = _build_ccc_count_matrix(ccc)
+    all_types = list(mat.index)
 
     for ct in all_types:
         if ct in mat.index and ct in mat.columns:
             mat.loc[ct, ct] = 0
 
     if colors_cell_type is None:
-        tab20 = plt.cm.tab20(np.linspace(0, 1, max(20, len(all_types))))
-        colors_cell_type = {ct: tab20[i] for i, ct in enumerate(all_types)}
+        colors_cell_type = _default_cell_type_colors(all_types)
 
     # Chord diagram via pycirclize (matches R circlize::chordDiagram)
     from pycirclize import Circos
@@ -282,17 +297,13 @@ def visualize_secact_sankey(
     -------
     matplotlib Figure
     """
-    spacet = adata.uns.get("spacet", {})
-    secact_out = spacet.get("SecAct_output", {})
-    ccc = secact_out.get("SecretedProteinCCC")
-    if ccc is None or len(ccc) == 0:
-        raise ValueError("No CCC results. Run secact_spatial_ccc() first.")
+    ccc = _get_secact_ccc(adata)
 
     # Filter
     mask = (
-        ccc["sender"].isin(sender)
-        & ccc["secretedProtein"].isin(secreted_protein)
-        & ccc["receiver"].isin(receiver)
+        ccc[COL_SENDER].isin(sender)
+        & ccc[COL_SECRETED_PROTEIN].isin(secreted_protein)
+        & ccc[COL_RECEIVER].isin(receiver)
     )
     ccc_sub = ccc[mask].copy()
 
@@ -304,35 +315,38 @@ def visualize_secact_sankey(
     # All unique labels
     all_labels = sorted(
         set(
-            ccc_sub["sender"].tolist()
-            + ccc_sub["secretedProtein"].tolist()
-            + ccc_sub["receiver"].tolist()
+            ccc_sub[COL_SENDER].tolist()
+            + ccc_sub[COL_SECRETED_PROTEIN].tolist()
+            + ccc_sub[COL_RECEIVER].tolist()
         )
     )
 
     if colors_cell_type is None:
-        tab20 = plt.cm.tab20(np.linspace(0, 1, max(20, len(all_labels))))
-        colors_cell_type = {lb: tab20[i] for i, lb in enumerate(all_labels)}
+        colors_cell_type = _default_cell_type_colors(all_labels)
 
     fig, ax = plt.subplots(figsize=figsize)
 
     # Three columns: sender (x=0), protein (x=1), receiver (x=2)
     # Count flows
     s_to_p = (
-        ccc_sub.groupby(["sender", "secretedProtein"]).size().reset_index(name="count")
+        ccc_sub.groupby([COL_SENDER, COL_SECRETED_PROTEIN])
+        .size()
+        .reset_index(name=COL_COUNT)
     )
     p_to_r = (
-        ccc_sub.groupby(["secretedProtein", "receiver"])
+        ccc_sub.groupby([COL_SECRETED_PROTEIN, COL_RECEIVER])
         .size()
-        .reset_index(name="count")
+        .reset_index(name=COL_COUNT)
     )
 
     # Compute node positions
-    s_counts = ccc_sub["sender"].value_counts().sort_values(ascending=False)
+    s_counts = ccc_sub[COL_SENDER].value_counts().sort_values(ascending=False)
     p_counts_l = (
-        s_to_p.groupby("secretedProtein")["count"].sum().sort_values(ascending=False)
+        s_to_p.groupby(COL_SECRETED_PROTEIN)[COL_COUNT]
+        .sum()
+        .sort_values(ascending=False)
     )
-    r_counts = ccc_sub["receiver"].value_counts().sort_values(ascending=False)
+    r_counts = ccc_sub[COL_RECEIVER].value_counts().sort_values(ascending=False)
 
     def _node_positions(counts, x_pos):
         total = counts.sum()
@@ -374,7 +388,7 @@ def visualize_secact_sankey(
 
     # Draw flows (sender → protein)
     for _, row in s_to_p.iterrows():
-        s, p, cnt = row["sender"], row["secretedProtein"], row["count"]
+        s, p, cnt = row[COL_SENDER], row[COL_SECRETED_PROTEIN], row[COL_COUNT]
         if s not in s_pos or p not in p_pos:
             continue
         color = colors_cell_type.get(s, "gray")
@@ -391,7 +405,7 @@ def visualize_secact_sankey(
 
     # Draw flows (protein → receiver)
     for _, row in p_to_r.iterrows():
-        p, r, cnt = row["secretedProtein"], row["receiver"], row["count"]
+        p, r, cnt = row[COL_SECRETED_PROTEIN], row[COL_RECEIVER], row[COL_COUNT]
         if p not in p_pos or r not in r_pos:
             continue
         color = colors_cell_type.get(p, "gray")
@@ -453,16 +467,12 @@ def visualize_secact_dotplot(
     -------
     matplotlib Figure
     """
-    spacet = adata.uns.get("spacet", {})
-    secact_out = spacet.get("SecAct_output", {})
-    ccc = secact_out.get("SecretedProteinCCC")
-    if ccc is None or len(ccc) == 0:
-        raise ValueError("No CCC results. Run secact_spatial_ccc() first.")
+    ccc = _get_secact_ccc(adata)
 
     mask = (
-        ccc["sender"].isin(sender)
-        & ccc["secretedProtein"].isin(secreted_protein)
-        & ccc["receiver"].isin(receiver)
+        ccc[COL_SENDER].isin(sender)
+        & ccc[COL_SECRETED_PROTEIN].isin(secreted_protein)
+        & ccc[COL_RECEIVER].isin(receiver)
     )
     ccc_sub = ccc[mask].copy()
 
@@ -470,7 +480,7 @@ def visualize_secact_dotplot(
         raise ValueError("No CCC entries match the given filters.")
 
     # Create s2r label
-    ccc_sub["s2r"] = ccc_sub["sender"] + "->" + ccc_sub["receiver"]
+    ccc_sub["s2r"] = ccc_sub[COL_SENDER] + "->" + ccc_sub[COL_RECEIVER]
 
     # Score and -log10(pv)
     if "ratio" in ccc_sub.columns:
@@ -503,7 +513,7 @@ def visualize_secact_dotplot(
     )
 
     for _, row in ccc_sub.iterrows():
-        sp = row["secretedProtein"]
+        sp = row[COL_SECRETED_PROTEIN]
         s2r = row["s2r"]
         if sp not in y_map or s2r not in x_map:
             continue
@@ -786,8 +796,8 @@ def visualize_secact_velocity(
     -------
     matplotlib Figure (or FuncAnimation if animated=True)
     """
-    spacet = adata.uns.get("spacet", {})
-    secact_out = spacet.get("SecAct_output", {})
+    spacet = adata.uns.get(UNS_SPACET, {})
+    secact_out = spacet.get(KEY_SECACT, {})
     vel = secact_out.get("velocity", {}).get(gene)
 
     if vel is None:
@@ -1105,6 +1115,136 @@ def _velocity_animated(
     return anim
 
 
+def _velocity_scst_filter_zoom(
+    velocity_result: dict,
+    customized_area: list[float] | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Extract cell/arrow DataFrames, optionally filtering to a zoom region."""
+    arrows = velocity_result["arrows"]
+    cell_df = velocity_result["cell_types"]
+
+    if customized_area is None:
+        return cell_df, arrows
+
+    x_left, x_right, y_bottom, y_top = customized_area
+    mask = (
+        (cell_df["x"] > x_left)
+        & (cell_df["x"] < x_right)
+        & (cell_df["y"] > y_bottom)
+        & (cell_df["y"] < y_top)
+    )
+    cell_df = cell_df[mask].copy()
+    if len(arrows) > 0:
+        a_mask = (
+            (arrows["x_start"] > x_left)
+            & (arrows["x_start"] < x_right)
+            & (arrows["x_end"] > x_left)
+            & (arrows["x_end"] < x_right)
+            & (arrows["y_start"] > y_bottom)
+            & (arrows["y_start"] < y_top)
+            & (arrows["y_end"] > y_bottom)
+            & (arrows["y_end"] < y_top)
+        )
+        arrows = arrows[a_mask].copy()
+    return cell_df, arrows
+
+
+def _velocity_scst_draw_cells(
+    ax: plt.Axes,
+    cell_df: pd.DataFrame,
+    colors: dict[str, str] | None,
+    point_size: float,
+    point_alpha: float,
+) -> None:
+    """Draw cells coloured by cell type onto *ax*."""
+    for ct in cell_df["cell_type"].unique():
+        sub = cell_df[cell_df["cell_type"] == ct]
+        c = colors.get(ct, "#cccccc") if colors else None
+        ax.scatter(
+            sub["x"],
+            sub["y"],
+            s=point_size,
+            c=c,
+            alpha=point_alpha,
+            label=ct,
+            edgecolors="none",
+            zorder=1,
+        )
+
+
+def _velocity_scst_draw_arrows(
+    ax: plt.Axes,
+    arrows: pd.DataFrame,
+    arrow_color: str,
+    arrow_size: float,
+    arrow_width: float,
+) -> None:
+    """Overlay quiver arrows from sender to receiver cells onto *ax*."""
+    if len(arrows) == 0:
+        return
+    x0 = arrows["x_start"].values
+    y0 = arrows["y_start"].values
+    x1 = arrows["x_end"].values
+    y1 = arrows["y_end"].values
+    dx = x1 - x0
+    dy = y1 - y0
+
+    ax.quiver(
+        x0,
+        y0,
+        dx,
+        dy,
+        color=arrow_color,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        width=arrow_size * 0.01,
+        headwidth=4,
+        headlength=5,
+        headaxislength=4.5,
+        linewidth=arrow_width,
+        alpha=0.7,
+        zorder=2,
+    )
+
+
+def _velocity_scst_style_axes(
+    ax: plt.Axes,
+    *,
+    is_zoomed: bool,
+    show_coordinates: bool,
+    legend_position: str,
+    legend_size: float,
+    point_size: float,
+) -> None:
+    """Apply axis styling and legend to the scST velocity plot."""
+    # Don't force equal aspect for zoomed subregions (avoids stretched figures)
+    if not is_zoomed:
+        ax.set_aspect("equal")
+
+    if not show_coordinates:
+        ax.axis("off")
+    else:
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    # Legend with fixed marker size (R uses guide_legend override.aes size)
+    if legend_position != "none":
+        loc = "center left" if legend_position == "right" else "center right"
+        bbox = (1.02, 0.5) if legend_position == "right" else (-0.02, 0.5)
+        legend = ax.legend(
+            loc=loc,
+            bbox_to_anchor=bbox,
+            frameon=False,
+            fontsize=8,
+        )
+        target_size = max(20, point_size * legend_size)
+        for h in legend.legend_handles:
+            h.set_sizes([target_size])
+    else:
+        ax.legend().remove()
+
+
 def visualize_secact_velocity_scst(
     velocity_result: dict,
     *,
@@ -1160,31 +1300,7 @@ def visualize_secact_velocity_scst(
     -------
     matplotlib Figure or plotly Figure (if interactive=True)
     """
-    arrows = velocity_result["arrows"]
-    cell_df = velocity_result["cell_types"]
-
-    # Optional zoom
-    if customized_area is not None:
-        x_left, x_right, y_bottom, y_top = customized_area
-        mask = (
-            (cell_df["x"] > x_left)
-            & (cell_df["x"] < x_right)
-            & (cell_df["y"] > y_bottom)
-            & (cell_df["y"] < y_top)
-        )
-        cell_df = cell_df[mask].copy()
-        if len(arrows) > 0:
-            a_mask = (
-                (arrows["x_start"] > x_left)
-                & (arrows["x_start"] < x_right)
-                & (arrows["x_end"] > x_left)
-                & (arrows["x_end"] < x_right)
-                & (arrows["y_start"] > y_bottom)
-                & (arrows["y_start"] < y_top)
-                & (arrows["y_end"] > y_bottom)
-                & (arrows["y_end"] < y_top)
-            )
-            arrows = arrows[a_mask].copy()
+    cell_df, arrows = _velocity_scst_filter_zoom(velocity_result, customized_area)
 
     if interactive:
         return _velocity_scst_plotly(
@@ -1202,76 +1318,16 @@ def visualize_secact_velocity_scst(
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Draw cells coloured by type
-    unique_types = cell_df["cell_type"].unique()
-    for ct in unique_types:
-        sub = cell_df[cell_df["cell_type"] == ct]
-        c = colors.get(ct, "#cccccc") if colors else None
-        ax.scatter(
-            sub["x"],
-            sub["y"],
-            s=point_size,
-            c=c,
-            alpha=point_alpha,
-            label=ct,
-            edgecolors="none",
-            zorder=1,
-        )
-
-    # Draw arrows — matches R geom_segment + arrow()
-    # arrow_size: arrow scale (shaft width + head)
-    # arrow_width: shaft line weight (points)
-    if len(arrows) > 0:
-        x0 = arrows["x_start"].values
-        y0 = arrows["y_start"].values
-        x1 = arrows["x_end"].values
-        y1 = arrows["y_end"].values
-        dx = x1 - x0
-        dy = y1 - y0
-
-        ax.quiver(
-            x0,
-            y0,
-            dx,
-            dy,
-            color=arrow_color,
-            angles="xy",
-            scale_units="xy",
-            scale=1,
-            width=arrow_size * 0.01,
-            headwidth=4,
-            headlength=5,
-            headaxislength=4.5,
-            linewidth=arrow_width,
-            alpha=0.7,
-            zorder=2,
-        )
-
-    # Don't force equal aspect for zoomed subregions (avoids stretched figures)
-    if customized_area is None:
-        ax.set_aspect("equal")
-
-    if not show_coordinates:
-        ax.axis("off")
-    else:
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-    # Legend with fixed marker size (R uses guide_legend override.aes size)
-    if legend_position != "none":
-        loc = "center left" if legend_position == "right" else "center right"
-        bbox = (1.02, 0.5) if legend_position == "right" else (-0.02, 0.5)
-        legend = ax.legend(
-            loc=loc,
-            bbox_to_anchor=bbox,
-            frameon=False,
-            fontsize=8,
-        )
-        target_size = max(20, point_size * legend_size)
-        for h in legend.legend_handles:
-            h.set_sizes([target_size])
-    else:
-        ax.legend().remove()
+    _velocity_scst_draw_cells(ax, cell_df, colors, point_size, point_alpha)
+    _velocity_scst_draw_arrows(ax, arrows, arrow_color, arrow_size, arrow_width)
+    _velocity_scst_style_axes(
+        ax,
+        is_zoomed=customized_area is not None,
+        show_coordinates=show_coordinates,
+        legend_position=legend_position,
+        legend_size=legend_size,
+        point_size=point_size,
+    )
 
     fig.tight_layout()
     if save:

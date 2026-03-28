@@ -5,7 +5,9 @@ Compares: normalizeVariance outputs, PCA scores, clustering, and final malProp.
 R intermediates must be pre-saved by scripts/r_save_mudan_intermediates.R.
 """
 
+import os
 import sys
+
 sys.path.insert(0, ".")
 
 import numpy as np
@@ -13,7 +15,7 @@ import pandas as pd
 from scipy import sparse
 
 # Paths
-VST_DIR = "/Users/seongyongpark/project/psychemist/sigdiscov/dataset/visium"
+VST_DIR = os.environ.get("SPACET_VST_DIR", "/Users/seongyongpark/project/psychemist/sigdiscov/dataset/visium")
 R_DIR = "validation/mudan_intermediates"
 COUNTS_FILE = f"{VST_DIR}/1_counts.tsv"
 

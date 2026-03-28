@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 
 import numpy as np
 from tqdm import tqdm
@@ -49,9 +49,9 @@ class SegmentationResult:
     cell_ids: NDArray
     centroids: NDArray
     areas: NDArray
-    boundaries: Optional[NDArray] = None
-    flows: Optional[NDArray] = None
-    probabilities: Optional[NDArray] = None
+    boundaries: NDArray | None = None
+    flows: NDArray | None = None
+    probabilities: NDArray | None = None
     model_name: str = "unknown"
     metadata: dict = field(default_factory=dict)
 
@@ -120,8 +120,8 @@ class BaseSegmentationModel(ABC):
     def segment(
         self,
         image: NDArray,
-        diameter: Optional[float] = None,
-        channels: Optional[list[int]] = None,
+        diameter: float | None = None,
+        channels: list[int] | None = None,
         **kwargs,
     ) -> SegmentationResult:
         """
@@ -150,7 +150,7 @@ class BaseSegmentationModel(ABC):
         image: NDArray,
         tile_size: int = 2048,
         overlap: int = 128,
-        diameter: Optional[float] = None,
+        diameter: float | None = None,
         show_progress: bool = True,
         **kwargs,
     ) -> SegmentationResult:
@@ -234,7 +234,7 @@ class CellSegmenter:
 
     def __init__(
         self,
-        model: Union[str, BaseSegmentationModel] = "cellpose",
+        model: str | BaseSegmentationModel = "cellpose",
         device: str = "auto",
         **model_kwargs,
     ):
@@ -282,8 +282,8 @@ class CellSegmenter:
     def segment(
         self,
         image: NDArray,
-        diameter: Optional[float] = None,
-        channels: Optional[list[int]] = None,
+        diameter: float | None = None,
+        channels: list[int] | None = None,
         **kwargs,
     ) -> SegmentationResult:
         """
@@ -312,7 +312,7 @@ class CellSegmenter:
         image: NDArray,
         tile_size: int = 2048,
         overlap: int = 128,
-        diameter: Optional[float] = None,
+        diameter: float | None = None,
         show_progress: bool = True,
         **kwargs,
     ) -> SegmentationResult:
@@ -354,7 +354,7 @@ class CellSegmenter:
     def segment_batch(
         self,
         images: Sequence[NDArray],
-        diameter: Optional[float] = None,
+        diameter: float | None = None,
         batch_size: int = 8,
         show_progress: bool = True,
         **kwargs,
@@ -402,10 +402,10 @@ class CellSegmenter:
 def segment_cells(
     image: NDArray,
     model: str = "cellpose",
-    diameter: Optional[float] = None,
-    channels: Optional[list[int]] = None,
+    diameter: float | None = None,
+    channels: list[int] | None = None,
     device: str = "auto",
-    tile_size: Optional[int] = None,
+    tile_size: int | None = None,
     **kwargs,
 ) -> SegmentationResult:
     """
@@ -456,7 +456,7 @@ def segment_cells(
 def segment_nuclei(
     image: NDArray,
     model: str = "cellpose",
-    diameter: Optional[float] = None,
+    diameter: float | None = None,
     device: str = "auto",
     **kwargs,
 ) -> SegmentationResult:

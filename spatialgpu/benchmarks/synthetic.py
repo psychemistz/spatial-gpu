@@ -4,7 +4,7 @@ Synthetic data generation for benchmarks.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -21,7 +21,7 @@ def generate_synthetic_data(
     spatial_dims: int = 2,
     extent: tuple[float, float] = (0, 1000),
     sparsity: float = 0.9,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> ad.AnnData:
     """
     Generate synthetic spatial data for benchmarking.
@@ -106,7 +106,7 @@ def generate_spatial_clusters(
     cluster_radius: float = 50.0,
     extent: tuple[float, float] = (0, 1000),
     noise: float = 0.1,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> ad.AnnData:
     """
     Generate synthetic data with spatially coherent clusters.
@@ -230,7 +230,7 @@ def generate_image_with_cells(
     cell_radius_range: tuple[int, int] = (10, 30),
     intensity_range: tuple[float, float] = (0.3, 1.0),
     noise_level: float = 0.1,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Generate synthetic image with cells for segmentation testing.

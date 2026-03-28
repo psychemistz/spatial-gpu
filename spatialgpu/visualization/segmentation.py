@@ -5,7 +5,7 @@ Segmentation visualization functions.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -21,12 +21,12 @@ def segmentation_overlay(
     image: NDArray,
     masks: NDArray | SegmentationResult,
     alpha: float = 0.4,
-    colors: Optional[NDArray] = None,
+    colors: NDArray | None = None,
     show_boundaries: bool = True,
     boundary_color: tuple = (1, 1, 1),
-    ax: Optional[Axes] = None,
+    ax: Axes | None = None,
     figsize: tuple[float, float] = (10, 10),
-    save: Optional[str] = None,
+    save: str | None = None,
 ) -> Axes:
     """
     Overlay segmentation masks on an image.
@@ -129,10 +129,10 @@ def segmentation_overlay(
 
 def show_masks(
     masks: NDArray | SegmentationResult,
-    ax: Optional[Axes] = None,
+    ax: Axes | None = None,
     figsize: tuple[float, float] = (10, 10),
     cmap: str = "nipy_spectral",
-    save: Optional[str] = None,
+    save: str | None = None,
 ) -> Axes:
     """
     Display segmentation masks.
@@ -195,12 +195,12 @@ def show_masks(
 
 def show_boundaries(
     masks: NDArray | SegmentationResult,
-    image: Optional[NDArray] = None,
-    ax: Optional[Axes] = None,
+    image: NDArray | None = None,
+    ax: Axes | None = None,
     figsize: tuple[float, float] = (10, 10),
     boundary_color: str = "red",
     linewidth: float = 1.0,
-    save: Optional[str] = None,
+    save: str | None = None,
 ) -> Axes:
     """
     Display cell boundaries.
@@ -276,7 +276,7 @@ def compare_segmentations(
     segmentations: Sequence[NDArray | SegmentationResult],
     labels: Sequence[str],
     figsize_per_image: tuple[float, float] = (6, 6),
-    save: Optional[str] = None,
+    save: str | None = None,
 ) -> Figure:
     """
     Compare multiple segmentations side by side.

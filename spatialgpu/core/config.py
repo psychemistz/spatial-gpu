@@ -7,7 +7,7 @@ Provides global settings for GPU memory, parallelization, and computation option
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Literal
 
 
 @dataclass
@@ -34,7 +34,7 @@ class GPUConfig:
     """
 
     device_id: int = 0
-    memory_limit: Optional[float] = None  # GB
+    memory_limit: float | None = None  # GB
     memory_pool: bool = True
     pinned_memory: bool = True
     unified_memory: bool = False
@@ -84,7 +84,7 @@ class ComputeConfig:
     n_jobs: int = -1
     backend: Literal["auto", "cpu", "cuda"] = "auto"
     precision: Literal["float32", "float64"] = "float32"
-    seed: Optional[int] = None
+    seed: int | None = None
     verbose: bool = False
     progress_bar: bool = True
 
@@ -110,7 +110,7 @@ class GraphConfig:
 
     default_coord_type: Literal["generic", "grid"] = "generic"
     default_n_neighbors: int = 6
-    default_radius: Optional[float] = None
+    default_radius: float | None = None
     use_kd_tree: bool = True
     use_ball_tree: bool = True
 
