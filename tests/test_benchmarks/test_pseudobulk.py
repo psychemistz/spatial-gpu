@@ -8,6 +8,7 @@ import pytest
 
 from spatialgpu.benchmarks.pseudobulk import (
     generate_pseudobulk_dirichlet,
+    generate_pseudobulk_titration,
     generate_semi_synthetic_scrna,
 )
 
@@ -139,3 +140,59 @@ class TestGeneratePseudobulkDirichlet:
         scrna_types = set(scrna.obs["cell_type"].unique())
         gt_types = set(gt.columns)
         assert gt_types == scrna_types
+
+
+class TestGeneratePseudobulkTitration:
+    @pytest.fixture(scope="class")
+    def scrna(self):
+        return generate_semi_synthetic_scrna(n_cells_per_type=50, include_malignant=True, seed=42)
+
+    @pytest.fixture(scope="class")
+    def titration_result(self, scrna):
+        return generate_pseudobulk_titration(
+            scrna,
+            target_type="Malignant_BRCA",
+            fractions=[0.0, 0.2, 0.5, 0.8],
+            n_replicates=3,
+            n_cells_per_sample=200,
+            seed=42,
+        )
+
+    def test_returns_tuple(self, titration_result):
+        adata_bulk, gt = titration_result
+        import anndata as ad
+
+        assert isinstance(adata_bulk, ad.AnnData)
+        assert isinstance(gt, pd.DataFrame)
+
+    def test_correct_sample_count(self, titration_result):
+        adata_bulk, gt = titration_result
+        assert adata_bulk.n_obs == 12
+        assert gt.shape[0] == 12
+
+    def test_ground_truth_sums_to_one(self, titration_result):
+        _, gt = titration_result
+        # target_fraction is metadata, not a proportion column — exclude it
+        prop_cols = [c for c in gt.columns if c != "target_fraction"]
+        np.testing.assert_allclose(gt[prop_cols].sum(axis=1).values, 1.0, atol=1e-10)
+
+    def test_target_fraction_column(self, titration_result):
+        _, gt = titration_result
+        assert "target_fraction" in gt.columns
+
+    def test_target_fractions_match_requested(self, titration_result):
+        _, gt = titration_result
+        expected = [0.0, 0.0, 0.0, 0.2, 0.2, 0.2, 0.5, 0.5, 0.5, 0.8, 0.8, 0.8]
+        np.testing.assert_allclose(gt["target_fraction"].values, expected, atol=1e-10)
+
+    def test_target_type_proportion_matches(self, titration_result):
+        _, gt = titration_result
+        np.testing.assert_allclose(
+            gt["Malignant_BRCA"].values, gt["target_fraction"].values, atol=1e-10
+        )
+
+    def test_other_types_sum_to_remainder(self, titration_result):
+        _, gt = titration_result
+        non_target = gt.drop(columns=["target_fraction", "Malignant_BRCA"])
+        remainder = 1.0 - gt["target_fraction"].values
+        np.testing.assert_allclose(non_target.sum(axis=1).values, remainder, atol=1e-10)
