@@ -57,6 +57,9 @@ from spatialgpu.deconvolution.visualization import (
     visualize_cell_type_pair,
     visualize_colocalization,
     visualize_distance_to_interface,
+    visualize_spatial_feature,
+)
+from spatialgpu.deconvolution.visualization_secact import (
     visualize_secact_bar,
     visualize_secact_circle,
     visualize_secact_dotplot,
@@ -67,7 +70,6 @@ from spatialgpu.deconvolution.visualization import (
     visualize_secact_survival,
     visualize_secact_velocity,
     visualize_secact_velocity_scst,
-    visualize_spatial_feature,
 )
 
 __all__ = [
