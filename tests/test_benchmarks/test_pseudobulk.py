@@ -153,7 +153,9 @@ class TestGeneratePseudobulkDirichlet:
 class TestGeneratePseudobulkTitration:
     @pytest.fixture(scope="class")
     def scrna(self):
-        return generate_semi_synthetic_scrna(n_cells_per_type=50, include_malignant=True, seed=42)
+        return generate_semi_synthetic_scrna(
+            n_cells_per_type=50, include_malignant=True, seed=42
+        )
 
     @pytest.fixture(scope="class")
     def titration_result(self, scrna):

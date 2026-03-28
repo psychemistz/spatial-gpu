@@ -401,7 +401,9 @@ def evaluate_deconvolution(
 
     rare_mask = gt_aligned < 0.05
     if rare_mask.sum() > 0:
-        rare_mae = float(np.mean(np.abs(est_aligned[rare_mask] - gt_aligned[rare_mask])))
+        rare_mae = float(
+            np.mean(np.abs(est_aligned[rare_mask] - gt_aligned[rare_mask]))
+        )
     else:
         rare_mae = 0.0
 
@@ -430,13 +432,17 @@ def export_for_music(
     X_bulk = adata_bulk.X
     if hasattr(X_bulk, "toarray"):
         X_bulk = X_bulk.toarray()
-    bulk_df = pd.DataFrame(X_bulk.T, index=adata_bulk.var_names, columns=adata_bulk.obs_names)
+    bulk_df = pd.DataFrame(
+        X_bulk.T, index=adata_bulk.var_names, columns=adata_bulk.obs_names
+    )
     bulk_df.to_csv(os.path.join(output_dir, "bulk_counts.csv"))
 
     X_sc = scrna_adata.X
     if hasattr(X_sc, "toarray"):
         X_sc = X_sc.toarray()
-    sc_df = pd.DataFrame(X_sc.T, index=scrna_adata.var_names, columns=scrna_adata.obs_names)
+    sc_df = pd.DataFrame(
+        X_sc.T, index=scrna_adata.var_names, columns=scrna_adata.obs_names
+    )
     sc_df.to_csv(os.path.join(output_dir, "sc_counts.csv"))
 
     pheno = scrna_adata.obs[["cell_type"]].copy()
@@ -481,14 +487,18 @@ def export_for_cibersortx(
     col_sums = X_bulk.sum(axis=1, keepdims=True)
     col_sums[col_sums == 0] = 1
     tpm = X_bulk / col_sums * 1e6
-    mixture_df = pd.DataFrame(tpm.T, index=adata_bulk.var_names, columns=adata_bulk.obs_names)
+    mixture_df = pd.DataFrame(
+        tpm.T, index=adata_bulk.var_names, columns=adata_bulk.obs_names
+    )
     mixture_df.index.name = "Gene"
     mixture_df.to_csv(os.path.join(output_dir, "mixture.txt"), sep="\t")
 
     X_sc = scrna_adata.X
     if hasattr(X_sc, "toarray"):
         X_sc = X_sc.toarray()
-    sc_df = pd.DataFrame(X_sc.T, index=scrna_adata.var_names, columns=scrna_adata.obs["cell_type"].values)
+    sc_df = pd.DataFrame(
+        X_sc.T, index=scrna_adata.var_names, columns=scrna_adata.obs["cell_type"].values
+    )
     sc_df.index.name = "Gene"
     sc_df.to_csv(os.path.join(output_dir, "sc_reference.txt"), sep="\t")
 
