@@ -1176,7 +1176,7 @@ def _solve_constrained_batch(
     """
     has_lower_bound = np.any(pp_min_arr > 1e-10)
     if has_lower_bound:
-        return _solve_trust_constr(
+        return _solve_constr_optim(
             A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr, n_jobs
         )
     return _solve_nnls(A, B, n_cell, theta_sum, pp_max_arr, n_jobs)
@@ -1279,6 +1279,80 @@ def _solve_nnls_gpu(
             prop2_gpu = prop2_gpu * (ppmax / s2)
 
         results.append(cp.asnumpy(prop2_gpu))
+
+    return np.column_stack(results)
+
+
+def _solve_constr_optim(
+    A: np.ndarray,
+    B: np.ndarray,
+    n_cell: int,
+    theta_sum: np.ndarray,
+    pp_min_arr: np.ndarray,
+    pp_max_arr: np.ndarray,
+    n_jobs: int = 1,
+) -> np.ndarray:
+    """R-compatible solver using constrOptim (Nelder-Mead + log-barrier).
+
+    Matches R's stats::constrOptim(grad=NULL) for Level 2 deconvolution.
+    Two-pass: unweighted LS, then weighted by 1/(fitted + 1).
+    """
+    from spatialgpu.core.backend import get_backend
+
+    backend = get_backend()
+    if backend.is_gpu_active:
+        return _solve_trust_constr_gpu(A, B, n_cell, theta_sum, pp_min_arr, pp_max_arr)
+
+    from joblib import Parallel, delayed
+
+    from spatialgpu.deconvolution.constr_optim import constr_optim
+
+    n_spots = B.shape[1]
+
+    # Constraint matrix: x_i >= 0, sum(x) >= ppmin, sum(x) <= ppmax
+    ui = np.vstack([np.eye(n_cell), np.ones((1, n_cell)), -np.ones((1, n_cell))])
+
+    def solve_single(i: int) -> np.ndarray:
+        ts = theta_sum[i]
+        if ts <= 0.01:
+            return np.full(n_cell, max(ts, 0) / n_cell)
+
+        b = B[:, i]
+        ppmin = float(pp_min_arr[i])
+        ppmax = float(pp_max_arr[i])
+
+        # Initial point: thetaSum/nCell (matches R exactly)
+        theta0 = np.full(n_cell, ts / n_cell)
+        ci = np.concatenate([np.zeros(n_cell), [ppmin], [-ppmax]])
+
+        # Pass 1: unweighted least squares
+        def f0(x, A_mat, b_vec):
+            return float(np.sum((A_mat @ x - b_vec) ** 2))
+
+        try:
+            prop, _ = constr_optim(theta0, f0, ui, ci, args=(A, b))
+        except (ValueError, RuntimeError):
+            prop = theta0.copy()
+
+        # Pass 2: weighted by 1/(fitted + 1), same initial theta (matches R)
+        bhat = A @ prop
+
+        def fw(x, A_mat, b_vec):
+            return float(np.sum((A_mat @ x - b_vec) ** 2 / (bhat + 1.0)))
+
+        try:
+            prop2, _ = constr_optim(theta0, fw, ui, ci, args=(A, b))
+        except (ValueError, RuntimeError):
+            prop2 = prop
+
+        return np.clip(prop2, 0.0, None)
+
+    if n_jobs == 1:
+        results = [solve_single(i) for i in range(n_spots)]
+    else:
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(solve_single)(i) for i in range(n_spots)
+        )
 
     return np.column_stack(results)
 
