@@ -21,8 +21,18 @@ logger = logging.getLogger(__name__)
 
 # Level 1 cell types used for pseudobulk mixing
 _LEVEL1_TYPES = [
-    "CAF", "Endothelial", "Plasma", "B cell", "T CD4", "T CD8",
-    "NK", "cDC", "pDC", "Macrophage", "Mast", "Neutrophil",
+    "CAF",
+    "Endothelial",
+    "Plasma",
+    "B cell",
+    "T CD4",
+    "T CD8",
+    "NK",
+    "cDC",
+    "pDC",
+    "Macrophage",
+    "Mast",
+    "Neutrophil",
 ]
 
 
@@ -77,7 +87,9 @@ def generate_semi_synthetic_scrna(
             mean_expr = ref_profiles[type_names].mean(axis=1)
             mal_profile = mean_expr.copy()
             olp = mal_profile.index.intersection(sig.index)
-            mal_profile.loc[olp] = mal_profile.loc[olp] + sig.loc[olp] * mean_expr.loc[olp].clip(lower=1)
+            mal_profile.loc[olp] = mal_profile.loc[olp] + sig.loc[olp] * mean_expr.loc[
+                olp
+            ].clip(lower=1)
             mal_profile = mal_profile.clip(lower=0)
             profiles[mal_name] = mal_profile
             type_names.append(mal_name)
@@ -99,7 +111,9 @@ def generate_semi_synthetic_scrna(
             mu = profile_prob * total_umi
             dispersion = np.maximum(0.5, mu / 2)
             p = dispersion / (dispersion + mu + 1e-10)
-            counts = rng.negative_binomial(n=np.maximum(dispersion, 0.01).astype(np.float64), p=p)
+            counts = rng.negative_binomial(
+                n=np.maximum(dispersion, 0.01).astype(np.float64), p=p
+            )
 
             log_mu = np.log(mu + 1)
             drop_prob = 1.0 / (1.0 + np.exp(1.5 * log_mu - 2.0))
@@ -193,5 +207,109 @@ def generate_pseudobulk_dirichlet(
         index=adata_bulk.obs_names,
         columns=cell_types,
     )
+
+    return adata_bulk, ground_truth
+
+
+def generate_pseudobulk_titration(
+    scrna_adata: ad.AnnData,
+    target_type: str = "Malignant_BRCA",
+    fractions: list[float] | None = None,
+    n_replicates: int = 5,
+    n_cells_per_sample: int = 1000,
+    seed: int = 42,
+) -> tuple[ad.AnnData, pd.DataFrame]:
+    """Generate pseudobulk with systematic titration of one cell type.
+
+    Fixes the target type at each specified fraction and distributes
+    the remainder across other types via Dirichlet(1.0).
+
+    Parameters
+    ----------
+    scrna_adata
+        Semi-synthetic scRNA-seq with obs['cell_type'].
+    target_type
+        Cell type to titrate (e.g., 'Malignant_BRCA').
+    fractions
+        Target fractions to sweep. Default: [0.0, 0.1, ..., 0.8].
+    n_replicates
+        Number of replicates per fraction.
+    n_cells_per_sample
+        Total cells per pseudobulk sample.
+    seed
+        Random seed.
+
+    Returns
+    -------
+    tuple of (AnnData, DataFrame)
+        AnnData: pseudobulk (samples x genes).
+        DataFrame: ground truth with extra 'target_fraction' column.
+    """
+    import anndata as ad
+
+    if fractions is None:
+        fractions = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+
+    rng = np.random.RandomState(seed)
+    cell_types = sorted(scrna_adata.obs["cell_type"].unique())
+
+    if target_type not in cell_types:
+        raise ValueError(
+            f"target_type '{target_type}' not in scrna_adata cell types: {cell_types}"
+        )
+
+    other_types = [ct for ct in cell_types if ct != target_type]
+    n_other = len(other_types)
+
+    type_indices = {}
+    for ct in cell_types:
+        type_indices[ct] = np.where(scrna_adata.obs["cell_type"].values == ct)[0]
+
+    X_all = scrna_adata.X
+    if sparse.issparse(X_all):
+        X_all = X_all.toarray()
+
+    all_counts = []
+    all_proportions = []
+    all_target_fracs = []
+
+    for frac in fractions:
+        for _rep in range(n_replicates):
+            props = {}
+            props[target_type] = frac
+
+            if frac < 1.0 - 1e-10:
+                remainder_props = rng.dirichlet(np.ones(n_other))
+                for j, ct in enumerate(other_types):
+                    props[ct] = remainder_props[j] * (1.0 - frac)
+            else:
+                for ct in other_types:
+                    props[ct] = 0.0
+
+            sample_sum = np.zeros(scrna_adata.n_vars, dtype=np.float64)
+            for ct in cell_types:
+                n_cells = int(round(props[ct] * n_cells_per_sample))
+                if n_cells == 0:
+                    continue
+                idx = rng.choice(type_indices[ct], size=n_cells, replace=True)
+                sample_sum += X_all[idx].sum(axis=0)
+
+            all_counts.append(sample_sum)
+            all_proportions.append([props[ct] for ct in cell_types])
+            all_target_fracs.append(frac)
+
+    n_total = len(all_counts)
+    adata_bulk = ad.AnnData(
+        X=np.vstack(all_counts),
+        obs=pd.DataFrame(index=[f"Titr_{i:04d}" for i in range(n_total)]),
+        var=pd.DataFrame(index=scrna_adata.var_names.copy()),
+    )
+
+    ground_truth = pd.DataFrame(
+        np.array(all_proportions),
+        index=adata_bulk.obs_names,
+        columns=cell_types,
+    )
+    ground_truth["target_fraction"] = all_target_fracs
 
     return adata_bulk, ground_truth

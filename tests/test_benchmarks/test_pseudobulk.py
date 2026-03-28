@@ -29,6 +29,7 @@ class TestGenerateSemiSyntheticScrna:
 
     def test_returns_anndata(self, scrna_with_mal):
         import anndata as ad
+
         assert isinstance(scrna_with_mal, ad.AnnData)
 
     def test_cell_type_column_exists(self, scrna_with_mal):
@@ -75,6 +76,7 @@ class TestGenerateSemiSyntheticScrna:
 
     def test_gene_names_from_reference(self, scrna_with_mal):
         from spatialgpu.deconvolution.reference import load_comb_ref
+
         ref = load_comb_ref()
         ref_genes = set(ref["refProfiles"].index)
         scrna_genes = set(scrna_with_mal.var_names)
@@ -97,6 +99,7 @@ class TestGeneratePseudobulkDirichlet:
     def test_returns_tuple(self, bulk_and_truth):
         adata_bulk, ground_truth = bulk_and_truth
         import anndata as ad
+
         assert isinstance(adata_bulk, ad.AnnData)
         assert isinstance(ground_truth, pd.DataFrame)
 
@@ -136,4 +139,3 @@ class TestGeneratePseudobulkDirichlet:
         scrna_types = set(scrna.obs["cell_type"].unique())
         gt_types = set(gt.columns)
         assert gt_types == scrna_types
-
