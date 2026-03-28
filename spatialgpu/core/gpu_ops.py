@@ -405,7 +405,7 @@ def gpu_cdist(A, B):
     dist_sq = cp.maximum(dist_sq, 0.0)
 
     # Zero diagonal for self-distance to avoid floating-point artifacts
-    if A.data_ptr() == B.data_ptr():
+    if A.data.ptr == B.data.ptr:
         cp.fill_diagonal(dist_sq, 0.0)
 
     return cp.sqrt(dist_sq)
