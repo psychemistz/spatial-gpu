@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-from scipy import sparse
 
+from spatialgpu.core.array_utils import ensure_dense
 from spatialgpu.deconvolution._keys import KEY_GENESET, UNS_SPACET
 from spatialgpu.deconvolution.reference import load_gene_set
 
@@ -94,10 +94,7 @@ def _ucell_score(
     n_genes = X.shape[1]
 
     # Rank genes per spot (descending, so highest expression = rank 1)
-    if sparse.issparse(X):
-        X_dense = X.toarray()
-    else:
-        X_dense = np.asarray(X)
+    X_dense = ensure_dense(X)
 
     # Vectorized ranking: argsort twice gives ordinal ranks, then handle ties
     # For "average" tie-breaking we use scipy rankdata but batch via apply

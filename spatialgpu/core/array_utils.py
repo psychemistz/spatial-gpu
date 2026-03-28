@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from numpy.typing import ArrayLike
 
 # Type alias for arrays that can be on CPU or GPU
+# Union required: module-level alias is evaluated eagerly (not deferred)
 Array = Union[np.ndarray, "cp.ndarray"]
 
 
@@ -356,7 +357,7 @@ def sparse_to_dense_chunked(
 
 
 def ensure_dense(
-    X: Union[np.ndarray, sparse.spmatrix],
+    X: np.ndarray | sparse.spmatrix,
     dtype: np.dtype | None = None,
 ) -> np.ndarray:
     """Convert sparse matrix to dense numpy array, or pass through dense arrays."""
@@ -365,14 +366,12 @@ def ensure_dense(
     return np.asarray(X, dtype=dtype)
 
 
-def to_dense_float64(X: Union[np.ndarray, sparse.spmatrix]) -> np.ndarray:
+def to_dense_float64(X: np.ndarray | sparse.spmatrix) -> np.ndarray:
     """Convert sparse or dense matrix to float64 dense array."""
     return ensure_dense(X, dtype=np.float64)
 
 
-def sparse_sum(
-    X: Union[np.ndarray, sparse.spmatrix], axis: int | None = None
-) -> np.ndarray:
+def sparse_sum(X: np.ndarray | sparse.spmatrix, axis: int | None = None) -> np.ndarray:
     """Sum over sparse or dense matrix, always returning a 1D numpy array."""
     if sparse.issparse(X):
         return np.asarray(X.sum(axis=axis)).ravel()
@@ -381,10 +380,10 @@ def sparse_sum(
 
 
 def filter_zero_genes(
-    counts: Union[np.ndarray, sparse.spmatrix],
+    counts: np.ndarray | sparse.spmatrix,
     gene_names: np.ndarray,
     axis: int = 1,
-) -> tuple[Union[np.ndarray, sparse.spmatrix], np.ndarray]:
+) -> tuple[np.ndarray | sparse.spmatrix, np.ndarray]:
     """Remove genes (rows) with zero total counts.
 
     Parameters

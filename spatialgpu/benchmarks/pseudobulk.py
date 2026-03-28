@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
+from spatialgpu.core.array_utils import ensure_dense
+
 if TYPE_CHECKING:
     import anndata as ad
 
@@ -174,9 +176,7 @@ def generate_pseudobulk_dirichlet(
     for ct in cell_types:
         type_indices[ct] = np.where(scrna_adata.obs["cell_type"].values == ct)[0]
 
-    X_all = scrna_adata.X
-    if sparse.issparse(X_all):
-        X_all = X_all.toarray()
+    X_all = ensure_dense(scrna_adata.X)
 
     bulk_counts = np.zeros((n_samples, scrna_adata.n_vars), dtype=np.float64)
     proportions = np.zeros((n_samples, n_types), dtype=np.float64)
@@ -265,9 +265,7 @@ def generate_pseudobulk_titration(
     for ct in cell_types:
         type_indices[ct] = np.where(scrna_adata.obs["cell_type"].values == ct)[0]
 
-    X_all = scrna_adata.X
-    if sparse.issparse(X_all):
-        X_all = X_all.toarray()
+    X_all = ensure_dense(scrna_adata.X)
 
     all_counts = []
     all_proportions = []
@@ -429,17 +427,13 @@ def export_for_music(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    X_bulk = adata_bulk.X
-    if hasattr(X_bulk, "toarray"):
-        X_bulk = X_bulk.toarray()
+    X_bulk = ensure_dense(adata_bulk.X)
     bulk_df = pd.DataFrame(
         X_bulk.T, index=adata_bulk.var_names, columns=adata_bulk.obs_names
     )
     bulk_df.to_csv(os.path.join(output_dir, "bulk_counts.csv"))
 
-    X_sc = scrna_adata.X
-    if hasattr(X_sc, "toarray"):
-        X_sc = X_sc.toarray()
+    X_sc = ensure_dense(scrna_adata.X)
     sc_df = pd.DataFrame(
         X_sc.T, index=scrna_adata.var_names, columns=scrna_adata.obs_names
     )
@@ -481,9 +475,7 @@ def export_for_cibersortx(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    X_bulk = adata_bulk.X
-    if hasattr(X_bulk, "toarray"):
-        X_bulk = X_bulk.toarray()
+    X_bulk = ensure_dense(adata_bulk.X)
     col_sums = X_bulk.sum(axis=1, keepdims=True)
     col_sums[col_sums == 0] = 1
     tpm = X_bulk / col_sums * 1e6
@@ -493,9 +485,7 @@ def export_for_cibersortx(
     mixture_df.index.name = "Gene"
     mixture_df.to_csv(os.path.join(output_dir, "mixture.txt"), sep="\t")
 
-    X_sc = scrna_adata.X
-    if hasattr(X_sc, "toarray"):
-        X_sc = X_sc.toarray()
+    X_sc = ensure_dense(scrna_adata.X)
     sc_df = pd.DataFrame(
         X_sc.T, index=scrna_adata.var_names, columns=scrna_adata.obs["cell_type"].values
     )

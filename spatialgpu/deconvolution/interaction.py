@@ -21,6 +21,7 @@ import pandas as pd
 from scipy import sparse, stats
 from scipy.spatial.distance import cdist
 
+from spatialgpu.core.array_utils import ensure_dense
 from spatialgpu.deconvolution._keys import (
     KEY_CCI,
     KEY_COLOCALIZATION,
@@ -315,10 +316,7 @@ def cci_lr_network_score(
     all_needed = np.union1d(l_indices, r_indices)
     for perm_l, perm_r in zip(all_perm_l_indices, all_perm_r_indices):
         all_needed = np.union1d(all_needed, np.union1d(perm_l, perm_r))
-    if sparse.issparse(st_mat):
-        st_sub = st_mat[all_needed, :].toarray()
-    else:
-        st_sub = np.asarray(st_mat[all_needed, :])
+    st_sub = ensure_dense(st_mat[all_needed, :])
     # Build re-index map: original gene index -> position in st_sub
     idx_map = np.empty(st_mat.shape[0], dtype=np.intp)
     idx_map[all_needed] = np.arange(len(all_needed))

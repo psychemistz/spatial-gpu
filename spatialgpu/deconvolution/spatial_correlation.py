@@ -17,7 +17,7 @@ import pandas as pd
 from scipy import sparse
 from scipy.spatial import KDTree
 
-from spatialgpu.core.array_utils import to_dense_float64
+from spatialgpu.core.array_utils import ensure_dense, to_dense_float64
 from spatialgpu.deconvolution._keys import KEY_SPATIAL_CORR, UNS_SPACET
 from spatialgpu.deconvolution.reference import load_lr_database
 
@@ -360,15 +360,11 @@ def _moran_permutation_univariate(
     for p in range(n_perm):
         random_order = rng.permutation(N)
         X_perm = mat[:, random_order]
-        XW = X_perm @ W
-        if sparse.issparse(XW):
-            XW = np.asarray(XW.todense())
+        XW = ensure_dense(X_perm @ W)
         moran_perm[:, p] = np.sum(XW * X_perm, axis=1)
 
     # Observed (last column)
-    XW_obs = mat @ W
-    if sparse.issparse(XW_obs):
-        XW_obs = np.asarray(XW_obs.todense())
+    XW_obs = ensure_dense(mat @ W)
     moran_perm[:, n_perm] = np.sum(XW_obs * mat, axis=1)
 
     return moran_perm
@@ -396,15 +392,11 @@ def _moran_permutation_bivariate(
         X_perm_L = X_perm[l_indices, :]
         X_perm_R = X_perm[r_indices, :]
 
-        XW = X_perm_L @ W
-        if sparse.issparse(XW):
-            XW = np.asarray(XW.todense())
+        XW = ensure_dense(X_perm_L @ W)
         moran_perm[:, p] = np.sum(XW * X_perm_R, axis=1)
 
     # Observed (last column)
-    XW_obs = mat[l_indices, :] @ W
-    if sparse.issparse(XW_obs):
-        XW_obs = np.asarray(XW_obs.todense())
+    XW_obs = ensure_dense(mat[l_indices, :] @ W)
     moran_perm[:, n_perm] = np.sum(XW_obs * mat[r_indices, :], axis=1)
 
     return moran_perm
@@ -502,9 +494,7 @@ def _compute_pairwise_moran(
     gene_names: np.ndarray,
 ) -> pd.DataFrame:
     """Compute pairwise Moran's I matrix: I = (Z @ W @ Z.T) / sum(W)."""
-    XW = mat @ W
-    if sparse.issparse(XW):
-        XW = np.asarray(XW.todense())
+    XW = ensure_dense(mat @ W)
 
     moran_matrix = XW @ mat.T / W_sum
 
