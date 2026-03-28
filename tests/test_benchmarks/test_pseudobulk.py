@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from spatialgpu.benchmarks.pseudobulk import (
+    compare_methods,
     evaluate_deconvolution,
+    export_for_cibersortx,
+    export_for_music,
     generate_pseudobulk_dirichlet,
     generate_pseudobulk_titration,
     generate_semi_synthetic_scrna,
+    import_external_results,
 )
 
 
@@ -251,3 +258,111 @@ class TestEvaluateDeconvolution:
         gt = pd.DataFrame({"A": [0.3, 0.5], "B": [0.7, 0.5]}, index=["S1", "S2"])
         result = evaluate_deconvolution(gt.copy(), gt)
         assert "spearman_rho" in result["overall"]
+
+
+class TestExportForMusic:
+    @pytest.fixture(scope="class")
+    def export_dir(self):
+        scrna = generate_semi_synthetic_scrna(n_cells_per_type=10, seed=42)
+        bulk, gt = generate_pseudobulk_dirichlet(scrna, n_samples=5, seed=42)
+        d = tempfile.mkdtemp()
+        export_for_music(bulk, scrna, d, gt)
+        return d
+
+    def test_bulk_counts_exists(self, export_dir):
+        assert os.path.exists(os.path.join(export_dir, "bulk_counts.csv"))
+
+    def test_sc_counts_exists(self, export_dir):
+        assert os.path.exists(os.path.join(export_dir, "sc_counts.csv"))
+
+    def test_sc_phenodata_exists(self, export_dir):
+        assert os.path.exists(os.path.join(export_dir, "sc_phenodata.csv"))
+
+    def test_ground_truth_exists(self, export_dir):
+        assert os.path.exists(os.path.join(export_dir, "ground_truth.csv"))
+
+    def test_run_music_r_exists(self, export_dir):
+        assert os.path.exists(os.path.join(export_dir, "run_music.R"))
+
+    def test_bulk_counts_shape(self, export_dir):
+        df = pd.read_csv(os.path.join(export_dir, "bulk_counts.csv"), index_col=0)
+        assert df.shape[1] == 5
+
+    def test_sc_phenodata_has_cell_type(self, export_dir):
+        df = pd.read_csv(os.path.join(export_dir, "sc_phenodata.csv"), index_col=0)
+        assert "cell_type" in df.columns
+
+
+class TestExportForCibersortx:
+    @pytest.fixture(scope="class")
+    def export_dir(self):
+        scrna = generate_semi_synthetic_scrna(n_cells_per_type=10, seed=42)
+        bulk, gt = generate_pseudobulk_dirichlet(scrna, n_samples=5, seed=42)
+        d = tempfile.mkdtemp()
+        export_for_cibersortx(bulk, scrna, d, gt)
+        return d
+
+    def test_mixture_txt_exists(self, export_dir):
+        assert os.path.exists(os.path.join(export_dir, "mixture.txt"))
+
+    def test_sc_reference_txt_exists(self, export_dir):
+        assert os.path.exists(os.path.join(export_dir, "sc_reference.txt"))
+
+    def test_readme_exists(self, export_dir):
+        assert os.path.exists(os.path.join(export_dir, "README_cibersortx.txt"))
+
+    def test_mixture_is_tab_delimited(self, export_dir):
+        df = pd.read_csv(os.path.join(export_dir, "mixture.txt"), sep="\t", index_col=0)
+        assert df.shape[0] > 100
+        assert df.shape[1] == 5
+
+
+class TestImportExternalResults:
+    def test_import_music_csv(self, tmp_path):
+        df = pd.DataFrame({"A": [0.3, 0.5], "B": [0.7, 0.5]}, index=["S1", "S2"])
+        path = str(tmp_path / "music_results.csv")
+        df.to_csv(path)
+        result = import_external_results(path, "MuSiC")
+        assert isinstance(result, pd.DataFrame)
+        assert result.shape == (2, 2)
+        np.testing.assert_allclose(result.values, df.values)
+
+    def test_import_cibersortx_tsv(self, tmp_path):
+        df = pd.DataFrame(
+            {
+                "A": [0.3, 0.5],
+                "B": [0.7, 0.5],
+                "P-value": [0.01, 0.02],
+                "Correlation": [0.9, 0.8],
+                "RMSE": [0.1, 0.2],
+            },
+            index=["S1", "S2"],
+        )
+        path = str(tmp_path / "CIBERSORTx_Results.txt")
+        df.to_csv(path, sep="\t")
+        result = import_external_results(path, "CIBERSORTx")
+        assert "A" in result.columns
+        assert "P-value" not in result.columns
+
+
+class TestCompareMethods:
+    def test_returns_summary_and_figure(self):
+        gt = pd.DataFrame(
+            {"A": [0.3, 0.5, 0.2], "B": [0.7, 0.5, 0.8]}, index=["S1", "S2", "S3"]
+        )
+        rng = np.random.RandomState(42)
+        est2 = pd.DataFrame(
+            rng.dirichlet([1, 1], size=3), columns=["A", "B"], index=["S1", "S2", "S3"]
+        )
+        summary, fig = compare_methods({"perfect": gt.copy(), "random": est2}, gt)
+        assert isinstance(summary, pd.DataFrame)
+        assert "perfect" in summary.index
+        assert summary.loc["perfect", "pearson_r"] > summary.loc["random", "pearson_r"]
+        import matplotlib.figure
+
+        assert isinstance(fig, matplotlib.figure.Figure)
+
+    def test_single_method(self):
+        gt = pd.DataFrame({"A": [0.5, 0.5]}, index=["S1", "S2"])
+        summary, fig = compare_methods({"ours": gt.copy()}, gt)
+        assert len(summary) == 1

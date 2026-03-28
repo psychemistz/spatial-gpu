@@ -414,3 +414,171 @@ def evaluate_deconvolution(
         "per_type": per_type,
         "rare_type_mae": rare_mae,
     }
+
+
+def export_for_music(
+    adata_bulk: ad.AnnData,
+    scrna_adata: ad.AnnData,
+    output_dir: str,
+    ground_truth: pd.DataFrame | None = None,
+) -> None:
+    """Export pseudobulk data in MuSiC-compatible format."""
+    import os
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    X_bulk = adata_bulk.X
+    if hasattr(X_bulk, "toarray"):
+        X_bulk = X_bulk.toarray()
+    bulk_df = pd.DataFrame(X_bulk.T, index=adata_bulk.var_names, columns=adata_bulk.obs_names)
+    bulk_df.to_csv(os.path.join(output_dir, "bulk_counts.csv"))
+
+    X_sc = scrna_adata.X
+    if hasattr(X_sc, "toarray"):
+        X_sc = X_sc.toarray()
+    sc_df = pd.DataFrame(X_sc.T, index=scrna_adata.var_names, columns=scrna_adata.obs_names)
+    sc_df.to_csv(os.path.join(output_dir, "sc_counts.csv"))
+
+    pheno = scrna_adata.obs[["cell_type"]].copy()
+    pheno.to_csv(os.path.join(output_dir, "sc_phenodata.csv"))
+
+    if ground_truth is not None:
+        ground_truth.to_csv(os.path.join(output_dir, "ground_truth.csv"))
+
+    r_script = """\
+library(MuSiC)
+library(Biobase)
+bulk_counts <- as.matrix(read.csv("bulk_counts.csv", row.names = 1, check.names = FALSE))
+sc_counts   <- as.matrix(read.csv("sc_counts.csv", row.names = 1, check.names = FALSE))
+sc_pheno    <- read.csv("sc_phenodata.csv", row.names = 1)
+bulk_eset <- ExpressionSet(assayData = bulk_counts)
+sc_pheno_df <- new("AnnotatedDataFrame", data = sc_pheno)
+sc_eset <- ExpressionSet(assayData = sc_counts, phenoData = sc_pheno_df)
+result <- music_prop(bulk.eset = bulk_eset, sc.eset = sc_eset, clusters = "cell_type", verbose = TRUE)
+write.csv(result$Est.prop.weighted, "music_results.csv")
+cat("MuSiC results saved to music_results.csv\\n")
+"""
+    with open(os.path.join(output_dir, "run_music.R"), "w") as f:
+        f.write(r_script)
+
+    logger.info("MuSiC export written to %s", output_dir)
+
+
+def export_for_cibersortx(
+    adata_bulk: ad.AnnData,
+    scrna_adata: ad.AnnData,
+    output_dir: str,
+    ground_truth: pd.DataFrame | None = None,
+) -> None:
+    """Export pseudobulk data in CIBERSORTx-compatible format."""
+    import os
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    X_bulk = adata_bulk.X
+    if hasattr(X_bulk, "toarray"):
+        X_bulk = X_bulk.toarray()
+    col_sums = X_bulk.sum(axis=1, keepdims=True)
+    col_sums[col_sums == 0] = 1
+    tpm = X_bulk / col_sums * 1e6
+    mixture_df = pd.DataFrame(tpm.T, index=adata_bulk.var_names, columns=adata_bulk.obs_names)
+    mixture_df.index.name = "Gene"
+    mixture_df.to_csv(os.path.join(output_dir, "mixture.txt"), sep="\t")
+
+    X_sc = scrna_adata.X
+    if hasattr(X_sc, "toarray"):
+        X_sc = X_sc.toarray()
+    sc_df = pd.DataFrame(X_sc.T, index=scrna_adata.var_names, columns=scrna_adata.obs["cell_type"].values)
+    sc_df.index.name = "Gene"
+    sc_df.to_csv(os.path.join(output_dir, "sc_reference.txt"), sep="\t")
+
+    if ground_truth is not None:
+        ground_truth.to_csv(os.path.join(output_dir, "ground_truth.csv"))
+
+    readme = """\
+CIBERSORTx Export
+=================
+Files:
+  mixture.txt      - TPM-normalized bulk expression (genes x samples, tab-delimited)
+  sc_reference.txt - Single-cell reference (genes x cells, tab-delimited, cell type headers)
+  ground_truth.csv - True cell type proportions
+Steps:
+  1. Go to https://cibersortx.stanford.edu/
+  2. Create account / sign in
+  3. "Create Signature Matrix" -> Upload sc_reference.txt
+  4. "Impute Cell Fractions" -> Upload mixture.txt, select signature from step 3
+  5. Download results CSV
+  6. Use import_external_results("path/to/results.csv", "CIBERSORTx") to load
+"""
+    with open(os.path.join(output_dir, "README_cibersortx.txt"), "w") as f:
+        f.write(readme)
+
+    logger.info("CIBERSORTx export written to %s", output_dir)
+
+
+def import_external_results(results_path: str, tool_name: str) -> pd.DataFrame:
+    """Import deconvolution results from an external tool (MuSiC or CIBERSORTx)."""
+    if tool_name == "CIBERSORTx":
+        df = pd.read_csv(results_path, sep="\t", index_col=0)
+        drop_cols = [c for c in df.columns if c in ("P-value", "Correlation", "RMSE")]
+        df = df.drop(columns=drop_cols, errors="ignore")
+    else:
+        df = pd.read_csv(results_path, index_col=0)
+    return df
+
+
+def compare_methods(
+    results_dict: dict,
+    ground_truth: pd.DataFrame,
+) -> tuple:
+    """Compare multiple deconvolution methods against ground truth.
+
+    Parameters
+    ----------
+    results_dict
+        Mapping of method name to estimated proportions DataFrame.
+    ground_truth
+        True proportions (samples x cell_types).
+
+    Returns
+    -------
+    tuple of (DataFrame, Figure)
+        Summary DataFrame (methods x metrics) and bar chart Figure.
+    """
+    import matplotlib.pyplot as plt
+
+    summaries = []
+    all_per_type = {}
+
+    for method_name, est in results_dict.items():
+        metrics = evaluate_deconvolution(est, ground_truth)
+        row = {
+            "method": method_name,
+            **metrics["overall"],
+            "rare_type_mae": metrics["rare_type_mae"],
+        }
+        summaries.append(row)
+        all_per_type[method_name] = metrics["per_type"]["pearson_r"]
+
+    summary_df = pd.DataFrame(summaries).set_index("method")
+    per_type_df = pd.DataFrame(all_per_type)
+
+    n_types = len(per_type_df)
+    n_methods = len(per_type_df.columns)
+    fig, ax = plt.subplots(figsize=(max(8, n_types * 0.8), 5))
+    x = np.arange(n_types)
+    width = 0.8 / max(n_methods, 1)
+    for i, method in enumerate(per_type_df.columns):
+        offset = (i - n_methods / 2 + 0.5) * width
+        vals = per_type_df[method].fillna(0).values
+        ax.bar(x + offset, vals, width, label=method)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(per_type_df.index, rotation=45, ha="right")
+    ax.set_ylabel("Pearson r")
+    ax.set_title("Per-cell-type accuracy by method")
+    ax.legend()
+    ax.set_ylim(-0.2, 1.1)
+    fig.tight_layout()
+
+    return summary_df, fig
