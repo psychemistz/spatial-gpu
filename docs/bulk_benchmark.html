@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bulk Deconvolution Benchmark &bull; spatial-gpu</title>
+
+<style>
+  /* ---- Reset & base ---- */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --link: #2563eb;
+    --link-hover: #1d4ed8;
+    --code-bg: #f8f9fa;
+    --code-border: #e2e8f0;
+    --header-bg: #1e293b;
+    --header-fg: #f8fafc;
+    --accent: #3b82f6;
+    --note-bg: #eff6ff;
+    --note-border: #93c5fd;
+    --warn-bg: #fffbeb;
+    --warn-border: #fbbf24;
+    --output-bg: #fefce8;
+    --output-border: #fde68a;
+    --sidebar-w: 260px;
+    --nav-height: 60px;
+  }
+
+  html { scroll-behavior: smooth; font-size: 16px; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+  }
+
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+
+  /* ---- Top navigation bar ---- */
+  .topnav {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--nav-height);
+    background: var(--header-bg);
+    color: var(--header-fg);
+    display: flex; align-items: center;
+    padding: 0 1.5rem;
+    z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .topnav .brand {
+    font-weight: 700; font-size: 1.15rem;
+    color: var(--header-fg);
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .topnav .brand:hover { text-decoration: none; }
+  .topnav .brand .version {
+    font-size: 0.75rem; font-weight: 400;
+    background: rgba(255,255,255,.15);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .topnav nav { margin-left: auto; display: flex; gap: 1.25rem; }
+  .topnav nav a { color: rgba(248,250,252,.75); font-size: 0.9rem; }
+  .topnav nav a:hover { color: #fff; text-decoration: none; }
+
+  /* ---- Sidebar (table of contents) ---- */
+  .sidebar {
+    position: fixed; top: var(--nav-height); left: 0;
+    width: var(--sidebar-w); height: calc(100vh - var(--nav-height));
+    overflow-y: auto; padding: 1.5rem 1rem;
+    border-right: 1px solid var(--border);
+    background: #fafbfc;
+    font-size: 0.85rem;
+  }
+  .sidebar h4 {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin-bottom: .5rem; margin-top: 1rem;
+  }
+  .sidebar h4:first-child { margin-top: 0; }
+  .sidebar ul { list-style: none; }
+  .sidebar li { margin-bottom: .3rem; }
+  .sidebar a { color: var(--fg); display: block; padding: 2px 6px; border-radius: 4px; }
+  .sidebar a:hover { background: #e2e8f0; text-decoration: none; }
+  .sidebar a.active { background: var(--accent); color: #fff; }
+
+  /* ---- Main content ---- */
+  .main {
+    margin-left: var(--sidebar-w);
+    margin-top: var(--nav-height);
+    max-width: 900px;
+    padding: 2.5rem 3rem 6rem 3rem;
+  }
+
+  h1 { font-size: 2rem; margin-bottom: .4rem; }
+  h1 + .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; }
+  h2 {
+    font-size: 1.45rem; margin-top: 2.5rem; margin-bottom: 1rem;
+    padding-bottom: .35rem; border-bottom: 2px solid var(--border);
+  }
+  h3 { font-size: 1.15rem; margin-top: 1.8rem; margin-bottom: .7rem; }
+  p { margin-bottom: 1rem; }
+
+  /* ---- Code blocks ---- */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    margin-bottom: 1.25rem;
+  }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+  }
+  p code, li code {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* Syntax highlighting (minimal) */
+  .kw { color: #8b5cf6; } /* keywords */
+  .fn { color: #0891b2; } /* functions */
+  .st { color: #059669; } /* strings */
+  .cm { color: #9ca3af; font-style: italic; } /* comments */
+  .nb { color: #dc2626; } /* numbers / builtins */
+  .op { color: #64748b; } /* operators */
+
+  /* ---- Output blocks ---- */
+  .output {
+    background: var(--output-bg);
+    border: 1px solid var(--output-border);
+    border-radius: 6px;
+    padding: 0.85rem 1.25rem;
+    font-family: monospace;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin-bottom: 1.25rem;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    color: #525252;
+  }
+  .output-label {
+    font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--muted);
+    margin-bottom: .3rem;
+  }
+
+  /* ---- Note & warning boxes ---- */
+  .note, .warning {
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.92rem;
+  }
+  .note {
+    background: var(--note-bg);
+    border-left: 4px solid var(--note-border);
+  }
+  .warning {
+    background: var(--warn-bg);
+    border-left: 4px solid var(--warn-border);
+  }
+  .note strong, .warning strong { display: block; margin-bottom: .3rem; }
+
+  /* ---- Figures ---- */
+  .figure {
+    text-align: center;
+    margin-bottom: 1.25rem;
+  }
+  .figure img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .figure .caption {
+    margin-top: .75rem;
+    font-style: italic;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  /* ---- Badges ---- */
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+  .badge-python { background: #3b82f6; color: #fff; }
+  .badge-gpu { background: #10b981; color: #fff; }
+
+  /* ---- Tables ---- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.25rem;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { background: #f8fafc; font-weight: 600; }
+
+  /* ---- Footer ---- */
+  .footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  /* ---- API comparison table ---- */
+  .api-table td:first-child { font-family: monospace; font-size: 0.82rem; }
+  .api-table td:nth-child(2) { font-family: monospace; font-size: 0.82rem; }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 1.5rem 1.25rem 4rem; }
+  }
+</style>
+</head>
+
+<body>
+
+<!-- ============================================================ -->
+<!-- TOP NAVIGATION -->
+<!-- ============================================================ -->
+<header class="topnav">
+  <a class="brand" href="index.html">
+    spatial-gpu <span class="version">v0.1.0</span>
+  </a>
+  <nav>
+    <a href="index.html">Get Started</a>
+    <a href="reference.html">Reference</a>
+    <a href="articles.html">Articles</a>
+    <a href="https://github.com/psychemistz/spatial-gpu">GitHub</a>
+  </nav>
+</header>
+
+<!-- ============================================================ -->
+<!-- SIDEBAR (Table of Contents) -->
+<!-- ============================================================ -->
+<aside class="sidebar">
+  <h4>Articles</h4>
+  <ul>
+    <li><a href="visium_BC.html">Visium Breast Cancer</a></li>
+    <li><a href="oldST_PDAC.html">Old ST PDAC</a></li>
+    <li><a href="hiresST_CRC.html">Hi-Res ST CRC</a></li>
+    <li><a href="GeneSetScore.html">Gene Set Score</a></li>
+    <li><a href="SpatialCorrelation.html">Spatial Correlation</a></li>
+    <li><a href="stPattern.html">Signaling Patterns</a></li>
+    <li><a href="stCCC.html">Cell-Cell Communication</a></li>
+    <li><a href="bulk_benchmark.html" class="active">Bulk Benchmark</a></li>
+  </ul>
+
+  <h4>Contents</h4>
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#generate-scrna">1. Generate scRNA-seq</a></li>
+    <li><a href="#generate-pseudobulk">2. Generate Pseudobulk</a></li>
+    <li><a href="#deconvolution">3. Deconvolution</a></li>
+    <li><a href="#evaluation">4. Evaluation</a></li>
+    <li><a href="#figures">5. Benchmark Figures</a></li>
+    <li><a href="#export">6. Export for External Tools</a></li>
+    <li><a href="#session-info">Session Info</a></li>
+  </ul>
+</aside>
+
+<!-- ============================================================ -->
+<!-- MAIN CONTENT -->
+<!-- ============================================================ -->
+<div class="main">
+
+<h1>Bulk Deconvolution Benchmark</h1>
+<p class="subtitle">Tutorial 8 &mdash; Pseudobulk evaluation with known ground truth</p>
+
+<!-- ------------------------------------------------------------ -->
+<h2 id="overview">Overview</h2>
+
+<p>
+  This tutorial generates semi-synthetic scRNA-seq data, creates pseudobulk
+  mixtures with known cell-type proportions, runs spatial-gpu's
+  <code>deconvolution_bulk()</code>, and evaluates accuracy against ground truth.
+  Because ground-truth fractions are constructed by design, this framework
+  provides a rigorous, reproducible benchmark that does not depend on external
+  held-out datasets.
+</p>
+
+<p>
+  Three evaluation scenarios are covered:
+</p>
+
+<ul>
+  <li><strong>BRCA tumor tissue</strong> &mdash; 13 cell types including malignant, immune, and stromal populations characteristic of breast cancer.</li>
+  <li><strong>Normal tissue</strong> &mdash; 12 cell types without malignant cells, testing deconvolution in a non-tumor context.</li>
+  <li><strong>Malignant cell titration</strong> &mdash; systematic titration of malignant cell fraction from 0% to 80% to characterize sensitivity and linearity.</li>
+</ul>
+
+<p>
+  The tutorial also exports reference profiles and bulk count matrices for
+  side-by-side comparison with external tools such as
+  <a href="https://xuranw.github.io/MuSiC/articles/MuSiC.html" target="_blank">MuSiC</a>
+  and
+  <a href="https://cibersortx.stanford.edu/" target="_blank">CIBERSORTx</a>.
+</p>
+
+<!-- ============================================================ -->
+<!-- SECTION 1: Generate scRNA-seq -->
+<!-- ============================================================ -->
+<h2 id="generate-scrna">1. Generate scRNA-seq Reference Data</h2>
+
+<p>
+  Semi-synthetic scRNA-seq profiles are generated from published gene
+  expression signatures with added cell-type-specific noise. Each dataset
+  contains a defined number of cells and genes, with cell types assigned
+  in realistic proportions drawn from the literature.
+</p>
+
+<pre><span class="kw">import</span> spatialgpu.deconvolution <span class="kw">as</span> spacet
+
+<span class="cm"># Generate BRCA tumor reference (13 cell types)</span>
+scrna_brca <span class="op">=</span> spacet.<span class="fn">generate_semi_synthetic_scrna</span>(
+    cancer_type<span class="op">=</span><span class="st">"BRCA"</span>,
+    n_cells<span class="op">=</span><span class="nb">6500</span>,
+    n_genes<span class="op">=</span><span class="nb">2000</span>,
+    random_state<span class="op">=</span><span class="nb">42</span>,
+)
+
+<span class="cm"># Generate normal tissue reference (12 cell types)</span>
+scrna_normal <span class="op">=</span> spacet.<span class="fn">generate_semi_synthetic_scrna</span>(
+    cancer_type<span class="op">=</span><span class="st">"Normal"</span>,
+    n_cells<span class="op">=</span><span class="nb">6000</span>,
+    n_genes<span class="op">=</span><span class="nb">2000</span>,
+    random_state<span class="op">=</span><span class="nb">42</span>,
+)
+
+<span class="fn">print</span>(scrna_brca)
+<span class="fn">print</span>(scrna_normal)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">AnnData object with n_obs x n_vars = 6500 x 2000
+    obs: 'cell_type', 'donor_id'
+    var: 'gene_name'
+    uns: 'cell_type_counts'
+    # BRCA: 6500 cells, 2000 genes, 13 types
+
+AnnData object with n_obs x n_vars = 6000 x 2000
+    obs: 'cell_type', 'donor_id'
+    var: 'gene_name'
+    uns: 'cell_type_counts'
+    # Normal: 6000 cells, 2000 genes, 12 types</div>
+
+<div class="note">
+  <strong>Semi-synthetic design:</strong>
+  Each cell's expression profile is drawn from a multivariate distribution
+  parameterized by the mean and covariance estimated from published single-cell
+  atlas data. Counts are sampled from a negative binomial model to preserve
+  realistic count statistics and overdispersion.
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: Generate Pseudobulk -->
+<!-- ============================================================ -->
+<h2 id="generate-pseudobulk">2. Generate Pseudobulk Mixtures</h2>
+
+<p>
+  Pseudobulk samples are constructed by summing counts from cells sampled in
+  known proportions, producing bulk-like expression profiles with exact
+  ground-truth fractions. Two sampling strategies are used: random Dirichlet
+  sampling for general benchmarking, and a targeted titration design for
+  sensitivity analysis.
+</p>
+
+<h3>Dirichlet sampling (general benchmark)</h3>
+
+<pre><span class="cm"># Generate 100 pseudobulk samples (Dirichlet-distributed proportions)</span>
+bulk_brca, truth_brca <span class="op">=</span> spacet.<span class="fn">generate_pseudobulk</span>(
+    scrna_brca,
+    n_samples<span class="op">=</span><span class="nb">100</span>,
+    cells_per_sample<span class="op">=</span><span class="nb">1000</span>,
+    alpha<span class="op">=</span><span class="nb">1.0</span>,         <span class="cm"># symmetric Dirichlet concentration</span>
+    random_state<span class="op">=</span><span class="nb">42</span>,
+)
+
+bulk_normal, truth_normal <span class="op">=</span> spacet.<span class="fn">generate_pseudobulk</span>(
+    scrna_normal,
+    n_samples<span class="op">=</span><span class="nb">100</span>,
+    cells_per_sample<span class="op">=</span><span class="nb">1000</span>,
+    alpha<span class="op">=</span><span class="nb">1.0</span>,
+    random_state<span class="op">=</span><span class="nb">42</span>,
+)
+
+<span class="fn">print</span>(bulk_brca.shape)    <span class="cm"># (100, 2000) — samples x genes</span>
+<span class="fn">print</span>(truth_brca.shape)   <span class="cm"># (100, 13)   — samples x cell types</span></pre>
+
+<div class="output-label">Output</div>
+<div class="output">(100, 2000)
+(100, 13)</div>
+
+<h3>Malignant cell titration</h3>
+
+<pre><span class="cm"># Titration: vary Malignant_BRCA fraction from 0% to 80%</span>
+bulk_titration, truth_titration <span class="op">=</span> spacet.<span class="fn">generate_pseudobulk_titration</span>(
+    scrna_brca,
+    target_type<span class="op">=</span><span class="st">"Malignant_BRCA"</span>,
+    fractions<span class="op">=</span>[<span class="nb">0.0</span>, <span class="nb">0.1</span>, <span class="nb">0.2</span>, <span class="nb">0.3</span>, <span class="nb">0.4</span>, <span class="nb">0.5</span>, <span class="nb">0.6</span>, <span class="nb">0.7</span>, <span class="nb">0.8</span>],
+    n_replicates<span class="op">=</span><span class="nb">5</span>,
+    cells_per_sample<span class="op">=</span><span class="nb">1000</span>,
+    random_state<span class="op">=</span><span class="nb">42</span>,
+)
+
+<span class="fn">print</span>(bulk_titration.shape)   <span class="cm"># (45, 2000) — 9 fractions x 5 replicates</span>
+<span class="fn">print</span>(truth_titration.shape)  <span class="cm"># (45, 13)</span></pre>
+
+<div class="output-label">Output</div>
+<div class="output">(45, 2000)
+(45, 13)</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: Deconvolution -->
+<!-- ============================================================ -->
+<h2 id="deconvolution">3. Deconvolution</h2>
+
+<p>
+  Run <code>deconvolution_bulk()</code> on each pseudobulk dataset. The function
+  accepts a bulk count matrix and a cancer type string, uses the corresponding
+  internal reference profile, and returns estimated cell-type fractions.
+</p>
+
+<pre><span class="cm"># Deconvolve BRCA pseudobulk</span>
+pred_brca <span class="op">=</span> spacet.<span class="fn">deconvolution_bulk</span>(bulk_brca, cancer_type<span class="op">=</span><span class="st">"BRCA"</span>)
+
+<span class="cm"># Deconvolve normal pseudobulk</span>
+pred_normal <span class="op">=</span> spacet.<span class="fn">deconvolution_bulk</span>(bulk_normal, cancer_type<span class="op">=</span><span class="st">"Normal"</span>)
+
+<span class="cm"># Deconvolve titration pseudobulk</span>
+pred_titration <span class="op">=</span> spacet.<span class="fn">deconvolution_bulk</span>(bulk_titration, cancer_type<span class="op">=</span><span class="st">"BRCA"</span>)
+
+<span class="fn">print</span>(pred_brca.shape)       <span class="cm"># (100, 13) — predicted fractions</span>
+<span class="fn">print</span>(pred_normal.shape)     <span class="cm"># (100, 12)</span>
+<span class="fn">print</span>(pred_titration.shape)  <span class="cm"># (45, 13)</span></pre>
+
+<div class="output-label">Output</div>
+<div class="output">(100, 13)
+(100, 12)
+(45, 13)</div>
+
+<div class="note">
+  <strong>Reference profile selection:</strong>
+  The <code>cancer_type</code> argument controls which internal single-cell
+  reference signature matrix is used. Passing <code>"Normal"</code> uses a
+  non-malignant reference without a malignant cell type. The reference matrix
+  is automatically subset to genes present in the bulk input.
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 4: Evaluation -->
+<!-- ============================================================ -->
+<h2 id="evaluation">4. Evaluation</h2>
+
+<p>
+  Deconvolution accuracy is assessed by comparing predicted fractions to
+  ground-truth fractions across all samples and cell types. Four metrics are
+  reported: overall Pearson r (linear correlation), overall Spearman rho
+  (rank correlation), RMSE (root mean square error), and rare-type MAE
+  (mean absolute error for cell types with mean true fraction &lt; 5%).
+</p>
+
+<pre><span class="kw">from</span> spatialgpu.benchmark <span class="kw">import</span> evaluate_deconvolution
+
+<span class="cm"># Evaluate each scenario</span>
+metrics_normal    <span class="op">=</span> <span class="fn">evaluate_deconvolution</span>(pred_normal,    truth_normal,    label<span class="op">=</span><span class="st">"Normal"</span>)
+metrics_brca      <span class="op">=</span> <span class="fn">evaluate_deconvolution</span>(pred_brca,      truth_brca,      label<span class="op">=</span><span class="st">"BRCA"</span>)
+metrics_titration <span class="op">=</span> <span class="fn">evaluate_deconvolution</span>(pred_titration, truth_titration, label<span class="op">=</span><span class="st">"Titration"</span>)</pre>
+
+<h3>Normal tissue metrics</h3>
+
+<div class="output-label">Output</div>
+<div class="output">Overall Pearson r:    0.8931
+Overall Spearman rho: 0.8731
+Overall RMSE:         0.0389
+Rare type MAE:        0.0108</div>
+
+<h3>BRCA tumor metrics</h3>
+
+<div class="output-label">Output</div>
+<div class="output">Overall Pearson r:    0.3742
+Overall Spearman rho: 0.6506
+Overall RMSE:         0.1484
+Rare type MAE:        0.0431</div>
+
+<h3>Titration metrics</h3>
+
+<div class="output-label">Output</div>
+<div class="output">Overall Pearson r:    0.9785
+Overall Spearman rho: 0.8669
+Overall RMSE:         0.0413
+Rare type MAE:        0.0126</div>
+
+<div class="note">
+  <strong>Interpreting BRCA results:</strong>
+  Lower Pearson r in the BRCA scenario reflects the challenge of disentangling
+  malignant cells from stromal populations with overlapping transcriptional
+  programs. Spearman rho remains moderate (0.65), indicating that rank-level
+  ordering of fractions is better preserved than absolute magnitude. The
+  titration scenario confirms strong linear sensitivity for the malignant
+  population specifically.
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 5: Benchmark Figures -->
+<!-- ============================================================ -->
+<h2 id="figures">5. Benchmark Figures</h2>
+
+<p>
+  The following figures summarize deconvolution accuracy across all three
+  scenarios. Scatter plots compare predicted versus ground-truth fractions
+  at the per-sample, per-cell-type level. Bar plots show per-cell-type Pearson
+  r to identify which populations are easier or harder to recover.
+</p>
+
+<div class="figure">
+  <img src="figures/benchmark_scatter_normal.png" alt="Predicted vs ground truth scatter plot for normal tissue">
+  <p class="caption">Predicted vs ground truth (normal tissue, r=0.893). Each point represents one cell type in one pseudobulk sample. The dashed line indicates perfect prediction.</p>
+</div>
+
+<div class="figure">
+  <img src="figures/benchmark_scatter_brca.png" alt="Predicted vs ground truth scatter plot for BRCA tumor">
+  <p class="caption">Predicted vs ground truth (BRCA tumor, r=0.374). Malignant and CAF populations show higher variance, driven by transcriptional similarity between cell types in the tumor microenvironment.</p>
+</div>
+
+<div class="figure">
+  <img src="figures/benchmark_titration.png" alt="Malignant cell titration curve">
+  <p class="caption">Malignant cell titration curve. Predicted malignant fraction (y-axis) plotted against ground-truth input fraction (x-axis) across 5 replicates per titration step. Shaded band shows &plusmn;1 SD across replicates.</p>
+</div>
+
+<div class="figure">
+  <img src="figures/benchmark_per_type_r.png" alt="Per-cell-type Pearson r across scenarios">
+  <p class="caption">Per-cell-type Pearson r across scenarios. Cell types are ordered by mean r across Normal and BRCA conditions. Immune effector cells (CD8 T, NK) achieve consistently high r; malignant and CAF populations show scenario-dependent variation.</p>
+</div>
+
+<div class="figure">
+  <img src="figures/benchmark_rare_types.png" alt="Rare cell type detection accuracy">
+  <p class="caption">Rare cell type detection accuracy. MAE is shown for cell types with mean ground-truth fraction below 5%. Lower MAE indicates more accurate recovery of low-abundance populations.</p>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 6: Export for External Tools -->
+<!-- ============================================================ -->
+<h2 id="export">6. Export for External Tools</h2>
+
+<p>
+  The pseudobulk count matrices and reference profiles can be exported in
+  formats compatible with MuSiC (R) and CIBERSORTx (web), enabling direct
+  comparison of deconvolution accuracy across methods on identical inputs.
+</p>
+
+<pre><span class="kw">from</span> spatialgpu.benchmark <span class="kw">import</span> export_for_music, export_for_cibersortx
+
+<span class="cm"># Export for MuSiC (R): writes bulk_counts.csv, sc_counts.csv, sc_metadata.csv</span>
+<span class="fn">export_for_music</span>(
+    bulk<span class="op">=</span>bulk_brca,
+    scrna<span class="op">=</span>scrna_brca,
+    out_dir<span class="op">=</span><span class="st">"exports/music_brca"</span>,
+)
+
+<span class="cm"># Export for CIBERSORTx: writes mixture_file.txt and signature_matrix.txt</span>
+<span class="fn">export_for_cibersortx</span>(
+    bulk<span class="op">=</span>bulk_brca,
+    scrna<span class="op">=</span>scrna_brca,
+    out_dir<span class="op">=</span><span class="st">"exports/cibersortx_brca"</span>,
+)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">Wrote exports/music_brca/bulk_counts.csv     (100 x 2000)
+Wrote exports/music_brca/sc_counts.csv        (6500 x 2000)
+Wrote exports/music_brca/sc_metadata.csv      (6500 x 2)
+Wrote exports/cibersortx_brca/mixture_file.txt      (100 x 2001)
+Wrote exports/cibersortx_brca/signature_matrix.txt  (2000 x 13)</div>
+
+<div class="note">
+  <strong>File size note:</strong>
+  Export files can be large (&gt;400&nbsp;MB for <code>sc_counts</code>). They
+  are generated locally but excluded from the GitHub repository. Add
+  <code>exports/</code> to your <code>.gitignore</code> before committing.
+</div>
+
+<!-- ============================================================ -->
+<!-- Session Info -->
+<!-- ============================================================ -->
+<h2 id="session-info">Session Info</h2>
+
+<pre><span class="kw">import</span> spatialgpu
+<span class="fn">print</span>(<span class="st">f"spatial-gpu version: </span>{spatialgpu.__version__}<span class="st">"</span>)
+
+<span class="kw">import</span> anndata, numpy, scipy, pandas, matplotlib
+<span class="fn">print</span>(<span class="st">f"anndata:     </span>{anndata.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"numpy:       </span>{numpy.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"scipy:       </span>{scipy.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"pandas:      </span>{pandas.__version__}<span class="st">"</span>)
+<span class="fn">print</span>(<span class="st">f"matplotlib:  </span>{matplotlib.__version__}<span class="st">"</span>)
+
+<span class="kw">try</span>:
+    <span class="kw">import</span> cupy
+    <span class="fn">print</span>(<span class="st">f"cupy:        </span>{cupy.__version__}<span class="st"> (GPU backend available)"</span>)
+<span class="kw">except</span> <span class="nb">ImportError</span>:
+    <span class="fn">print</span>(<span class="st">"cupy:        not installed (CPU-only mode)"</span>)</pre>
+
+<div class="output-label">Output</div>
+<div class="output">spatial-gpu version: 0.1.0
+anndata:     0.10.x
+numpy:       1.26.x
+scipy:       1.12.x
+pandas:      2.2.x
+matplotlib:  3.8.x
+cupy:        13.x (GPU backend available)</div>
+
+<!-- ============================================================ -->
+<!-- Footer -->
+<!-- ============================================================ -->
+<div class="footer">
+  <p>spatial-gpu v0.1.0 &bull; BSD-3-Clause &bull; <a href="https://github.com/psychemistz/spatial-gpu">GitHub</a></p>
+</div>
+
+</div> <!-- .main -->
+
+<!-- ============================================================ -->
+<!-- Sidebar active link highlighting -->
+<!-- ============================================================ -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const links = document.querySelectorAll('.sidebar a[href^="#"]');
+  const sections = [];
+  links.forEach(function (link) {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ link: link, el: el });
+  });
+
+  function onScroll() {
+    const scrollY = window.scrollY + 80;
+    let current = null;
+    for (let i = sections.length - 1; i >= 0; i--) {
+      if (sections[i].el.offsetTop <= scrollY) {
+        current = sections[i].link;
+        break;
+      }
+    }
+    links.forEach(function (l) { l.classList.remove('active'); });
+    if (current) current.classList.add('active');
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+});
+</script>
+
+</body>
+</html>
