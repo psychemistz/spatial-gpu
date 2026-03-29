@@ -1238,6 +1238,7 @@ def _spatial_deconv_python(
     reference = ref["refProfiles"].copy()
     signature = ref["sigGenes"].copy()
     tree = ref["lineageTree"].copy()
+    gene_weights = ref.get("gene_weights")  # None unless cross-subject weighting
 
     # Intersect genes, subset, and CPM-normalize
     ST_cpm, ref_cpm, olp_genes, olp_set = _intersect_and_normalize(
@@ -1246,6 +1247,18 @@ def _spatial_deconv_python(
         reference.copy(),
     )
     reference = reference.loc[olp_genes]
+
+    # Apply cross-subject gene weights (MuSiC-style)
+    if gene_weights is not None:
+        w = gene_weights.reindex(olp_genes, fill_value=1.0).values.astype(np.float64)
+        w_sqrt = np.sqrt(w)  # sqrt so that ||W^{1/2}(Ax - b)||^2 = (Ax-b)^T W (Ax-b)
+        ref_cpm = ref_cpm * w_sqrt[:, np.newaxis]
+        ST_cpm = ST_cpm * w_sqrt[:, np.newaxis]
+        logger.info(
+            "Applied cross-subject gene weights: %d/%d genes weighted.",
+            (w < 0.99).sum(),
+            len(w),
+        )
 
     # Drop NaN spots
     ST_cpm, valid_spots = _remove_nan_spots(ST_cpm, spot_names)

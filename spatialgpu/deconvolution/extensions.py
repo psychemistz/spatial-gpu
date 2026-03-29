@@ -141,6 +141,8 @@ def deconvolution_matched_scrnaseq(
     cancer_type: str | None = None,
     sc_downsampling: bool = True,
     sc_n_cell_each_lineage: int = 100,
+    cross_subject_weighting: bool = False,
+    subject_col: str | None = None,
     n_jobs: int = 1,
 ) -> ad.AnnData:
     """Deconvolve ST data with matched scRNA-seq reference.
@@ -168,6 +170,13 @@ def deconvolution_matched_scrnaseq(
         Whether to downsample cells per type.
     sc_n_cell_each_lineage : int
         Max cells per lineage for downsampling (seed=123).
+    cross_subject_weighting : bool
+        If True, weight genes by inverse cross-subject variance (MuSiC-style).
+        Genes stable across subjects get higher weight, noisy genes get
+        downweighted. Requires ``subject_col``.
+    subject_col : str or None
+        Column name in ``sc_annotation`` containing subject/donor IDs.
+        Required when ``cross_subject_weighting=True``.
     n_jobs : int
         Number of parallel jobs.
 
@@ -203,6 +212,30 @@ def deconvolution_matched_scrnaseq(
     # --- Generate reference ---
     logger.info("1. Generate the cell type reference from the matched scRNAseq data.")
     ref = generate_ref(sc_counts, sc_annotation, sc_lineage_tree, n_jobs=n_jobs)
+
+    # --- Cross-subject gene weighting (MuSiC-style) ---
+    gene_weights = None
+    if cross_subject_weighting:
+        if subject_col is None:
+            raise ValueError(
+                "subject_col is required when cross_subject_weighting=True."
+            )
+        if subject_col not in sc_annotation.columns:
+            raise ValueError(
+                f"subject_col='{subject_col}' not found in sc_annotation. "
+                f"Available columns: {list(sc_annotation.columns)}"
+            )
+        logger.info("   Computing cross-subject gene weights...")
+        gene_weights = _compute_cross_subject_weights(
+            sc_counts, sc_annotation, subject_col
+        )
+        logger.info(
+            "   Gene weights: %d genes, median=%.4f, mean=%.4f",
+            len(gene_weights),
+            np.median(gene_weights.values),
+            np.mean(gene_weights.values),
+        )
+        ref["gene_weights"] = gene_weights
 
     # --- Get ST counts ---
     logger.info("2. Hierarchically deconvolve the Spatial Transcriptomics dataset.")
@@ -812,6 +845,120 @@ def _merge_and_store_results(
     adata.uns[UNS_SPACET][KEY_DECONV] = deconv
     adata.uns[UNS_SPACET][KEY_PROPMAT_COLS] = list(prop_mat_merged.index)
     adata.obsm[OBSM_SPACET_PROPMAT] = prop_mat_merged.T.reindex(adata.obs_names).values
+
+
+# ---------------------------------------------------------------------------
+# Cross-subject gene weighting (MuSiC-style)
+# ---------------------------------------------------------------------------
+
+
+def _compute_cross_subject_weights(
+    sc_counts: pd.DataFrame,
+    sc_annotation: pd.DataFrame,
+    subject_col: str,
+) -> pd.Series:
+    """Compute per-gene weights from cross-subject variance.
+
+    Implements the MuSiC weighting scheme (Wang et al. 2019, Nature Comms):
+    for each gene and cell type, decompose variance into within-subject
+    (biological) and between-subject (technical/batch) components. Genes
+    with low between-subject variance relative to within-subject variance
+    are more informative for deconvolution.
+
+    Weight_g = 1 / (1 + var_between_g / (var_within_g + eps))
+
+    Averaged across cell types. Returns values in (0, 1].
+
+    Parameters
+    ----------
+    sc_counts : pd.DataFrame
+        scRNA-seq count matrix (genes x cells).
+    sc_annotation : pd.DataFrame
+        Must have 'cellID', 'cellType', and ``subject_col`` columns.
+    subject_col : str
+        Column name for subject/donor ID.
+
+    Returns
+    -------
+    pd.Series
+        Per-gene weights indexed by gene name.
+    """
+    gene_names = np.array(sc_counts.index)
+    n_genes = len(gene_names)
+
+    # CPM normalize
+    counts_dense = to_dense_float64(sc_counts.values)
+    col_sums = counts_dense.sum(axis=0)
+    col_sums[col_sums == 0] = 1.0
+    expr = counts_dense / col_sums[np.newaxis, :] * 1e5
+
+    # Map cell IDs to annotation
+    ann = sc_annotation.set_index("cellID")
+    cell_ids = np.array(sc_counts.columns)
+    cell_types = ann.loc[cell_ids, COL_CELLTYPE].values.astype(str)
+    subjects = ann.loc[cell_ids, subject_col].values.astype(str)
+
+    unique_types = np.unique(cell_types)
+    eps = 1e-10
+
+    # Accumulate weights across cell types
+    weight_sum = np.zeros(n_genes, dtype=np.float64)
+    n_contributing = np.zeros(n_genes, dtype=np.float64)
+
+    for ct in unique_types:
+        ct_mask = cell_types == ct
+        ct_expr = expr[:, ct_mask]  # (n_genes, n_cells_of_type)
+        ct_subjects = subjects[ct_mask]
+        unique_subjects = np.unique(ct_subjects)
+
+        if len(unique_subjects) < 2:
+            # Can't compute between-subject variance with 1 subject
+            continue
+
+        # Per-subject means for this cell type
+        subject_means = np.zeros((n_genes, len(unique_subjects)), dtype=np.float64)
+        subject_counts = np.zeros(len(unique_subjects), dtype=np.float64)
+
+        for s_idx, subj in enumerate(unique_subjects):
+            s_mask = ct_subjects == subj
+            n_cells_s = s_mask.sum()
+            if n_cells_s == 0:
+                continue
+            subject_means[:, s_idx] = ct_expr[:, s_mask].mean(axis=1)
+            subject_counts[s_idx] = n_cells_s
+
+        # Between-subject variance: variance of subject means
+        var_between = np.var(subject_means, axis=1, ddof=1)
+
+        # Within-subject variance: mean of per-subject variances
+        var_within = np.zeros(n_genes, dtype=np.float64)
+        n_subj_with_data = 0
+        for subj in unique_subjects:
+            s_mask = ct_subjects == subj
+            if s_mask.sum() < 2:
+                continue
+            var_within += np.var(ct_expr[:, s_mask], axis=1, ddof=1)
+            n_subj_with_data += 1
+
+        if n_subj_with_data > 0:
+            var_within /= n_subj_with_data
+
+        # Weight: high when between-subject variance is low relative to within
+        w = 1.0 / (1.0 + var_between / (var_within + eps))
+
+        weight_sum += w
+        n_contributing += 1.0
+
+    # Average across cell types
+    n_contributing = np.maximum(n_contributing, 1.0)
+    gene_weights = weight_sum / n_contributing
+
+    # Normalize to [0, 1] range
+    max_w = gene_weights.max()
+    if max_w > 0:
+        gene_weights = gene_weights / max_w
+
+    return pd.Series(gene_weights, index=gene_names)
 
 
 # ---------------------------------------------------------------------------
