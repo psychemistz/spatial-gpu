@@ -1,9 +1,12 @@
-"""Tutorial 8b — Bulk Deconvolution Benchmark with Real BRCA scRNA-seq.
+"""Tutorial 8b — Fair Bulk Deconvolution Benchmark: SpaCET vs MuSiC.
 
 Uses Wu et al. 2021 (Nature Genetics, GSE176078) real BRCA single-cell
-RNA-seq data to generate pseudobulk with known proportions. Tests
-deconvolution accuracy with real malignant cells carrying actual CNA
-expression patterns.
+RNA-seq data. Splits by SUBJECT into reference (train) and pseudobulk (test)
+sets so neither method sees the cells that generated the bulk mixtures.
+
+SpaCET uses deconvolution_matched_scrnaseq with the train-set reference.
+MuSiC uses the same train-set scRNA-seq as its reference.
+Pseudobulk is generated from test-set cells only.
 
 Requires: data/BRCA_scRNA/BRCA_scRNA_full.h5ad (from slurm_download_brca_scrna.sh)
 
@@ -25,6 +28,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import scanpy as sc  # noqa: E402
 from scipy import sparse  # noqa: E402
+from scipy.stats import pearsonr, spearmanr  # noqa: E402
 
 FIGURES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "figures")
 OUTPUTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
@@ -46,63 +50,54 @@ def write_output(name, text):
     print(f"  Output saved: {path}")
 
 
-# Wu et al. -> SpaCET Level 1 mapping (many-to-one for evaluation)
-# SpaCET deconvolution outputs fine-grained types; we collapse both
-# ground truth and predictions to these matched categories.
-WU_TO_SPACET = {
+# Wu et al. -> collapsed category mapping for evaluation
+WU_TO_EVAL = {
     "Cancer Epithelial": "Malignant",
     "CAFs": "CAF",
     "Endothelial": "Endothelial",
-    "T-cells": "T_cells",  # collapsed: T CD4 + T CD8
+    "T-cells": "T_cells",
     "B-cells": "B cell",
     "Plasmablasts": "Plasma",
-    "Myeloid": "Myeloid",  # collapsed: Macrophage + cDC + pDC
+    "Myeloid": "Myeloid",
     "PVL": "PVL",
     "Normal Epithelial": "Normal_Epithelial",
 }
 
-# SpaCET Level 1 types that map to collapsed Wu categories
-SPACET_COLLAPSE = {
-    "T_cells": ["T CD4", "T CD8", "NK"],  # NK often grouped with T in broad
-    "Myeloid": ["Macrophage", "cDC", "pDC"],
+# SpaCET fine types that collapse to Wu broad categories
+SPACET_TO_EVAL = {
+    "T CD4": "T_cells",
+    "T CD8": "T_cells",
+    "NK": "T_cells",
+    "Macrophage": "Myeloid",
+    "cDC": "Myeloid",
+    "pDC": "Myeloid",
+    "Macrophage other": "Myeloid",
+    "CAF": "CAF",
+    "Endothelial": "Endothelial",
+    "B cell": "B cell",
+    "Plasma": "Plasma",
+    "Mast": "Other",
+    "Neutrophil": "Other",
+    "Unidentifiable": "Other",
+    "Malignant": "Malignant",
 }
 
 
-def collapse_spacet_to_wu(prop_mat):
-    """Collapse SpaCET propMat to match Wu et al. broad categories."""
+def collapse_spacet_propmat(prop_mat):
+    """Collapse SpaCET propMat to evaluation categories."""
     result = {}
-    used = set()
-
-    for wu_type, spacet_types in SPACET_COLLAPSE.items():
-        cols = [c for c in spacet_types if c in prop_mat.index]
-        if cols:
-            result[wu_type] = prop_mat.loc[cols].sum(axis=0)
-            used.update(cols)
-
-    # Direct mappings
-    for wu_name, spacet_name in [
-        ("Malignant", "Malignant"),
-        ("CAF", "CAF"),
-        ("Endothelial", "Endothelial"),
-        ("B cell", "B cell"),
-        ("Plasma", "Plasma"),
-    ]:
-        if spacet_name in prop_mat.index:
-            result[wu_name] = prop_mat.loc[spacet_name]
-            used.add(spacet_name)
-
-    # Remaining unmapped types go into "Other"
-    unmapped = [c for c in prop_mat.index if c not in used]
-    if unmapped:
-        result["Other"] = prop_mat.loc[unmapped].sum(axis=0)
-
-    return pd.DataFrame(result).T
+    for spacet_type in prop_mat.index:
+        eval_type = SPACET_TO_EVAL.get(spacet_type, "Other")
+        if eval_type not in result:
+            result[eval_type] = prop_mat.loc[spacet_type].values.copy()
+        else:
+            result[eval_type] += prop_mat.loc[spacet_type].values
+    df = pd.DataFrame(result, index=prop_mat.columns)  # samples x types
+    return df
 
 
-def generate_pseudobulk_real(
-    adata, n_samples, n_cells_per_sample, alpha, seed=42
-):
-    """Generate pseudobulk from real scRNA-seq with Dirichlet proportions."""
+def generate_pseudobulk(adata, n_samples, n_cells_per_sample, alpha, seed=42):
+    """Generate pseudobulk from scRNA-seq with Dirichlet proportions."""
     rng = np.random.RandomState(seed)
     cell_types = sorted(adata.obs["cell_type"].unique())
     n_types = len(cell_types)
@@ -111,15 +106,11 @@ def generate_pseudobulk_real(
         ct: np.where(adata.obs["cell_type"].values == ct)[0] for ct in cell_types
     }
 
-    if sparse.issparse(adata.X):
-        X_all = adata.X.toarray()
-    else:
-        X_all = np.asarray(adata.X)
+    X_all = adata.X.toarray() if sparse.issparse(adata.X) else np.asarray(adata.X)
 
     bulk_counts = np.zeros((n_samples, adata.n_vars), dtype=np.float64)
     proportions = np.zeros((n_samples, n_types), dtype=np.float64)
-
-    alpha_vec = np.full(n_types, alpha) if isinstance(alpha, (int, float)) else np.array(alpha)
+    alpha_vec = np.full(n_types, alpha)
 
     for i in range(n_samples):
         props = rng.dirichlet(alpha_vec)
@@ -132,7 +123,6 @@ def generate_pseudobulk_real(
                 continue
             idx = rng.choice(type_indices[ct], size=cell_counts[j], replace=True)
             sample_sum += X_all[idx].sum(axis=0)
-
         bulk_counts[i] = sample_sum
 
     import anndata as ad
@@ -142,45 +132,30 @@ def generate_pseudobulk_real(
         obs=pd.DataFrame(index=[f"Bulk_{i:04d}" for i in range(n_samples)]),
         var=pd.DataFrame(index=adata.var_names.copy()),
     )
-
-    ground_truth = pd.DataFrame(
-        proportions, index=adata_bulk.obs_names, columns=cell_types
-    )
-
+    ground_truth = pd.DataFrame(proportions, index=adata_bulk.obs_names, columns=cell_types)
     return adata_bulk, ground_truth
 
 
-def generate_pseudobulk_tumor_realistic(
-    adata, n_samples, n_cells_per_sample, tumor_fractions, seed=42
-):
-    """Generate pseudobulk with realistic tumor purity (60-90% malignant).
-
-    For each sample, the malignant fraction is drawn from tumor_fractions,
-    and the remaining fraction is distributed among non-malignant types
-    via Dirichlet.
-    """
+def generate_pseudobulk_tumor(adata, n_samples, n_cells_per_sample, tumor_fractions, seed=42):
+    """Generate pseudobulk with fixed malignant fraction, Dirichlet for rest."""
     rng = np.random.RandomState(seed)
     cell_types = sorted(adata.obs["cell_type"].unique())
     mal_type = "Cancer Epithelial"
     nonmal_types = [ct for ct in cell_types if ct != mal_type]
-    n_nonmal = len(nonmal_types)
     all_types = [mal_type] + nonmal_types
 
     type_indices = {
         ct: np.where(adata.obs["cell_type"].values == ct)[0] for ct in cell_types
     }
 
-    if sparse.issparse(adata.X):
-        X_all = adata.X.toarray()
-    else:
-        X_all = np.asarray(adata.X)
+    X_all = adata.X.toarray() if sparse.issparse(adata.X) else np.asarray(adata.X)
 
     bulk_counts = np.zeros((n_samples, adata.n_vars), dtype=np.float64)
     proportions = np.zeros((n_samples, len(all_types)), dtype=np.float64)
 
     for i in range(n_samples):
         mal_frac = rng.choice(tumor_fractions)
-        nonmal_props = rng.dirichlet(np.ones(n_nonmal))
+        nonmal_props = rng.dirichlet(np.ones(len(nonmal_types)))
         nonmal_props *= 1 - mal_frac
 
         props = np.zeros(len(all_types))
@@ -189,14 +164,12 @@ def generate_pseudobulk_tumor_realistic(
         proportions[i] = props
 
         cell_counts = rng.multinomial(n_cells_per_sample, props)
-
         sample_sum = np.zeros(adata.n_vars, dtype=np.float64)
         for j, ct in enumerate(all_types):
             if cell_counts[j] == 0:
                 continue
             idx = rng.choice(type_indices[ct], size=cell_counts[j], replace=True)
             sample_sum += X_all[idx].sum(axis=0)
-
         bulk_counts[i] = sample_sum
 
     import anndata as ad
@@ -206,28 +179,20 @@ def generate_pseudobulk_tumor_realistic(
         obs=pd.DataFrame(index=[f"Bulk_{i:04d}" for i in range(n_samples)]),
         var=pd.DataFrame(index=adata.var_names.copy()),
     )
-
-    ground_truth = pd.DataFrame(
-        proportions, index=adata_bulk.obs_names, columns=all_types
-    )
-
+    ground_truth = pd.DataFrame(proportions, index=adata_bulk.obs_names, columns=all_types)
     return adata_bulk, ground_truth
 
 
 def evaluate(est_df, gt_df, label):
-    """Evaluate deconvolution accuracy."""
-    from scipy.stats import pearsonr, spearmanr
-
-    # Align columns
+    """Evaluate deconvolution accuracy. Returns (r, rho, rmse)."""
     common = sorted(set(est_df.columns) & set(gt_df.columns))
     if not common:
-        print(f"   WARNING: No common types between estimation and ground truth!")
-        print(f"   Est types: {list(est_df.columns)}")
-        print(f"   GT types: {list(gt_df.columns)}")
-        return ""
+        print(f"   WARNING [{label}]: No common types!")
+        return np.nan, np.nan, np.nan
 
+    gt_aligned = gt_df.reindex(est_df.index)[common]
     est = est_df[common].values.ravel()
-    gt = gt_df[common].values.ravel()
+    gt = gt_aligned.values.ravel()
 
     r, _ = pearsonr(est, gt)
     rho, _ = spearmanr(est, gt)
@@ -240,335 +205,274 @@ def evaluate(est_df, gt_df, label):
         "",
         "Per-cell-type:",
     ]
-
-    per_type = []
     for ct in common:
-        e = est_df[ct].values
-        g = gt_df[ct].values
-        ct_r, _ = pearsonr(e, g)
-        ct_rmse = np.sqrt(np.mean((e - g) ** 2))
-        per_type.append({"cell_type": ct, "pearson_r": ct_r, "rmse": ct_rmse, "n": len(e)})
+        ct_r, _ = pearsonr(est_df[ct].values, gt_aligned[ct].values)
+        ct_rmse = np.sqrt(np.mean((est_df[ct].values - gt_aligned[ct].values) ** 2))
+        lines.append(f"  {ct:25s}  r={ct_r:.4f}  RMSE={ct_rmse:.4f}")
 
-    per_type_df = pd.DataFrame(per_type).set_index("cell_type")
-    lines.append(per_type_df.to_string())
-
-    result = "\n".join(lines)
-    write_output(f"t8_real_{label}.txt", result)
+    write_output(f"t8_real_{label}.txt", "\n".join(lines))
     print(f"   {label}: r={r:.4f}, rho={rho:.4f}, RMSE={rmse:.4f}")
-    return result
+    return r, rho, rmse
 
 
 def main():
     import spatialgpu.deconvolution as spacet
-    from spatialgpu.benchmarks.pseudobulk import _LEVEL1_TYPES, _collapse_to_level1
 
-    print("=== Tutorial 8b: Real BRCA Pseudobulk Benchmark ===\n")
+    print("=== Tutorial 8b: Fair BRCA Benchmark (Subject-Split) ===\n")
 
-    # ---- Step 1: Load real BRCA scRNA-seq ----
+    # ---- Step 1: Load data ----
     print("1. Loading Wu et al. 2021 BRCA scRNA-seq...")
     data_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "data", "BRCA_scRNA", "BRCA_scRNA_full.h5ad",
     )
     adata_sc = sc.read_h5ad(data_path)
-    # Standardize cell type column (full h5ad uses 'celltype_major')
     if "celltype_major" in adata_sc.obs.columns and "cell_type" not in adata_sc.obs.columns:
         adata_sc.obs["cell_type"] = adata_sc.obs["celltype_major"]
     print(f"   {adata_sc.n_obs} cells x {adata_sc.n_vars} genes")
-    print(f"   Cell types:")
-    for ct, n in adata_sc.obs["cell_type"].value_counts().items():
-        print(f"     {ct}: {n}")
+    print(f"   Subjects: {adata_sc.obs['orig.ident'].nunique()}")
 
-    # ---- Step 2: Scenario A — Uniform Dirichlet (diverse ratios) ----
-    print("\n2. Scenario A: Uniform Dirichlet (alpha=1.0, 200 samples)...")
-    bulk_a, gt_a = generate_pseudobulk_real(
-        adata_sc, n_samples=200, n_cells_per_sample=2000, alpha=1.0, seed=42
+    # ---- Step 2: Subject-level train/test split ----
+    print("\n2. Splitting by subject (50/50)...")
+    subjects = sorted(adata_sc.obs["orig.ident"].unique())
+    rng = np.random.RandomState(42)
+    rng.shuffle(subjects)
+    mid = len(subjects) // 2
+    train_subjects = subjects[:mid]
+    test_subjects = subjects[mid:]
+
+    train_mask = adata_sc.obs["orig.ident"].isin(train_subjects)
+    test_mask = adata_sc.obs["orig.ident"].isin(test_subjects)
+
+    adata_train = adata_sc[train_mask].copy()
+    adata_test = adata_sc[test_mask].copy()
+
+    print(f"   Train: {adata_train.n_obs} cells, {len(train_subjects)} subjects")
+    print(f"     {adata_train.obs['cell_type'].value_counts().to_dict()}")
+    print(f"   Test:  {adata_test.n_obs} cells, {len(test_subjects)} subjects")
+    print(f"     {adata_test.obs['cell_type'].value_counts().to_dict()}")
+
+    # ---- Step 3: Generate pseudobulk from TEST set only ----
+    print("\n3. Generating pseudobulk from TEST subjects...")
+
+    scenarios = {}
+
+    bulk_a, gt_a = generate_pseudobulk(
+        adata_test, n_samples=200, n_cells_per_sample=2000, alpha=1.0, seed=42
     )
-    print(f"   Pseudobulk: {bulk_a.n_obs} samples x {bulk_a.n_vars} genes")
+    scenarios["uniform"] = (bulk_a, gt_a, "Uniform (alpha=1.0)")
+    print(f"   Uniform: {bulk_a.n_obs} samples")
 
-    # ---- Step 3: Scenario B — Sparse Dirichlet (concentrated ratios) ----
-    print("\n3. Scenario B: Sparse Dirichlet (alpha=0.3, 200 samples)...")
-    bulk_b, gt_b = generate_pseudobulk_real(
-        adata_sc, n_samples=200, n_cells_per_sample=2000, alpha=0.3, seed=43
+    bulk_b, gt_b = generate_pseudobulk(
+        adata_test, n_samples=200, n_cells_per_sample=2000, alpha=0.3, seed=43
     )
+    scenarios["sparse"] = (bulk_b, gt_b, "Sparse (alpha=0.3)")
+    print(f"   Sparse: {bulk_b.n_obs} samples")
 
-    # ---- Step 4: Scenario C — Realistic tumor purity (60-90%) ----
-    print("\n4. Scenario C: Realistic tumor purity (60-90%, 200 samples)...")
-    tumor_fracs = [0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]
-    bulk_c, gt_c = generate_pseudobulk_tumor_realistic(
-        adata_sc, n_samples=200, n_cells_per_sample=2000,
-        tumor_fractions=tumor_fracs, seed=44
+    bulk_c, gt_c = generate_pseudobulk_tumor(
+        adata_test, n_samples=200, n_cells_per_sample=2000,
+        tumor_fractions=[0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9], seed=44
     )
+    scenarios["tumor_purity"] = (bulk_c, gt_c, "Tumor Purity (60-90%)")
+    print(f"   Tumor purity: {bulk_c.n_obs} samples")
 
-    # ---- Step 5: Scenario D — Titration of malignant cells ----
-    print("\n5. Scenario D: Malignant titration (0-90%, 10 replicates)...")
-    titration_fracs = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    bulk_d, gt_d = generate_pseudobulk_tumor_realistic(
-        adata_sc, n_samples=len(titration_fracs) * 10, n_cells_per_sample=2000,
-        tumor_fractions=titration_fracs, seed=45
+    bulk_d, gt_d = generate_pseudobulk_tumor(
+        adata_test, n_samples=100, n_cells_per_sample=2000,
+        tumor_fractions=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], seed=45
     )
+    scenarios["titration"] = (bulk_d, gt_d, "Titration (0-90%)")
+    print(f"   Titration: {bulk_d.n_obs} samples")
 
-    # ---- Step 5b: Export for MuSiC (R) ----
-    print("\n5b. Exporting data for MuSiC (R)...")
+    # ---- Step 4: Export for MuSiC (uses TRAIN set as reference) ----
+    print("\n4. Exporting TRAIN set for MuSiC (R)...")
 
-    # Export scRNA-seq reference (subsample to keep file size manageable)
+    # Subsample train set for manageable export
     rng_export = np.random.RandomState(99)
-    max_cells = 3000  # 3K cells max for MuSiC reference
-    if adata_sc.n_obs > max_cells:
-        sub_idx = []
-        for ct in adata_sc.obs["cell_type"].unique():
-            ct_idx = np.where(adata_sc.obs["cell_type"].values == ct)[0]
-            n = min(max_cells // adata_sc.obs["cell_type"].nunique(), len(ct_idx))
-            sub_idx.extend(rng_export.choice(ct_idx, n, replace=False))
-        sc_export = adata_sc[sorted(sub_idx)].copy()
-    else:
-        sc_export = adata_sc
+    max_per_type = 500
+    sub_idx = []
+    for ct in adata_train.obs["cell_type"].unique():
+        ct_idx = np.where(adata_train.obs["cell_type"].values == ct)[0]
+        n = min(max_per_type, len(ct_idx))
+        sub_idx.extend(rng_export.choice(ct_idx, n, replace=False))
+    train_export = adata_train[sorted(sub_idx)].copy()
 
-    # scRNA-seq counts (genes x cells CSV)
-    if sparse.issparse(sc_export.X):
-        sc_dense = sc_export.X.toarray()
-    else:
-        sc_dense = np.asarray(sc_export.X)
-    sc_df = pd.DataFrame(
-        sc_dense.T,  # genes x cells
-        index=sc_export.var_names,
-        columns=sc_export.obs_names,
-    )
+    # scRNA-seq counts (genes x cells)
+    sc_dense = train_export.X.toarray() if sparse.issparse(train_export.X) else np.asarray(train_export.X)
+    sc_df = pd.DataFrame(sc_dense.T, index=train_export.var_names, columns=train_export.obs_names)
     sc_df.to_csv(os.path.join(OUTPUTS_DIR, "t8_real_sc_counts.csv"))
 
-    # scRNA-seq metadata
     sc_meta = pd.DataFrame({
-        "cell_type": sc_export.obs["cell_type"].values,
-        "subject_id": sc_export.obs["orig.ident"].values,
-    }, index=sc_export.obs_names)
+        "cell_type": train_export.obs["cell_type"].values,
+        "subject_id": train_export.obs["orig.ident"].values,
+    }, index=train_export.obs_names)
     sc_meta.to_csv(os.path.join(OUTPUTS_DIR, "t8_real_sc_meta.csv"))
-    print(f"   Exported scRNA-seq: {sc_export.n_obs} cells, {sc_export.obs['orig.ident'].nunique()} subjects")
+    print(f"   Exported: {train_export.n_obs} cells, {train_export.obs['orig.ident'].nunique()} subjects")
 
-    # Export pseudobulk counts (samples x genes CSV) + ground truth
-    for label, bulk, gt in [
-        ("uniform", bulk_a, gt_a),
-        ("sparse", bulk_b, gt_b),
-        ("tumor_purity", bulk_c, gt_c),
-        ("titration", bulk_d, gt_d),
-    ]:
-        if sparse.issparse(bulk.X):
-            bulk_dense = bulk.X.toarray()
-        else:
-            bulk_dense = np.asarray(bulk.X)
-        bulk_df = pd.DataFrame(bulk_dense, index=bulk.obs_names, columns=bulk.var_names)
-        bulk_df.to_csv(os.path.join(OUTPUTS_DIR, f"t8_real_bulk_{label}.csv"))
+    # Export pseudobulk + ground truth
+    for label, (bulk, gt, _) in scenarios.items():
+        bulk_dense = bulk.X.toarray() if sparse.issparse(bulk.X) else np.asarray(bulk.X)
+        pd.DataFrame(bulk_dense, index=bulk.obs_names, columns=bulk.var_names).to_csv(
+            os.path.join(OUTPUTS_DIR, f"t8_real_bulk_{label}.csv")
+        )
         gt.to_csv(os.path.join(OUTPUTS_DIR, f"t8_real_gt_{label}.csv"))
+    print("   Exported 4 scenarios")
 
-    print("   Exported 4 scenarios (bulk counts + ground truth)")
-    print("   Run: Rscript scripts/run_music_benchmark.R")
+    # ---- Step 5: SpaCET deconvolution with matched scRNA-seq (TRAIN set) ----
+    print("\n5. SpaCET deconvolution (matched scRNA-seq from TRAIN set)...")
 
-    # ---- Step 6: Run deconvolution ----
-    print("\n6. Running deconvolution...")
-    for label, bulk in [("A", bulk_a), ("B", bulk_b), ("C", bulk_c), ("D", bulk_d)]:
-        print(f"   Scenario {label}...")
-        spacet.deconvolution_bulk(bulk, cancer_type="BRCA")
+    # Build reference inputs for deconvolution_matched_scrnaseq
+    train_counts_df = pd.DataFrame(
+        adata_train.X.toarray() if sparse.issparse(adata_train.X) else np.asarray(adata_train.X),
+        index=adata_train.obs_names,
+        columns=adata_train.var_names,
+    ).T  # genes x cells
 
-    # ---- Step 7: Evaluate ----
-    print("\n7. Evaluating accuracy...")
+    train_annotation = pd.DataFrame({
+        "cellID": adata_train.obs_names,
+        "cellType": adata_train.obs["cell_type"].values,
+    })
 
-    for label, bulk, gt in [
-        ("uniform", bulk_a, gt_a),
-        ("sparse", bulk_b, gt_b),
-        ("tumor_purity", bulk_c, gt_c),
-        ("titration", bulk_d, gt_d),
-    ]:
-        pm = bulk.uns["deconv"]["propMat"]
-        # Collapse SpaCET output to match Wu broad categories
-        est_collapsed = collapse_spacet_to_wu(pm).T  # samples x types
+    # Build lineage tree from Wu cell types
+    lineage_tree = {
+        "Cancer Epithelial": ["Cancer Epithelial"],
+        "CAFs": ["CAFs"],
+        "Endothelial": ["Endothelial"],
+        "T-cells": ["T-cells"],
+        "B-cells": ["B-cells"],
+        "Plasmablasts": ["Plasmablasts"],
+        "Myeloid": ["Myeloid"],
+        "PVL": ["PVL"],
+        "Normal Epithelial": ["Normal Epithelial"],
+    }
 
-        # Collapse ground truth Wu types using same mapping
-        gt_renamed = gt.rename(columns=WU_TO_SPACET)
-        # Aggregate columns with same target name
-        gt_collapsed = gt_renamed.T.groupby(level=0).sum().T
+    spacet_results = {}
+    for label, (bulk, gt, desc) in scenarios.items():
+        print(f"   {desc}...")
+        try:
+            spacet.deconvolution_matched_scrnaseq(
+                bulk,
+                sc_counts=train_counts_df,
+                sc_annotation=train_annotation,
+                sc_lineage_tree=lineage_tree,
+                sc_include_malignant=True,
+                sc_downsampling=True,
+                sc_n_cell_each_lineage=200,
+            )
+            pm = bulk.uns["spacet"]["deconvolution"]["propMat"]
+            # Collapse to evaluation categories
+            est = pm.T.rename(columns=WU_TO_EVAL)
+            est = est.T.groupby(level=0).sum().T
+            spacet_results[label] = est
+        except Exception as e:
+            print(f"   ERROR in {label}: {e}")
+            spacet_results[label] = None
 
-        evaluate(est_collapsed, gt_collapsed, label)
+    # ---- Step 6: Evaluate SpaCET ----
+    print("\n6. Evaluating SpaCET...")
+    spacet_metrics = {}
+    for label, (_, gt, _) in scenarios.items():
+        est = spacet_results.get(label)
+        if est is None:
+            continue
+        gt_eval = gt.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
+        r, rho, rmse = evaluate(est, gt_eval, f"spacet_{label}")
+        spacet_metrics[label] = {"r": r, "rho": rho, "rmse": rmse}
 
-    # ---- Step 8: Figures ----
-    print("\n8. Generating figures...")
+    # ---- Step 7: Figures ----
+    print("\n7. Generating SpaCET figures...")
 
-    # --- Scatter: Scenario A (uniform) ---
-    pm_a = bulk_a.uns["deconv"]["propMat"]
-    est_a = collapse_spacet_to_wu(pm_a).T
-    gt_a_r = gt_a.rename(columns=WU_TO_SPACET).T.groupby(level=0).sum().T
-    common_a = sorted(set(est_a.columns) & set(gt_a_r.columns))
+    for label, (_, gt, desc) in scenarios.items():
+        est = spacet_results.get(label)
+        if est is None:
+            continue
+        gt_eval = gt.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
+        common = sorted(set(est.columns) & set(gt_eval.columns))
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    colors = plt.cm.tab10(range(len(common_a)))
-    for i, ct in enumerate(common_a):
-        ax.scatter(gt_a_r[ct], est_a[ct], alpha=0.5, s=15, label=ct, color=colors[i])
-    ax.plot([0, 1], [0, 1], "k--", lw=1, alpha=0.5)
-    ax.set_xlabel("Ground Truth Fraction")
-    ax.set_ylabel("Predicted Fraction")
-    ax.set_title("Scenario A: Uniform Dirichlet (Real BRCA)")
-    ax.legend(fontsize=7, loc="upper left", framealpha=0.8)
-    from scipy.stats import pearsonr
-    r_val, _ = pearsonr(est_a[common_a].values.ravel(), gt_a_r[common_a].values.ravel())
-    ax.text(0.95, 0.05, f"r = {r_val:.3f}", transform=ax.transAxes, ha="right", fontsize=12)
-    save(fig, "benchmark_real_brca_scatter_uniform.png")
-
-    # --- Scatter: Scenario C (tumor purity) ---
-    pm_c = bulk_c.uns["deconv"]["propMat"]
-    est_c = collapse_spacet_to_wu(pm_c).T
-    gt_c_r = gt_c.rename(columns=WU_TO_SPACET).T.groupby(level=0).sum().T
-    common_c = sorted(set(est_c.columns) & set(gt_c_r.columns))
-
-    fig, ax = plt.subplots(figsize=(6, 6))
-    for i, ct in enumerate(common_c):
-        ax.scatter(gt_c_r[ct], est_c[ct], alpha=0.5, s=15, label=ct, color=colors[i % len(colors)])
-    ax.plot([0, 1], [0, 1], "k--", lw=1, alpha=0.5)
-    ax.set_xlabel("Ground Truth Fraction")
-    ax.set_ylabel("Predicted Fraction")
-    ax.set_title("Scenario C: Realistic Tumor Purity (60-90%)")
-    ax.legend(fontsize=7, loc="upper left", framealpha=0.8)
-    r_val_c, _ = pearsonr(est_c[common_c].values.ravel(), gt_c_r[common_c].values.ravel())
-    ax.text(0.95, 0.05, f"r = {r_val_c:.3f}", transform=ax.transAxes, ha="right", fontsize=12)
-    save(fig, "benchmark_real_brca_scatter_tumor.png")
-
-    # --- Titration curve ---
-    pm_d = bulk_d.uns["deconv"]["propMat"]
-    est_d = collapse_spacet_to_wu(pm_d).T
-    gt_d_r = gt_d.rename(columns=WU_TO_SPACET).T.groupby(level=0).sum().T
-
-    if "Malignant" in est_d.columns and "Malignant" in gt_d_r.columns:
-        fig, ax = plt.subplots(figsize=(6, 5))
-        ax.scatter(gt_d_r["Malignant"], est_d["Malignant"], alpha=0.6, s=20, c="#e74c3c")
+        fig, ax = plt.subplots(figsize=(6, 6))
+        colors = plt.cm.tab10(range(len(common)))
+        for i, ct in enumerate(common):
+            ax.scatter(gt_eval[ct], est[ct], alpha=0.5, s=15, label=ct, color=colors[i])
         ax.plot([0, 1], [0, 1], "k--", lw=1, alpha=0.5)
-        ax.set_xlabel("True Malignant Fraction")
-        ax.set_ylabel("Predicted Malignant Fraction")
-        ax.set_title("Malignant Cell Titration (Real BRCA)")
-        r_titr, _ = pearsonr(gt_d_r["Malignant"], est_d["Malignant"])
-        ax.text(0.95, 0.05, f"r = {r_titr:.3f}", transform=ax.transAxes, ha="right", fontsize=12)
-        save(fig, "benchmark_real_brca_titration.png")
+        ax.set_xlabel("Ground Truth Fraction")
+        ax.set_ylabel("Predicted Fraction")
+        ax.set_title(f"SpaCET — {desc}")
+        ax.legend(fontsize=7, loc="upper left", framealpha=0.8)
+        r_val = spacet_metrics.get(label, {}).get("r", 0)
+        ax.text(0.95, 0.05, f"r = {r_val:.3f}", transform=ax.transAxes, ha="right", fontsize=12)
+        save(fig, f"benchmark_real_brca_scatter_{label}.png")
 
-    # --- Per-type r across scenarios ---
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    for ax, (label, bulk, gt) in zip(axes, [
-        ("Uniform", bulk_a, gt_a),
-        ("Sparse", bulk_b, gt_b),
-        ("Tumor Purity", bulk_c, gt_c),
-    ]):
-        pm = bulk.uns["deconv"]["propMat"]
-        est = collapse_spacet_to_wu(pm).T
-        gt_r = gt.rename(columns=WU_TO_SPACET).T.groupby(level=0).sum().T
-        common = sorted(set(est.columns) & set(gt_r.columns))
-
-        rs = []
-        for ct in common:
-            r, _ = pearsonr(est[ct], gt_r[ct])
-            rs.append(r)
-
-        bars = ax.barh(common, rs, color="#3b82f6", alpha=0.8)
-        ax.set_xlim(-0.1, 1.05)
-        ax.set_xlabel("Pearson r")
-        ax.set_title(label)
-        ax.axvline(0, color="k", lw=0.5)
-        for bar, r in zip(bars, rs):
-            ax.text(max(r + 0.02, 0.05), bar.get_y() + bar.get_height() / 2,
-                    f"{r:.2f}", va="center", fontsize=8)
-
-    plt.tight_layout()
-    save(fig, "benchmark_real_brca_per_type.png")
-
-    # ---- Step 9: Compare with MuSiC (if results available) ----
-    print("\n9. Comparing with MuSiC (if available)...")
-    from scipy.stats import pearsonr
-
+    # ---- Step 8: Check MuSiC results ----
+    print("\n8. Checking MuSiC results...")
+    music_metrics = {}
     has_music = False
-    for label, gt in [
-        ("uniform", gt_a),
-        ("sparse", gt_b),
-        ("tumor_purity", gt_c),
-        ("titration", gt_d),
-    ]:
+    for label, (_, gt, desc) in scenarios.items():
         music_file = os.path.join(OUTPUTS_DIR, f"t8_music_{label}.csv")
         if not os.path.exists(music_file):
             continue
         has_music = True
-
         music_props = pd.read_csv(music_file, index_col=0)
-        gt_renamed = gt.rename(columns=WU_TO_SPACET).T.groupby(level=0).sum().T
-        common = sorted(set(music_props.columns) & set(gt_renamed.columns))
-
+        # MuSiC uses Wu cell type names directly
+        gt_eval = gt.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
+        music_eval = music_props.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
+        common = sorted(set(music_eval.columns) & set(gt_eval.columns))
         if common:
-            r_music, _ = pearsonr(
-                music_props[common].values.ravel(),
-                gt_renamed.reindex(music_props.index)[common].values.ravel(),
-            )
-            print(f"   MuSiC {label}: r={r_music:.4f}")
+            r, _ = pearsonr(music_eval[common].values.ravel(), gt_eval.reindex(music_eval.index)[common].values.ravel())
+            rho, _ = spearmanr(music_eval[common].values.ravel(), gt_eval.reindex(music_eval.index)[common].values.ravel())
+            rmse = np.sqrt(np.mean((music_eval[common].values.ravel() - gt_eval.reindex(music_eval.index)[common].values.ravel()) ** 2))
+            music_metrics[label] = {"r": r, "rho": rho, "rmse": rmse}
+            print(f"   MuSiC {label}: r={r:.4f}")
 
     if not has_music:
-        print("   MuSiC results not found. Run: Rscript scripts/run_music_benchmark.R")
+        print("   MuSiC results not found. Run: sbatch scripts/slurm_music_benchmark.sh")
 
-    # ---- Step 10: Combined comparison figure ----
-    if has_music:
-        print("\n10. Generating SpaCET vs MuSiC comparison figure...")
-        spacet_rs = []
-        music_rs = []
-        scenario_labels = []
-
-        for label, bulk, gt in [
-            ("uniform", bulk_a, gt_a),
-            ("sparse", bulk_b, gt_b),
-            ("tumor_purity", bulk_c, gt_c),
-            ("titration", bulk_d, gt_d),
-        ]:
-            music_file = os.path.join(OUTPUTS_DIR, f"t8_music_{label}.csv")
-            if not os.path.exists(music_file):
-                continue
-
-            # SpaCET
-            pm = bulk.uns["deconv"]["propMat"]
-            est_sp = collapse_spacet_to_wu(pm).T
-            gt_r = gt.rename(columns=WU_TO_SPACET).T.groupby(level=0).sum().T
-            common_sp = sorted(set(est_sp.columns) & set(gt_r.columns))
-            r_sp, _ = pearsonr(est_sp[common_sp].values.ravel(), gt_r[common_sp].values.ravel())
-
-            # MuSiC
-            music_props = pd.read_csv(music_file, index_col=0)
-            common_mu = sorted(set(music_props.columns) & set(gt_r.columns))
-            r_mu, _ = pearsonr(
-                music_props[common_mu].values.ravel(),
-                gt_r.reindex(music_props.index)[common_mu].values.ravel(),
-            )
-
-            spacet_rs.append(r_sp)
-            music_rs.append(r_mu)
-            scenario_labels.append(label.replace("_", "\n"))
-
-        if scenario_labels:
+    # ---- Step 9: Comparison figure ----
+    if has_music and spacet_metrics:
+        print("\n9. Generating comparison figure...")
+        common_labels = sorted(set(spacet_metrics) & set(music_metrics))
+        if common_labels:
             fig, ax = plt.subplots(figsize=(8, 5))
-            x = np.arange(len(scenario_labels))
+            x = np.arange(len(common_labels))
             w = 0.35
-            ax.bar(x - w / 2, spacet_rs, w, label="SpaCET (spatial-gpu)", color="#3b82f6")
-            ax.bar(x + w / 2, music_rs, w, label="MuSiC", color="#f97316")
+            sp_rs = [spacet_metrics[l]["r"] for l in common_labels]
+            mu_rs = [music_metrics[l]["r"] for l in common_labels]
+            ax.bar(x - w / 2, sp_rs, w, label="SpaCET (matched scRNA-seq)", color="#3b82f6")
+            ax.bar(x + w / 2, mu_rs, w, label="MuSiC", color="#f97316")
             ax.set_xticks(x)
-            ax.set_xticklabels(scenario_labels)
+            ax.set_xticklabels([scenarios[l][2] for l in common_labels], fontsize=8)
             ax.set_ylabel("Pearson r (overall)")
-            ax.set_title("SpaCET vs MuSiC — Real BRCA Pseudobulk")
+            ax.set_title("SpaCET vs MuSiC — Fair Comparison (Subject-Split)")
             ax.set_ylim(0, 1.05)
             ax.legend()
-            for i, (s, m) in enumerate(zip(spacet_rs, music_rs)):
+            for i, (s, m) in enumerate(zip(sp_rs, mu_rs)):
                 ax.text(i - w / 2, s + 0.02, f"{s:.2f}", ha="center", fontsize=8)
                 ax.text(i + w / 2, m + 0.02, f"{m:.2f}", ha="center", fontsize=8)
-            save(fig, "benchmark_real_brca_spacet_vs_music.png")
+            plt.tight_layout()
+            save(fig, "benchmark_spacet_vs_music.png")
 
-    # Session info
-    print("\n11. Session info...")
+            # Summary table
+            summary = pd.DataFrame([
+                {"Scenario": scenarios[l][2], "SpaCET_r": spacet_metrics[l]["r"], "MuSiC_r": music_metrics[l]["r"]}
+                for l in common_labels
+            ])
+            summary.to_csv(os.path.join(OUTPUTS_DIR, "t8_comparison_summary.csv"), index=False)
+            print("\n" + summary.to_string(index=False))
+
+    # ---- Session info ----
+    print("\n10. Session info...")
     import spatialgpu
+
     session = [
         f"spatial-gpu version: {spatialgpu.__version__}",
         f"Data: Wu et al. 2021 (GSE176078)",
-        f"Cells: {adata_sc.n_obs}",
-        f"Genes: {adata_sc.n_vars}",
-        f"Cell types: {adata_sc.obs['cell_type'].nunique()}",
+        f"Total cells: {adata_sc.n_obs}",
+        f"Train subjects: {train_subjects}",
+        f"Test subjects: {test_subjects}",
+        f"Train cells: {adata_train.n_obs}",
+        f"Test cells: {adata_test.n_obs}",
     ]
     try:
         import cupy
+
         session.append(f"cupy: {cupy.__version__} (GPU)")
     except ImportError:
         session.append("cupy: not installed (CPU)")

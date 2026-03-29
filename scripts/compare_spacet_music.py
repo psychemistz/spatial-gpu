@@ -74,8 +74,10 @@ def main():
     for scenario, label in SCENARIOS:
         gt = load_gt(scenario)
 
-        # SpaCET results
-        spacet_file = os.path.join(OUTPUTS_DIR, f"t8_real_{scenario}.txt")
+        # SpaCET results (try fair-split file first, then original)
+        spacet_file = os.path.join(OUTPUTS_DIR, f"t8_real_spacet_{scenario}.txt")
+        if not os.path.exists(spacet_file):
+            spacet_file = os.path.join(OUTPUTS_DIR, f"t8_real_{scenario}.txt")
         # MuSiC results
         music_file = os.path.join(OUTPUTS_DIR, f"t8_music_{scenario}.csv")
 

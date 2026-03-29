@@ -1,6 +1,8 @@
 spatial-gpu version: 0.1.0
 Data: Wu et al. 2021 (GSE176078)
-Cells: 100064
-Genes: 29733
-Cell types: 9
+Total cells: 100064
+Train subjects: ['CID4066', 'CID4471', 'CID3586', 'CID4530N', 'CID4398', 'CID4067', 'CID4461', 'CID3838', 'CID4523', 'CID3948', 'CID3921', 'CID44041', 'CID4465']
+Test subjects: ['CID3941', 'CID3946', 'CID4515', 'CID4495', 'CID45171', 'CID44971', 'CID4535', 'CID4513', 'CID4040', 'CID4290A', 'CID4463', 'CID44991', 'CID3963']
+Train cells: 46504
+Test cells: 53560
 cupy: 13.6.0 (GPU)
