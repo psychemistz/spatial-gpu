@@ -87,12 +87,19 @@ sp.set_backend("cpu")   # Force CPU
 
 ## Citation
 
+If you use spatial-gpu in your research, please cite:
+
+Beibei Ru, Jinlin Huang, Yu Zhang, Kenneth Aldape, Peng Jiang. Estimation of cell lineages in tumors from spatial transcriptomics data. *Nature Communications* 14, 568 (2023). [Full Text](https://www.nature.com/articles/s41467-023-36062-6)
+
 ```bibtex
-@software{spatialgpu2026,
-  title={spatial-gpu: GPU-accelerated spatial omics analysis},
-  author={spatial-gpu contributors},
-  year={2026},
-  url={https://github.com/psychemistz/spatial-gpu}
+@article{ru2023spacet,
+  title={Estimation of cell lineages in tumors from spatial transcriptomics data},
+  author={Ru, Beibei and Huang, Jinlin and Zhang, Yu and Aldape, Kenneth and Jiang, Peng},
+  journal={Nature Communications},
+  volume={14},
+  pages={568},
+  year={2023},
+  doi={10.1038/s41467-023-36062-6}
 }
 ```
 
