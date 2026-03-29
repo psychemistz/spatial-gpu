@@ -1,0 +1,4 @@
+AnnData object with n_obs × n_vars = 3404 × 33514
+    obs: 'barcode', 'pixel_row', 'pixel_col', 'array_row', 'array_col', 'coordinate_x_um', 'coordinate_y_um', 'UMI', 'Gene'
+    uns: 'spacet_platform', 'spacet'
+    obsm: 'spatial'

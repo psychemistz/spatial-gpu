@@ -1,0 +1,14 @@
+cellType
+Tumor_core        323001
+Tumor_boundary     74800
+Macrophage         19398
+T.alpha.beta       16641
+Endothelial        12262
+Fibroblast          5852
+B                   4888
+Cholangiocyte       1212
+Hepatocyte          1199
+NK                   574
+T.gamma.delta        484
+Erythrocyte          125
+Other                  5

@@ -1,0 +1,4 @@
+AnnData object with n_obs × n_vars = 18288 × 16270
+    obs: 'coordinate_x_um', 'coordinate_y_um'
+    uns: 'spacet', 'spacet_platform'
+    obsm: 'spatial'

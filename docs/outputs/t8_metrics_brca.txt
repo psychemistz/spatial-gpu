@@ -1,0 +1,21 @@
+Overall Pearson r:    0.3742
+Overall Spearman rho: 0.6506
+Overall RMSE:         0.1484
+Rare type MAE:        0.0431
+
+Per-cell-type:
+                pearson_r      rmse  n_samples
+cell_type                                     
+CAF              0.932085  0.031853        100
+Endothelial      0.909964  0.052999        100
+Plasma           0.950740  0.034667        100
+B cell           0.801767  0.066662        100
+T CD4            0.692238  0.086853        100
+T CD8            0.810683  0.065282        100
+NK               0.864406  0.044379        100
+cDC              0.657497  0.086250        100
+pDC              0.906830  0.056530        100
+Macrophage       0.790990  0.062621        100
+Mast             0.833476  0.040767        100
+Neutrophil       0.667801  0.059838        100
+Malignant_BRCA   0.597932  0.493328        100

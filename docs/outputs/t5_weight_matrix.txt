@@ -1,0 +1,2 @@
+Weight matrix shape: (3813, 3813)
+Non-zero entries: 64350

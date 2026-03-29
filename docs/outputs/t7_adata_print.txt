@@ -1,0 +1,4 @@
+AnnData object with n_obs × n_vars = 443515 × 1000
+    obs: 'coordinate_x_um', 'coordinate_y_um', 'cellType', 'niche', 'UMI', 'Gene'
+    uns: 'spacet', 'spacet_platform'
+    obsm: 'spatial'

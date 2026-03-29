@@ -1,0 +1,3 @@
+              p.Moran_I  p.Moran_Z  p.Moran_P  p.Moran_Padj
+TGFB1_TGFBR2   0.085752  17.801563   0.000999      0.001998
+TGFB1_TGFBR1   0.005025   1.052369   0.148851      0.148851

@@ -1,0 +1,14 @@
+                                 cell_type_1  ...   reference_pv
+Malignant_CAF                      Malignant  ...            NaN
+Malignant_Endothelial              Malignant  ...            NaN
+Malignant_Plasma                   Malignant  ...            NaN
+Malignant_B cell                   Malignant  ...            NaN
+Malignant_T CD4                    Malignant  ...            NaN
+...                                      ...  ...            ...
+Macrophage M2_T CD8 exhausted  Macrophage M2  ...   1.565010e-43
+Macrophage M2_cDC1 CLEC9A      Macrophage M2  ...   7.278503e-79
+Macrophage M2_cDC2 CD1C        Macrophage M2  ...  1.582361e-303
+Macrophage M2_cDC3 LAMP3       Macrophage M2  ...   3.009704e-36
+Macrophage M2_Macrophage M1    Macrophage M2  ...   0.000000e+00
+
+[1056 rows x 7 columns]

@@ -1,0 +1,30 @@
+{
+  "Acinar cells": "Acinar cells",
+  "Cancer": [
+    "Cancer clone A",
+    "Cancer clone B"
+  ],
+  "Ductal": [
+    "Ductal - APOL1 high/hypoxic",
+    "Ductal - CRISP3 high/centroacinar like",
+    "Ductal - MHC Class II",
+    "Ductal - terminal ductal like"
+  ],
+  "Endocrine cells": "Endocrine cells",
+  "Endothelial cells": "Endothelial cells",
+  "Fibroblasts": "Fibroblasts",
+  "Macrophage": [
+    "Macrophages A",
+    "Macrophages B"
+  ],
+  "Mast cells": "Mast cells",
+  "Monocytes": "Monocytes",
+  "RBCs": "RBCs",
+  "T cells & NK cells": "T cells & NK cells",
+  "Tuft cells": "Tuft cells",
+  "mDC": [
+    "mDCs A",
+    "mDCs B"
+  ],
+  "pDCs": "pDCs"
+}

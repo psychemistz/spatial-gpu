@@ -1,0 +1,8 @@
+spatial-gpu version: 0.1.0
+numpy: 2.2.6
+pandas: 2.3.3
+matplotlib: 3.10.8
+anndata: 0.12.7
+scipy: 1.16.3
+GPU available: True
+GPU active: True
