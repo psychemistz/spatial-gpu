@@ -58,7 +58,7 @@ Full documentation at **[psychemistz.github.io/spatial-gpu](https://psychemistz.
 | [T5: Spatial Correlation](https://psychemistz.github.io/spatial-gpu/SpatialCorrelation.html) | Moran's I (univariate, bivariate, pairwise) |
 | [T6: Signaling Patterns](https://psychemistz.github.io/spatial-gpu/stPattern.html) | SecAct + NMF patterns + velocity |
 | [T7: Cell-Cell Communication](https://psychemistz.github.io/spatial-gpu/stCCC.html) | Single-cell CCC (CosMx 443K cells) |
-| T8: Bulk Benchmark | Pseudobulk evaluation, MuSiC/CIBERSORTx export |
+| [T8: Bulk Benchmark](https://psychemistz.github.io/spatial-gpu/bulk_benchmark.html) | Pseudobulk evaluation, MuSiC/CIBERSORTx export |
 
 ## GPU Acceleration
 
