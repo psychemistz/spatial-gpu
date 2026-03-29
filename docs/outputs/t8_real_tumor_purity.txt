@@ -1,0 +1,14 @@
+Overall Pearson r:    0.8418
+Overall Spearman rho: 0.6179
+Overall RMSE:         0.1415
+
+Per-cell-type:
+             pearson_r      rmse    n
+cell_type                            
+B cell        0.360779  0.102546  200
+CAF           0.801199  0.031567  200
+Endothelial   0.763536  0.047894  200
+Malignant     0.912449  0.351652  200
+Myeloid       0.864078  0.019426  200
+Plasma        0.802885  0.023848  200
+T_cells       0.726645  0.041777  200

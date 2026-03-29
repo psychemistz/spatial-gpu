@@ -1,0 +1,6 @@
+spatial-gpu version: 0.1.0
+Data: Wu et al. 2021 (GSE176078)
+Cells: 100064
+Genes: 29733
+Cell types: 9
+cupy: 13.6.0 (GPU)
