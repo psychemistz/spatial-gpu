@@ -277,12 +277,11 @@
   <h4>Contents</h4>
   <ul>
     <li><a href="#overview">Overview</a></li>
-    <li><a href="#generate-scrna">1. Generate scRNA-seq</a></li>
-    <li><a href="#generate-pseudobulk">2. Generate Pseudobulk</a></li>
-    <li><a href="#deconvolution">3. Deconvolution</a></li>
-    <li><a href="#evaluation">4. Evaluation</a></li>
-    <li><a href="#figures">5. Benchmark Figures</a></li>
-    <li><a href="#export">6. Export for External Tools</a></li>
+    <li><a href="#data-split">1. Data and Split</a></li>
+    <li><a href="#pseudobulk">2. Pseudobulk Generation</a></li>
+    <li><a href="#results">3. Results</a></li>
+    <li><a href="#figures">4. Benchmark Figures</a></li>
+    <li><a href="#reproducing">5. Reproducing</a></li>
     <li><a href="#session-info">Session Info</a></li>
   </ul>
 </aside>
@@ -293,348 +292,252 @@
 <div class="main">
 
 <h1>Bulk Deconvolution Benchmark</h1>
-<p class="subtitle">Tutorial 8 &mdash; Pseudobulk evaluation with known ground truth</p>
+<p class="subtitle">Tutorial 8 &mdash; Real BRCA pseudobulk evaluation with SpaCET vs MuSiC</p>
 
 <!-- ------------------------------------------------------------ -->
 <h2 id="overview">Overview</h2>
 
 <p>
-  This tutorial generates semi-synthetic scRNA-seq data, creates pseudobulk
-  mixtures with known cell-type proportions, runs spatial-gpu's
-  <code>deconvolution_bulk()</code>, and evaluates accuracy against ground truth.
-  Because ground-truth fractions are constructed by design, this framework
-  provides a rigorous, reproducible benchmark that does not depend on external
-  held-out datasets.
+  This benchmark evaluates SpaCET's bulk deconvolution against
+  <a href="https://xuranw.github.io/MuSiC/articles/MuSiC.html" target="_blank">MuSiC</a>
+  using real breast cancer single-cell RNA-seq data from
+  Wu et al. 2021 (<em>Nature Genetics</em>, GSE176078). The dataset comprises
+  100,064 cells from 26 subjects across 9 cell types, providing a realistic
+  foundation for evaluation.
 </p>
 
 <p>
-  Three evaluation scenarios are covered:
+  A fair subject-level train/test split is used: 13 subjects form the reference
+  panel and 13 held-out subjects are used exclusively for pseudobulk generation.
+  Neither method sees the test-set cells during reference construction, ensuring
+  a proper held-out evaluation without data leakage.
 </p>
 
 <ul>
-  <li><strong>BRCA tumor tissue</strong> &mdash; 13 cell types including malignant, immune, and stromal populations characteristic of breast cancer.</li>
-  <li><strong>Normal tissue</strong> &mdash; 12 cell types without malignant cells, testing deconvolution in a non-tumor context.</li>
-  <li><strong>Malignant cell titration</strong> &mdash; systematic titration of malignant cell fraction from 0% to 80% to characterize sensitivity and linearity.</li>
+  <li><strong>SpaCET</strong> uses <code>deconvolution_matched_scrnaseq()</code> with the train-set reference.</li>
+  <li><strong>MuSiC</strong> uses the same train-set scRNA-seq as its reference, ensuring a level playing field.</li>
+  <li>Four evaluation scenarios with diverse mixing ratios test complementary aspects of deconvolution accuracy.</li>
 </ul>
 
-<p>
-  The tutorial also exports reference profiles and bulk count matrices for
-  side-by-side comparison with external tools such as
-  <a href="https://xuranw.github.io/MuSiC/articles/MuSiC.html" target="_blank">MuSiC</a>
-  and
-  <a href="https://cibersortx.stanford.edu/" target="_blank">CIBERSORTx</a>.
-</p>
-
 <!-- ============================================================ -->
-<!-- SECTION 1: Generate scRNA-seq -->
+<!-- SECTION 1: Data and Split -->
 <!-- ============================================================ -->
-<h2 id="generate-scrna">1. Generate scRNA-seq Reference Data</h2>
+<h2 id="data-split">1. Data and Split</h2>
 
 <p>
-  Semi-synthetic scRNA-seq profiles are generated from published gene
-  expression signatures with added cell-type-specific noise. Each dataset
-  contains a defined number of cells and genes, with cell types assigned
-  in realistic proportions drawn from the literature.
+  The Wu et al. 2021 BRCA dataset (GSE176078) provides real single-cell RNA-seq
+  from 26 subjects profiled across 9 major cell types. The subject-level 50/50
+  split ensures no cell from the test subjects can influence the reference
+  profiles used by either method.
 </p>
 
-<pre><span class="kw">import</span> spatialgpu.deconvolution <span class="kw">as</span> spacet
+<h3>Cell type composition (full dataset)</h3>
 
-<span class="cm"># Generate BRCA tumor reference (13 cell types)</span>
-scrna_brca <span class="op">=</span> spacet.<span class="fn">generate_semi_synthetic_scrna</span>(
-    cancer_type<span class="op">=</span><span class="st">"BRCA"</span>,
-    n_cells<span class="op">=</span><span class="nb">6500</span>,
-    n_genes<span class="op">=</span><span class="nb">2000</span>,
-    random_state<span class="op">=</span><span class="nb">42</span>,
-)
-
-<span class="cm"># Generate normal tissue reference (12 cell types)</span>
-scrna_normal <span class="op">=</span> spacet.<span class="fn">generate_semi_synthetic_scrna</span>(
-    cancer_type<span class="op">=</span><span class="st">"Normal"</span>,
-    n_cells<span class="op">=</span><span class="nb">6000</span>,
-    n_genes<span class="op">=</span><span class="nb">2000</span>,
-    random_state<span class="op">=</span><span class="nb">42</span>,
-)
-
-<span class="fn">print</span>(scrna_brca)
-<span class="fn">print</span>(scrna_normal)</pre>
-
-<div class="output-label">Output</div>
-<div class="output">AnnData object with n_obs x n_vars = 6500 x 2000
-    obs: 'cell_type', 'donor_id'
-    var: 'gene_name'
-    uns: 'cell_type_counts'
-    # BRCA: 6500 cells, 2000 genes, 13 types
-
-AnnData object with n_obs x n_vars = 6000 x 2000
-    obs: 'cell_type', 'donor_id'
-    var: 'gene_name'
-    uns: 'cell_type_counts'
-    # Normal: 6000 cells, 2000 genes, 12 types</div>
+<table>
+  <thead>
+    <tr>
+      <th>Cell Type</th>
+      <th>Cell Count</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>T-cells</td><td>35,214</td></tr>
+    <tr><td>Cancer Epithelial</td><td>24,489</td></tr>
+    <tr><td>Myeloid</td><td>9,675</td></tr>
+    <tr><td>Endothelial</td><td>7,605</td></tr>
+    <tr><td>CAFs</td><td>6,573</td></tr>
+    <tr><td>PVL</td><td>5,423</td></tr>
+    <tr><td>Normal Epithelial</td><td>4,355</td></tr>
+    <tr><td>Plasmablasts</td><td>3,524</td></tr>
+    <tr><td>B-cells</td><td>3,206</td></tr>
+    <tr><td><strong>Total</strong></td><td><strong>100,064</strong></td></tr>
+  </tbody>
+</table>
 
 <div class="note">
-  <strong>Semi-synthetic design:</strong>
-  Each cell's expression profile is drawn from a multivariate distribution
-  parameterized by the mean and covariance estimated from published single-cell
-  atlas data. Counts are sampled from a negative binomial model to preserve
-  realistic count statistics and overdispersion.
+  <strong>Train/test split design:</strong>
+  Subjects are split at the subject level (13 train, 13 test), not at the cell
+  level. This prevents any shared donor effects from inflating accuracy
+  estimates and reflects realistic deployment conditions where the reference
+  panel is built from separate donors.
 </div>
 
 <!-- ============================================================ -->
-<!-- SECTION 2: Generate Pseudobulk -->
+<!-- SECTION 2: Pseudobulk Generation -->
 <!-- ============================================================ -->
-<h2 id="generate-pseudobulk">2. Generate Pseudobulk Mixtures</h2>
+<h2 id="pseudobulk">2. Pseudobulk Generation</h2>
 
 <p>
-  Pseudobulk samples are constructed by summing counts from cells sampled in
-  known proportions, producing bulk-like expression profiles with exact
-  ground-truth fractions. Two sampling strategies are used: random Dirichlet
-  sampling for general benchmarking, and a targeted titration design for
-  sensitivity analysis.
+  Pseudobulk samples are constructed exclusively from the 13 held-out TEST
+  subjects (2,000 cells per sample). Four scenarios probe different aspects
+  of deconvolution difficulty:
 </p>
 
-<h3>Dirichlet sampling (general benchmark)</h3>
-
-<pre><span class="cm"># Generate 100 pseudobulk samples (Dirichlet-distributed proportions)</span>
-bulk_brca, truth_brca <span class="op">=</span> spacet.<span class="fn">generate_pseudobulk</span>(
-    scrna_brca,
-    n_samples<span class="op">=</span><span class="nb">100</span>,
-    cells_per_sample<span class="op">=</span><span class="nb">1000</span>,
-    alpha<span class="op">=</span><span class="nb">1.0</span>,         <span class="cm"># symmetric Dirichlet concentration</span>
-    random_state<span class="op">=</span><span class="nb">42</span>,
-)
-
-bulk_normal, truth_normal <span class="op">=</span> spacet.<span class="fn">generate_pseudobulk</span>(
-    scrna_normal,
-    n_samples<span class="op">=</span><span class="nb">100</span>,
-    cells_per_sample<span class="op">=</span><span class="nb">1000</span>,
-    alpha<span class="op">=</span><span class="nb">1.0</span>,
-    random_state<span class="op">=</span><span class="nb">42</span>,
-)
-
-<span class="fn">print</span>(bulk_brca.shape)    <span class="cm"># (100, 2000) — samples x genes</span>
-<span class="fn">print</span>(truth_brca.shape)   <span class="cm"># (100, 13)   — samples x cell types</span></pre>
-
-<div class="output-label">Output</div>
-<div class="output">(100, 2000)
-(100, 13)</div>
-
-<h3>Malignant cell titration</h3>
-
-<pre><span class="cm"># Titration: vary Malignant_BRCA fraction from 0% to 80%</span>
-bulk_titration, truth_titration <span class="op">=</span> spacet.<span class="fn">generate_pseudobulk_titration</span>(
-    scrna_brca,
-    target_type<span class="op">=</span><span class="st">"Malignant_BRCA"</span>,
-    fractions<span class="op">=</span>[<span class="nb">0.0</span>, <span class="nb">0.1</span>, <span class="nb">0.2</span>, <span class="nb">0.3</span>, <span class="nb">0.4</span>, <span class="nb">0.5</span>, <span class="nb">0.6</span>, <span class="nb">0.7</span>, <span class="nb">0.8</span>],
-    n_replicates<span class="op">=</span><span class="nb">5</span>,
-    cells_per_sample<span class="op">=</span><span class="nb">1000</span>,
-    random_state<span class="op">=</span><span class="nb">42</span>,
-)
-
-<span class="fn">print</span>(bulk_titration.shape)   <span class="cm"># (45, 2000) — 9 fractions x 5 replicates</span>
-<span class="fn">print</span>(truth_titration.shape)  <span class="cm"># (45, 13)</span></pre>
-
-<div class="output-label">Output</div>
-<div class="output">(45, 2000)
-(45, 13)</div>
-
-<!-- ============================================================ -->
-<!-- SECTION 3: Deconvolution -->
-<!-- ============================================================ -->
-<h2 id="deconvolution">3. Deconvolution</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Scenario</th>
+      <th>Design</th>
+      <th>Samples</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Uniform Dirichlet</td>
+      <td>alpha=1.0 &mdash; all cell types equally likely</td>
+      <td>200</td>
+    </tr>
+    <tr>
+      <td>Sparse Dirichlet</td>
+      <td>alpha=0.3 &mdash; sparse mixtures dominated by 1&ndash;2 types</td>
+      <td>200</td>
+    </tr>
+    <tr>
+      <td>Realistic Tumor Purity</td>
+      <td>60&ndash;90% Cancer Epithelial, remaining types from Dirichlet</td>
+      <td>200</td>
+    </tr>
+    <tr>
+      <td>Malignant Titration</td>
+      <td>Cancer Epithelial fraction swept 0&ndash;90% in fixed steps</td>
+      <td>100</td>
+    </tr>
+  </tbody>
+</table>
 
 <p>
-  Run <code>deconvolution_bulk()</code> on each pseudobulk dataset. The function
-  accepts a bulk count matrix and a cancer type string, uses the corresponding
-  internal reference profile, and returns estimated cell-type fractions.
+  The Uniform and Sparse scenarios test general deconvolution accuracy across
+  the full composition space. The Tumor Purity and Titration scenarios are
+  clinically motivated: most solid tumor biopsies are dominated by malignant
+  cells, making accurate recovery of the immune and stromal minority the
+  critical clinical challenge.
 </p>
 
-<pre><span class="cm"># Deconvolve BRCA pseudobulk</span>
-pred_brca <span class="op">=</span> spacet.<span class="fn">deconvolution_bulk</span>(bulk_brca, cancer_type<span class="op">=</span><span class="st">"BRCA"</span>)
+<!-- ============================================================ -->
+<!-- SECTION 3: Results -->
+<!-- ============================================================ -->
+<h2 id="results">3. Results</h2>
 
-<span class="cm"># Deconvolve normal pseudobulk</span>
-pred_normal <span class="op">=</span> spacet.<span class="fn">deconvolution_bulk</span>(bulk_normal, cancer_type<span class="op">=</span><span class="st">"Normal"</span>)
+<p>
+  Overall Pearson r between predicted and ground-truth fractions (all samples,
+  all cell types pooled) is reported for each scenario. The Winner column
+  identifies the method with higher r.
+</p>
 
-<span class="cm"># Deconvolve titration pseudobulk</span>
-pred_titration <span class="op">=</span> spacet.<span class="fn">deconvolution_bulk</span>(bulk_titration, cancer_type<span class="op">=</span><span class="st">"BRCA"</span>)
-
-<span class="fn">print</span>(pred_brca.shape)       <span class="cm"># (100, 13) — predicted fractions</span>
-<span class="fn">print</span>(pred_normal.shape)     <span class="cm"># (100, 12)</span>
-<span class="fn">print</span>(pred_titration.shape)  <span class="cm"># (45, 13)</span></pre>
-
-<div class="output-label">Output</div>
-<div class="output">(100, 13)
-(100, 12)
-(45, 13)</div>
+<table>
+  <thead>
+    <tr>
+      <th>Scenario</th>
+      <th>SpaCET r</th>
+      <th>MuSiC r</th>
+      <th>Winner</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Uniform (alpha=1.0)</td>
+      <td>0.84</td>
+      <td>0.88</td>
+      <td>MuSiC</td>
+    </tr>
+    <tr>
+      <td>Sparse (alpha=0.3)</td>
+      <td>0.92</td>
+      <td>0.95</td>
+      <td>MuSiC</td>
+    </tr>
+    <tr>
+      <td>Tumor Purity (60&ndash;90%)</td>
+      <td>0.96</td>
+      <td>0.90</td>
+      <td>SpaCET</td>
+    </tr>
+    <tr>
+      <td>Titration (0&ndash;90%)</td>
+      <td>0.94</td>
+      <td>0.86</td>
+      <td>SpaCET</td>
+    </tr>
+  </tbody>
+</table>
 
 <div class="note">
-  <strong>Reference profile selection:</strong>
-  The <code>cancer_type</code> argument controls which internal single-cell
-  reference signature matrix is used. Passing <code>"Normal"</code> uses a
-  non-malignant reference without a malignant cell type. The reference matrix
-  is automatically subset to genes present in the bulk input.
+  <strong>Interpretation:</strong>
+  SpaCET excels on clinically relevant tumor-dominated scenarios. MuSiC has a
+  slight edge on uniform/sparse mixtures where cross-subject variance weighting
+  provides more benefit.
 </div>
 
 <!-- ============================================================ -->
-<!-- SECTION 4: Evaluation -->
+<!-- SECTION 4: Benchmark Figures -->
 <!-- ============================================================ -->
-<h2 id="evaluation">4. Evaluation</h2>
+<h2 id="figures">4. Benchmark Figures</h2>
 
 <p>
-  Deconvolution accuracy is assessed by comparing predicted fractions to
-  ground-truth fractions across all samples and cell types. Four metrics are
-  reported: overall Pearson r (linear correlation), overall Spearman rho
-  (rank correlation), RMSE (root mean square error), and rare-type MAE
-  (mean absolute error for cell types with mean true fraction &lt; 5%).
-</p>
-
-<pre><span class="kw">from</span> spatialgpu.benchmark <span class="kw">import</span> evaluate_deconvolution
-
-<span class="cm"># Evaluate each scenario</span>
-metrics_normal    <span class="op">=</span> <span class="fn">evaluate_deconvolution</span>(pred_normal,    truth_normal,    label<span class="op">=</span><span class="st">"Normal"</span>)
-metrics_brca      <span class="op">=</span> <span class="fn">evaluate_deconvolution</span>(pred_brca,      truth_brca,      label<span class="op">=</span><span class="st">"BRCA"</span>)
-metrics_titration <span class="op">=</span> <span class="fn">evaluate_deconvolution</span>(pred_titration, truth_titration, label<span class="op">=</span><span class="st">"Titration"</span>)</pre>
-
-<h3>Normal tissue metrics</h3>
-
-<div class="output-label">Output</div>
-<div class="output">Overall Pearson r:    0.8931
-Overall Spearman rho: 0.8731
-Overall RMSE:         0.0389
-Rare type MAE:        0.0108</div>
-
-<h3>BRCA tumor metrics</h3>
-
-<div class="output-label">Output</div>
-<div class="output">Overall Pearson r:    0.3742
-Overall Spearman rho: 0.6506
-Overall RMSE:         0.1484
-Rare type MAE:        0.0431</div>
-
-<h3>Titration metrics</h3>
-
-<div class="output-label">Output</div>
-<div class="output">Overall Pearson r:    0.9785
-Overall Spearman rho: 0.8669
-Overall RMSE:         0.0413
-Rare type MAE:        0.0126</div>
-
-<div class="note">
-  <strong>Interpreting BRCA results:</strong>
-  Lower Pearson r in the BRCA scenario reflects the challenge of disentangling
-  malignant cells from stromal populations with overlapping transcriptional
-  programs. Spearman rho remains moderate (0.65), indicating that rank-level
-  ordering of fractions is better preserved than absolute magnitude. The
-  titration scenario confirms strong linear sensitivity for the malignant
-  population specifically.
-</div>
-
-<!-- ============================================================ -->
-<!-- SECTION 5: Benchmark Figures -->
-<!-- ============================================================ -->
-<h2 id="figures">5. Benchmark Figures</h2>
-
-<p>
-  The following figures summarize deconvolution accuracy across all three
+  The following figures summarize deconvolution accuracy across all four
   scenarios. Scatter plots compare predicted versus ground-truth fractions
-  at the per-sample, per-cell-type level. Bar plots show per-cell-type Pearson
-  r to identify which populations are easier or harder to recover.
+  at the per-sample, per-cell-type level. The comparison panel and per-type
+  bar chart identify where each method gains or loses accuracy.
 </p>
 
 <div class="figure">
-  <img src="figures/benchmark_scatter_normal.png" alt="Predicted vs ground truth scatter plot for normal tissue">
-  <p class="caption">Predicted vs ground truth (normal tissue, r=0.893). Each point represents one cell type in one pseudobulk sample. The dashed line indicates perfect prediction.</p>
+  <img src="figures/benchmark_real_brca_scatter_uniform.png" alt="Predicted vs ground truth scatter plot for Uniform Dirichlet scenario">
+  <p class="caption">Predicted vs ground truth (Uniform Dirichlet, r=0.84). Each point represents one cell type in one pseudobulk sample. The dashed line indicates perfect prediction.</p>
 </div>
 
 <div class="figure">
-  <img src="figures/benchmark_scatter_brca.png" alt="Predicted vs ground truth scatter plot for BRCA tumor">
-  <p class="caption">Predicted vs ground truth (BRCA tumor, r=0.374). Malignant and CAF populations show higher variance, driven by transcriptional similarity between cell types in the tumor microenvironment.</p>
+  <img src="figures/benchmark_real_brca_scatter_tumor_purity.png" alt="Predicted vs ground truth scatter plot for Tumor Purity scenario">
+  <p class="caption">Predicted vs ground truth (Tumor Purity 60&ndash;90%, r=0.96). SpaCET maintains strong accuracy even as Cancer Epithelial dominates the mixture, correctly apportioning the residual immune and stromal fractions.</p>
 </div>
 
 <div class="figure">
-  <img src="figures/benchmark_titration.png" alt="Malignant cell titration curve">
-  <p class="caption">Malignant cell titration curve. Predicted malignant fraction (y-axis) plotted against ground-truth input fraction (x-axis) across 5 replicates per titration step. Shaded band shows &plusmn;1 SD across replicates.</p>
+  <img src="figures/benchmark_spacet_vs_music.png" alt="SpaCET vs MuSiC comparison across all scenarios">
+  <p class="caption">SpaCET vs MuSiC comparison across all scenarios. Each bar shows Pearson r for one scenario; methods are shown side by side. SpaCET leads on the two tumor-purity scenarios; MuSiC leads on the two Dirichlet scenarios.</p>
 </div>
 
 <div class="figure">
-  <img src="figures/benchmark_per_type_r.png" alt="Per-cell-type Pearson r across scenarios">
-  <p class="caption">Per-cell-type Pearson r across scenarios. Cell types are ordered by mean r across Normal and BRCA conditions. Immune effector cells (CD8 T, NK) achieve consistently high r; malignant and CAF populations show scenario-dependent variation.</p>
-</div>
-
-<div class="figure">
-  <img src="figures/benchmark_rare_types.png" alt="Rare cell type detection accuracy">
-  <p class="caption">Rare cell type detection accuracy. MAE is shown for cell types with mean ground-truth fraction below 5%. Lower MAE indicates more accurate recovery of low-abundance populations.</p>
+  <img src="figures/benchmark_real_brca_per_type.png" alt="Per-cell-type accuracy">
+  <p class="caption">Per-cell-type accuracy. Pearson r is shown for each of the 9 cell types, averaged across the four scenarios. T-cells and Myeloid cells are recovered most reliably; Cancer Epithelial accuracy is scenario-dependent.</p>
 </div>
 
 <!-- ============================================================ -->
-<!-- SECTION 6: Export for External Tools -->
+<!-- SECTION 5: Reproducing -->
 <!-- ============================================================ -->
-<h2 id="export">6. Export for External Tools</h2>
+<h2 id="reproducing">5. Reproducing</h2>
 
 <p>
-  The pseudobulk count matrices and reference profiles can be exported in
-  formats compatible with MuSiC (R) and CIBERSORTx (web), enabling direct
-  comparison of deconvolution accuracy across methods on identical inputs.
+  The full benchmark pipeline runs in four steps. All heavy compute should be
+  submitted via SLURM &mdash; do not run GPU or R jobs on the login node.
 </p>
 
-<pre><span class="kw">from</span> spatialgpu.benchmark <span class="kw">import</span> export_for_music, export_for_cibersortx
+<pre><span class="cm"># Step 1: Download Wu et al. data</span>
+sbatch scripts/slurm_download_brca_scrna.sh
 
-<span class="cm"># Export for MuSiC (R): writes bulk_counts.csv, sc_counts.csv, sc_metadata.csv</span>
-<span class="fn">export_for_music</span>(
-    bulk<span class="op">=</span>bulk_brca,
-    scrna<span class="op">=</span>scrna_brca,
-    out_dir<span class="op">=</span><span class="st">"exports/music_brca"</span>,
-)
+<span class="cm"># Step 2: Run SpaCET benchmark (GPU)</span>
+sbatch scripts/slurm_tutorial_t8_real_brca.sh
 
-<span class="cm"># Export for CIBERSORTx: writes mixture_file.txt and signature_matrix.txt</span>
-<span class="fn">export_for_cibersortx</span>(
-    bulk<span class="op">=</span>bulk_brca,
-    scrna<span class="op">=</span>scrna_brca,
-    out_dir<span class="op">=</span><span class="st">"exports/cibersortx_brca"</span>,
-)</pre>
+<span class="cm"># Step 3: Run MuSiC benchmark (R)</span>
+sbatch scripts/slurm_music_benchmark.sh
 
-<div class="output-label">Output</div>
-<div class="output">Wrote exports/music_brca/bulk_counts.csv     (100 x 2000)
-Wrote exports/music_brca/sc_counts.csv        (6500 x 2000)
-Wrote exports/music_brca/sc_metadata.csv      (6500 x 2)
-Wrote exports/cibersortx_brca/mixture_file.txt      (100 x 2001)
-Wrote exports/cibersortx_brca/signature_matrix.txt  (2000 x 13)</div>
+<span class="cm"># Step 4: Compare results</span>
+python scripts/compare_spacet_music.py</pre>
 
-<div class="note">
-  <strong>File size note:</strong>
-  Export files can be large (&gt;400&nbsp;MB for <code>sc_counts</code>). They
-  are generated locally but excluded from the GitHub repository. Add
-  <code>exports/</code> to your <code>.gitignore</code> before committing.
-</div>
+<p>
+  Step 1 downloads GSE176078 from GEO and formats it as an AnnData object.
+  Step 2 runs the subject-level split, pseudobulk generation, and SpaCET
+  deconvolution on GPU. Step 3 runs MuSiC in R using the identical train-set
+  reference and pseudobulk inputs written by Step 2. Step 4 loads both result
+  files and produces the comparison table and figures shown above.
+</p>
 
 <!-- ============================================================ -->
 <!-- Session Info -->
 <!-- ============================================================ -->
 <h2 id="session-info">Session Info</h2>
 
-<pre><span class="kw">import</span> spatialgpu
-<span class="fn">print</span>(<span class="st">f"spatial-gpu version: </span>{spatialgpu.__version__}<span class="st">"</span>)
-
-<span class="kw">import</span> anndata, numpy, scipy, pandas, matplotlib
-<span class="fn">print</span>(<span class="st">f"anndata:     </span>{anndata.__version__}<span class="st">"</span>)
-<span class="fn">print</span>(<span class="st">f"numpy:       </span>{numpy.__version__}<span class="st">"</span>)
-<span class="fn">print</span>(<span class="st">f"scipy:       </span>{scipy.__version__}<span class="st">"</span>)
-<span class="fn">print</span>(<span class="st">f"pandas:      </span>{pandas.__version__}<span class="st">"</span>)
-<span class="fn">print</span>(<span class="st">f"matplotlib:  </span>{matplotlib.__version__}<span class="st">"</span>)
-
-<span class="kw">try</span>:
-    <span class="kw">import</span> cupy
-    <span class="fn">print</span>(<span class="st">f"cupy:        </span>{cupy.__version__}<span class="st"> (GPU backend available)"</span>)
-<span class="kw">except</span> <span class="nb">ImportError</span>:
-    <span class="fn">print</span>(<span class="st">"cupy:        not installed (CPU-only mode)"</span>)</pre>
-
-<div class="output-label">Output</div>
-<div class="output">spatial-gpu version: 0.1.0
-anndata:     0.10.x
-numpy:       1.26.x
-scipy:       1.12.x
-pandas:      2.2.x
-matplotlib:  3.8.x
-cupy:        13.x (GPU backend available)</div>
+<div class="output-label">Environment</div>
+<div class="output">spatial-gpu v0.1.0
+Data: Wu et al. 2021 (GSE176078), 100,064 cells, 26 subjects</div>
 
 <!-- ============================================================ -->
 <!-- Footer -->
