@@ -298,6 +298,66 @@ def deconvolution_matched_scrnaseq(
     return adata
 
 
+def deconvolution_bulk(
+    adata: ad.AnnData,
+    sc_counts: pd.DataFrame | np.ndarray,
+    sc_annotation: pd.DataFrame,
+    sc_lineage_tree: dict[str, list[str]],
+    sc_include_malignant: bool = True,
+    cancer_type: str | None = None,
+    sc_downsampling: bool = True,
+    sc_n_cell_each_lineage: int = 100,
+    cross_subject_weighting: bool = False,
+    subject_col: str | None = None,
+    n_jobs: int = 1,
+) -> ad.AnnData:
+    """Cell-type deconvolution for bulk RNA-seq using a matched scRNA-seq reference.
+
+    Thin wrapper around :func:`deconvolution_matched_scrnaseq`. Each sample in
+    ``adata`` is treated as an independent mixture; cell-type fractions are
+    solved jointly via hierarchical constrained NNLS against the user-supplied
+    scRNA-seq reference. No malignant-first cascade, no within-cohort purity
+    rescaling — when ``sc_include_malignant=True``, the malignant cluster is
+    deconvolved jointly with non-malignant cell types.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Bulk RNA-seq data. ``X`` = raw counts, ``obs`` = samples, ``var`` = genes.
+    sc_counts, sc_annotation, sc_lineage_tree
+        Matched scRNA-seq reference. See
+        :func:`deconvolution_matched_scrnaseq` for format.
+    sc_include_malignant : bool
+        Whether the scRNA-seq reference already contains malignant cells.
+        Default True. If False, ``cancer_type`` must be provided.
+    cancer_type : str or None
+        Required only when ``sc_include_malignant=False``.
+    sc_downsampling, sc_n_cell_each_lineage
+        Reference downsampling controls.
+    cross_subject_weighting, subject_col
+        MuSiC-style cross-subject gene weighting (optional).
+    n_jobs : int
+        Parallel jobs.
+
+    Returns
+    -------
+    AnnData with results in ``adata.uns['spacet']`` and ``adata.obsm['spacet_propMat']``.
+    """
+    return deconvolution_matched_scrnaseq(
+        adata,
+        sc_counts=sc_counts,
+        sc_annotation=sc_annotation,
+        sc_lineage_tree=sc_lineage_tree,
+        sc_include_malignant=sc_include_malignant,
+        cancer_type=cancer_type,
+        sc_downsampling=sc_downsampling,
+        sc_n_cell_each_lineage=sc_n_cell_each_lineage,
+        cross_subject_weighting=cross_subject_weighting,
+        subject_col=subject_col,
+        n_jobs=n_jobs,
+    )
+
+
 def deconvolution_malignant_custom_scrnaseq(
     adata: ad.AnnData,
     malignant: str = LABEL_MALIGNANT,

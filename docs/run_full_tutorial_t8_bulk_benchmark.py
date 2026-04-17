@@ -1,8 +1,13 @@
-"""Run Tutorial 8 — Bulk Deconvolution Pseudobulk Benchmark.
+"""Run Tutorial 8 — Bulk Deconvolution with Matched scRNA-seq Reference.
 
-Generates semi-synthetic scRNA-seq, creates pseudobulk with known
-proportions, runs deconvolution_bulk, evaluates accuracy, and exports
-data for comparison with MuSiC/CIBERSORTx.
+Generates semi-synthetic scRNA-seq, splits it into TRAIN (deconvolution
+reference) and TEST (pseudobulk source), runs ``deconvolution_bulk`` — a
+thin wrapper around ``deconvolution_matched_scrnaseq`` — on the pseudobulk,
+evaluates accuracy, and exports data for MuSiC/CIBERSORTx comparison.
+
+The train/test split is performed **by cell** with a cell-type-stratified
+shuffle, so no single cell appears in both the reference and the mixtures
+(mirrors the fair-evaluation design of the SpaCET BRCA tutorial).
 
 Usage: python docs/run_full_tutorial_t8_bulk_benchmark.py
 """
@@ -39,6 +44,46 @@ def write_output(name, text):
     print(f"  Output saved: {path}")
 
 
+def _stratified_cell_split(adata, label_col="cell_type", train_frac=0.5, seed=0):
+    """Stratified train/test cell split preserving cell-type balance."""
+    import numpy as np
+
+    rng = np.random.RandomState(seed)
+    train_idx, test_idx = [], []
+    labels = adata.obs[label_col].values
+    for ct in np.unique(labels):
+        idx = np.where(labels == ct)[0]
+        rng.shuffle(idx)
+        cut = int(len(idx) * train_frac)
+        train_idx.extend(idx[:cut].tolist())
+        test_idx.extend(idx[cut:].tolist())
+    return np.array(train_idx), np.array(test_idx)
+
+
+def _adata_to_sc_inputs(adata, label_col="cell_type"):
+    """Convert an scRNA-seq AnnData to (sc_counts_df, sc_annotation, lineage_tree)
+    as expected by ``deconvolution_matched_scrnaseq``.
+    """
+    import numpy as np
+    import pandas as pd
+    from scipy import sparse
+
+    X = adata.X
+    if sparse.issparse(X):
+        X = X.toarray()
+    counts_T = X.T.astype(np.float64)  # genes x cells
+    cell_ids = np.array(adata.obs_names, dtype=object)
+    gene_names = np.array(adata.var_names, dtype=object)
+    sc_counts = pd.DataFrame(counts_T, index=gene_names, columns=cell_ids)
+    sc_annotation = pd.DataFrame(
+        {"cellID": cell_ids, "cellType": adata.obs[label_col].values},
+        index=cell_ids,
+    )
+    cell_types = sorted(adata.obs[label_col].unique().tolist())
+    lineage_tree = {ct: [ct] for ct in cell_types}
+    return sc_counts, sc_annotation, lineage_tree
+
+
 def main():
     import numpy as np
     import pandas as pd
@@ -55,7 +100,7 @@ def main():
         generate_semi_synthetic_scrna,
     )
 
-    print("=== Tutorial 8: Bulk Deconvolution Pseudobulk Benchmark ===\n")
+    print("=== Tutorial 8: Bulk Deconvolution with Matched scRNA-seq ===\n")
 
     # ---- Step 1: Generate semi-synthetic scRNA-seq ----
     print("1. Generating semi-synthetic scRNA-seq...")
@@ -75,22 +120,50 @@ def main():
         f"{scrna_normal.obs['cell_type'].nunique()} types"
     )
 
-    # ---- Step 2: Generate pseudobulk — Dirichlet ----
-    print("\n2. Generating pseudobulk (Dirichlet)...")
+    # ---- Step 2: Stratified train/test split (reference vs pseudobulk source) ----
+    print("\n2. Splitting scRNA-seq into TRAIN (reference) / TEST (pseudobulk)...")
+    brca_train_idx, brca_test_idx = _stratified_cell_split(
+        scrna_brca, train_frac=0.5, seed=0
+    )
+    scrna_brca_train = scrna_brca[brca_train_idx].copy()
+    scrna_brca_test = scrna_brca[brca_test_idx].copy()
+
+    normal_train_idx, normal_test_idx = _stratified_cell_split(
+        scrna_normal, train_frac=0.5, seed=0
+    )
+    scrna_normal_train = scrna_normal[normal_train_idx].copy()
+    scrna_normal_test = scrna_normal[normal_test_idx].copy()
+    print(
+        f"   BRCA train: {scrna_brca_train.n_obs} | test: {scrna_brca_test.n_obs}"
+    )
+    print(
+        f"   Normal train: {scrna_normal_train.n_obs} | "
+        f"test: {scrna_normal_test.n_obs}"
+    )
+
+    sc_brca = _adata_to_sc_inputs(scrna_brca_train)
+    sc_normal = _adata_to_sc_inputs(scrna_normal_train)
+
+    # ---- Step 3: Generate pseudobulk — Dirichlet from TEST cells ----
+    print("\n3. Generating pseudobulk (Dirichlet) from TEST cells...")
     bulk_brca, gt_brca = generate_pseudobulk_dirichlet(
-        scrna_brca, n_samples=100, n_cells_per_sample=1000, alpha=1.0, seed=42
+        scrna_brca_test, n_samples=100, n_cells_per_sample=1000, alpha=1.0, seed=42
     )
     print(f"   BRCA: {bulk_brca.n_obs} samples, {bulk_brca.n_vars} genes")
 
     bulk_normal, gt_normal = generate_pseudobulk_dirichlet(
-        scrna_normal, n_samples=100, n_cells_per_sample=1000, alpha=1.0, seed=42
+        scrna_normal_test,
+        n_samples=100,
+        n_cells_per_sample=1000,
+        alpha=1.0,
+        seed=42,
     )
     print(f"   Normal: {bulk_normal.n_obs} samples, {bulk_normal.n_vars} genes")
 
-    # ---- Step 3: Generate pseudobulk — Titration ----
-    print("\n3. Generating pseudobulk (Titration)...")
+    # ---- Step 4: Generate pseudobulk — Titration ----
+    print("\n4. Generating pseudobulk (Titration) from TEST cells...")
     bulk_titr, gt_titr = generate_pseudobulk_titration(
-        scrna_brca,
+        scrna_brca_test,
         target_type="Malignant_BRCA",
         fractions=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
         n_replicates=5,
@@ -99,35 +172,48 @@ def main():
     )
     print(f"   Titration: {bulk_titr.n_obs} samples")
 
-    # ---- Step 4: Deconvolution — BRCA ----
-    print("\n4. Deconvolution — BRCA (100 samples)...")
-    spacet.deconvolution_bulk(bulk_brca, cancer_type="BRCA")
-    pm_brca = bulk_brca.uns["deconv"]["propMat"]
+    # ---- Step 5: Deconvolution — BRCA (matched scRNA-seq from TRAIN) ----
+    print("\n5. Deconvolution — BRCA (100 samples, matched reference)...")
+    spacet.deconvolution_bulk(
+        bulk_brca,
+        sc_counts=sc_brca[0],
+        sc_annotation=sc_brca[1],
+        sc_lineage_tree=sc_brca[2],
+        sc_include_malignant=True,
+    )
+    pm_brca = bulk_brca.uns["spacet"]["deconvolution"]["propMat"]
     print(f"   propMat: {pm_brca.shape[0]} types x {pm_brca.shape[1]} samples")
 
-    # ---- Step 5: Deconvolution — Normal ----
-    print("\n5. Deconvolution — Normal (100 samples)...")
-    spacet.deconvolution_bulk(bulk_normal, cancer_type="normal")
-    pm_normal = bulk_normal.uns["deconv"]["propMat"]
+    # ---- Step 6: Deconvolution — Normal ----
+    print("\n6. Deconvolution — Normal (100 samples, matched reference)...")
+    spacet.deconvolution_bulk(
+        bulk_normal,
+        sc_counts=sc_normal[0],
+        sc_annotation=sc_normal[1],
+        sc_lineage_tree=sc_normal[2],
+        sc_include_malignant=False,
+    )
+    pm_normal = bulk_normal.uns["spacet"]["deconvolution"]["propMat"]
     print(f"   propMat: {pm_normal.shape[0]} types x {pm_normal.shape[1]} samples")
 
-    # ---- Step 6: Deconvolution — Titration ----
-    print("\n6. Deconvolution — Titration (45 samples)...")
-    spacet.deconvolution_bulk(bulk_titr, cancer_type="BRCA")
-    pm_titr = bulk_titr.uns["deconv"]["propMat"]
+    # ---- Step 7: Deconvolution — Titration ----
+    print("\n7. Deconvolution — Titration (45 samples, matched reference)...")
+    spacet.deconvolution_bulk(
+        bulk_titr,
+        sc_counts=sc_brca[0],
+        sc_annotation=sc_brca[1],
+        sc_lineage_tree=sc_brca[2],
+        sc_include_malignant=True,
+    )
+    pm_titr = bulk_titr.uns["spacet"]["deconvolution"]["propMat"]
     print(f"   propMat: {pm_titr.shape[0]} types x {pm_titr.shape[1]} samples")
 
-    # ---- Step 7: Evaluate accuracy ----
-    print("\n7. Evaluating accuracy...")
+    # ---- Step 8: Evaluate accuracy ----
+    print("\n8. Evaluating accuracy...")
 
-    # Collapse propMat to Level 1, transpose to samples x types
-    est_brca = _collapse_to_level1(pm_brca, _LEVEL1_TYPES + ["Malignant"]).T
-    est_brca = est_brca.rename(columns={"Malignant": "Malignant_BRCA"})
-
+    est_brca = _collapse_to_level1(pm_brca, _LEVEL1_TYPES + ["Malignant_BRCA"]).T
     est_normal = _collapse_to_level1(pm_normal, _LEVEL1_TYPES).T
-
-    est_titr = _collapse_to_level1(pm_titr, _LEVEL1_TYPES + ["Malignant"]).T
-    est_titr = est_titr.rename(columns={"Malignant": "Malignant_BRCA"})
+    est_titr = _collapse_to_level1(pm_titr, _LEVEL1_TYPES + ["Malignant_BRCA"]).T
 
     gt_titr_eval = gt_titr.drop(columns=["target_fraction"], errors="ignore")
 
@@ -162,10 +248,9 @@ def main():
         ]
         write_output(f"t8_metrics_{name}.txt", "\n".join(lines))
 
-    # ---- Step 8: Generate figures ----
-    print("\n8. Generating figures...")
+    # ---- Step 9: Generate figures ----
+    print("\n9. Generating figures...")
 
-    # 8a. Scatter: BRCA
     fig, ax = plt.subplots(figsize=(7, 7))
     common_types = est_brca.columns.intersection(gt_brca.columns)
     colors = plt.cm.tab20(np.linspace(0, 1, len(common_types)))
@@ -185,7 +270,6 @@ def main():
     ax.legend(fontsize=7, loc="upper left", ncol=2)
     save(fig, "benchmark_scatter_brca.png")
 
-    # 8b. Scatter: Normal
     fig, ax = plt.subplots(figsize=(7, 7))
     common_types_n = est_normal.columns.intersection(gt_normal.columns)
     colors_n = plt.cm.tab20(np.linspace(0, 1, len(common_types_n)))
@@ -205,7 +289,6 @@ def main():
     ax.legend(fontsize=7, loc="upper left", ncol=2)
     save(fig, "benchmark_scatter_normal.png")
 
-    # 8c. Per-cell-type Pearson r
     fig, ax = plt.subplots(figsize=(10, 5))
     brca_pt = metrics_brca["per_type"]["pearson_r"].rename("BRCA")
     normal_pt = metrics_normal["per_type"]["pearson_r"].rename("Normal")
@@ -217,7 +300,6 @@ def main():
     fig.tight_layout()
     save(fig, "benchmark_per_type_r.png")
 
-    # 8d. Titration curve
     from scipy.stats import pearsonr
 
     titr_fracs = np.sort(gt_titr["target_fraction"].unique())
@@ -242,7 +324,6 @@ def main():
     fig.tight_layout()
     save(fig, "benchmark_titration.png")
 
-    # 8e. Rare cell type errors
     fig, ax = plt.subplots(figsize=(8, 5))
     rare_errors = {}
     common_brca = est_brca.columns.intersection(gt_brca.columns)
@@ -266,19 +347,19 @@ def main():
     fig.tight_layout()
     save(fig, "benchmark_rare_types.png")
 
-    # ---- Step 9: Export for external tools ----
-    print("\n9. Exporting for external tools...")
+    # ---- Step 10: Export for external tools (reference = TRAIN split) ----
+    print("\n10. Exporting for external tools...")
     music_dir = os.path.join(OUTPUTS_DIR, "t8_export_music")
     cibersortx_dir = os.path.join(OUTPUTS_DIR, "t8_export_cibersortx")
 
-    export_for_music(bulk_brca, scrna_brca, music_dir, gt_brca)
+    export_for_music(bulk_brca, scrna_brca_train, music_dir, gt_brca)
     print(f"   MuSiC export: {music_dir}")
 
-    export_for_cibersortx(bulk_brca, scrna_brca, cibersortx_dir, gt_brca)
+    export_for_cibersortx(bulk_brca, scrna_brca_train, cibersortx_dir, gt_brca)
     print(f"   CIBERSORTx export: {cibersortx_dir}")
 
-    # ---- Step 10: Session info ----
-    print("\n10. Session info...")
+    # ---- Step 11: Session info ----
+    print("\n11. Session info...")
     import spatialgpu
 
     session_lines = [
