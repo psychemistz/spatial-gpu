@@ -17,7 +17,6 @@ from spatialgpu.deconvolution import (
     deconvolution_matched_scrnaseq,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -103,9 +102,7 @@ class TestBulkWrapperContract:
     def test_missing_lineage_tree_raises(self, matched_data):
         adata, sc_counts, sc_ann, _ = matched_data
         with pytest.raises(TypeError):
-            deconvolution_bulk(
-                adata.copy(), sc_counts=sc_counts, sc_annotation=sc_ann
-            )
+            deconvolution_bulk(adata.copy(), sc_counts=sc_counts, sc_annotation=sc_ann)
 
 
 # ---------------------------------------------------------------------------
