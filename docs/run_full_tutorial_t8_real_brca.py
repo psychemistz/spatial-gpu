@@ -530,7 +530,46 @@ def main():
             "   MuSiC results not found. Run: sbatch scripts/slurm_music_benchmark.sh"
         )
 
-    # ---- Step 9: Comparison figure (3 methods) ----
+    # ---- Step 8b: Check DWLS results ----
+    print("\n8b. Checking DWLS results...")
+    dwls_metrics = {}
+    has_dwls = False
+    for label, (_, gt, _desc) in scenarios.items():
+        dwls_file = os.path.join(OUTPUTS_DIR, f"t8_dwls_{label}.csv")
+        if not os.path.exists(dwls_file):
+            continue
+        has_dwls = True
+        dwls_props = pd.read_csv(dwls_file, index_col=0)
+        gt_eval = gt.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
+        dwls_eval = dwls_props.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
+        common = sorted(set(dwls_eval.columns) & set(gt_eval.columns))
+        if common:
+            r, _ = pearsonr(
+                dwls_eval[common].values.ravel(),
+                gt_eval.reindex(dwls_eval.index)[common].values.ravel(),
+            )
+            rho, _ = spearmanr(
+                dwls_eval[common].values.ravel(),
+                gt_eval.reindex(dwls_eval.index)[common].values.ravel(),
+            )
+            rmse = np.sqrt(
+                np.mean(
+                    (
+                        dwls_eval[common].values.ravel()
+                        - gt_eval.reindex(dwls_eval.index)[common].values.ravel()
+                    )
+                    ** 2
+                )
+            )
+            dwls_metrics[label] = {"r": r, "rho": rho, "rmse": rmse}
+            print(f"   DWLS {label}: r={r:.4f}")
+
+    if not has_dwls:
+        print(
+            "   DWLS results not found. Run: sbatch scripts/slurm_dwls_benchmark.sh"
+        )
+
+    # ---- Step 9: Comparison figure (3+ methods) ----
     print("\n9. Generating comparison figure...")
     common_labels = sorted(set(spacet_metrics) & set(spacet_w_metrics))
     if common_labels:
@@ -541,6 +580,9 @@ def main():
         if has_music:
             common_labels = sorted(set(common_labels) & set(music_metrics))
             methods.append(("MuSiC", music_metrics, "#f97316"))
+        if has_dwls:
+            common_labels = sorted(set(common_labels) & set(dwls_metrics))
+            methods.append(("DWLS", dwls_metrics, "#a855f7"))
 
         n_methods = len(methods)
         fig, ax = plt.subplots(figsize=(10, 5))

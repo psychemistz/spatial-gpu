@@ -292,7 +292,7 @@
 <div class="main">
 
 <h1>Bulk Deconvolution Benchmark</h1>
-<p class="subtitle">Tutorial 8 &mdash; Real BRCA pseudobulk evaluation with SpaCET vs MuSiC</p>
+<p class="subtitle">Tutorial 8 &mdash; Real BRCA pseudobulk evaluation with SpaCET vs MuSiC vs DWLS</p>
 
 <!-- ------------------------------------------------------------ -->
 <h2 id="overview">Overview</h2>
@@ -300,10 +300,15 @@
 <p>
   This benchmark evaluates SpaCET's bulk deconvolution against
   <a href="https://xuranw.github.io/MuSiC/articles/MuSiC.html" target="_blank">MuSiC</a>
+  and
+  <a href="https://github.com/dtsoucas/DWLS" target="_blank">DWLS</a>
+  (Tsoucas et al. 2019, <em>Nat Commun</em>)
   using real breast cancer single-cell RNA-seq data from
   Wu et al. 2021 (<em>Nature Genetics</em>, GSE176078). The dataset comprises
   100,064 cells from 26 subjects across 9 cell types, providing a realistic
-  foundation for evaluation.
+  foundation for evaluation. DWLS is included because SpaCET's bulk path
+  borrows its dampened-weighting scheme; the comparison makes that lineage
+  explicit.
 </p>
 
 <p>
@@ -316,6 +321,7 @@
 <ul>
   <li><strong>SpaCET</strong> uses <code>deconvolution_matched_scrnaseq()</code> with the train-set reference.</li>
   <li><strong>MuSiC</strong> uses the same train-set scRNA-seq as its reference, ensuring a level playing field.</li>
+  <li><strong>DWLS</strong> builds a cell-type signature matrix via MAST one-vs-rest DE on the same train-set, then solves dampened weighted least squares per bulk sample.</li>
   <li>Four evaluation scenarios with diverse mixing ratios test complementary aspects of deconvolution accuracy.</li>
 </ul>
 
@@ -430,6 +436,8 @@
       <th>Scenario</th>
       <th>SpaCET r</th>
       <th>MuSiC r</th>
+      <th>DWLS (broad) r</th>
+      <th>DWLS (minor) r</th>
       <th>Winner</th>
     </tr>
   </thead>
@@ -438,24 +446,32 @@
       <td>Uniform (alpha=1.0)</td>
       <td>0.84</td>
       <td>0.88</td>
+      <td>0.69</td>
+      <td>0.72</td>
       <td>MuSiC</td>
     </tr>
     <tr>
       <td>Sparse (alpha=0.3)</td>
       <td>0.92</td>
       <td>0.95</td>
+      <td>0.83</td>
+      <td>0.86</td>
       <td>MuSiC</td>
     </tr>
     <tr>
       <td>Tumor Purity (60&ndash;90%)</td>
       <td>0.96</td>
       <td>0.90</td>
+      <td>0.81</td>
+      <td>0.87</td>
       <td>SpaCET</td>
     </tr>
     <tr>
       <td>Titration (0&ndash;90%)</td>
-      <td>0.94</td>
+      <td>0.93</td>
       <td>0.86</td>
+      <td>0.68</td>
+      <td>0.74</td>
       <td>SpaCET</td>
     </tr>
   </tbody>
@@ -465,7 +481,17 @@
   <strong>Interpretation:</strong>
   SpaCET excels on clinically relevant tumor-dominated scenarios. MuSiC has a
   slight edge on uniform/sparse mixtures where cross-subject variance weighting
-  provides more benefit.
+  provides more benefit. DWLS trails both methods across all scenarios.
+  Resolution is part of the story &mdash; SpaCET models subtypes internally via
+  its lineage tree (T&nbsp;CD4/CD8, Macrophage/Monocyte/DCs, etc.) and collapses
+  only at evaluation, while broad-resolution DWLS operates end-to-end at the
+  9-major-type resolution. Building the DWLS signature at
+  celltype_minor (22 subtypes) and collapsing to major at evaluation
+  closes most of the gap on the tumor-dominated scenarios (+0.06 on both
+  tumor&nbsp;purity and titration) but only narrows it on uniform/sparse
+  (+0.02&ndash;0.03). The residual gap to MuSiC and SpaCET is
+  methodological: DWLS lacks cross-subject variance weighting (MuSiC) and
+  the lineage-consistent deconvolution prior (SpaCET).
 </div>
 
 <!-- ============================================================ -->
@@ -491,8 +517,8 @@
 </div>
 
 <div class="figure">
-  <img src="figures/benchmark_spacet_vs_music.png" alt="SpaCET vs MuSiC comparison across all scenarios">
-  <p class="caption">SpaCET vs MuSiC comparison across all scenarios. Each bar shows Pearson r for one scenario; methods are shown side by side. SpaCET leads on the two tumor-purity scenarios; MuSiC leads on the two Dirichlet scenarios.</p>
+  <img src="figures/benchmark_spacet_vs_music.png" alt="SpaCET vs MuSiC vs DWLS (broad) vs DWLS (minor) comparison across all scenarios">
+  <p class="caption">Four-method comparison across all scenarios (Pearson r, overall). SpaCET leads on the two tumor-dominated scenarios; MuSiC leads on the two Dirichlet scenarios. DWLS (broad, 9 major types) trails across all four. DWLS (minor, 22 subtypes collapsed to 9 majors at evaluation) closes most of the gap on the tumor-dominated scenarios and narrows it modestly on uniform/sparse, but still trails SpaCET and MuSiC.</p>
 </div>
 
 <div class="figure">
@@ -519,15 +545,20 @@ sbatch scripts/slurm_tutorial_t8_real_brca.sh
 <span class="cm"># Step 3: Run MuSiC benchmark (R)</span>
 sbatch scripts/slurm_music_benchmark.sh
 
-<span class="cm"># Step 4: Compare results</span>
-python scripts/compare_spacet_music.py</pre>
+<span class="cm"># Step 4: Run DWLS benchmark (R, slow: ~2.5 h for MAST signature + per-sample WLS)</span>
+sbatch scripts/slurm_dwls_benchmark.sh
+
+<span class="cm"># Step 5: Regenerate comparison figure + summary table</span>
+python scripts/regenerate_dwls_figure.py</pre>
 
 <p>
   Step 1 downloads GSE176078 from GEO and formats it as an AnnData object.
   Step 2 runs the subject-level split, pseudobulk generation, and SpaCET
   deconvolution on GPU. Step 3 runs MuSiC in R using the identical train-set
-  reference and pseudobulk inputs written by Step 2. Step 4 loads both result
-  files and produces the comparison table and figures shown above.
+  reference and pseudobulk inputs written by Step 2. Step 4 builds a DWLS
+  MAST signature matrix from the same train-set and solves dampened weighted
+  least squares per bulk sample. Step 5 combines the three external methods
+  with SpaCET into the comparison table and bar chart shown above.
 </p>
 
 <!-- ============================================================ -->
