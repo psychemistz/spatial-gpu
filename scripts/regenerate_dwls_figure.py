@@ -14,30 +14,16 @@ Standalone — does not rerun SpaCET (no GPU needed).
 
 import json
 import os
+import sys
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from scipy.stats import pearsonr
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-WU_TO_EVAL = {
-    "Cancer Epithelial": "Malignant",
-    "CAFs": "CAF",
-    "Endothelial": "Endothelial",
-    "T-cells": "T_cells",
-    "B-cells": "B cell",
-    "Plasmablasts": "Plasma",
-    "Myeloid": "Myeloid",
-    "PVL": "PVL",
-    "Normal Epithelial": "Normal_Epithelial",
-}
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from _t8_common import SCENARIOS, compute_method_r  # noqa: E402
 
-SCENARIO_DESC = {
-    "uniform": "Uniform (alpha=1.0)",
-    "sparse": "Sparse (alpha=0.3)",
-    "tumor_purity": "Tumor Purity (60-90%)",
-    "titration": "Titration (0-90%)",
-}
+SCENARIO_DESC = dict(SCENARIOS)
 
 DOCS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "docs"))
 OUTPUTS_DIR = os.path.join(DOCS_DIR, "outputs")
@@ -46,18 +32,8 @@ MINOR_TO_MAJOR_PATH = os.path.join(OUTPUTS_DIR, "t8_minor_to_major.json")
 os.makedirs(FIGURES_DIR, exist_ok=True)
 
 
-def remap_and_collapse(df: pd.DataFrame) -> pd.DataFrame:
-    return df.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
-
-
 def compute_r_against_gt(pred: pd.DataFrame, gt: pd.DataFrame) -> float:
-    pred_e = remap_and_collapse(pred)
-    gt_e = remap_and_collapse(gt)
-    common = sorted(set(pred_e.columns) & set(gt_e.columns))
-    est = pred_e[common].values.ravel()
-    truth = gt_e.reindex(pred_e.index)[common].values.ravel()
-    r, _ = pearsonr(est, truth)
-    return r
+    return compute_method_r(pred, gt)["r"]
 
 
 def compute_dwls_broad_r() -> dict[str, float]:

@@ -25,24 +25,7 @@ echo "Rscript: $(which Rscript)"
 ls docs/outputs/t8_real_sc_counts.csv || { echo "ERROR: Run tutorial t8 real BRCA first."; exit 1; }
 ls docs/outputs/t8_real_bulk_uniform.csv || { echo "ERROR: Run tutorial t8 real BRCA first."; exit 1; }
 
-# Install DWLS + MAST (idempotent)
-Rscript -e "
-if (!requireNamespace('BiocManager', quietly=TRUE)) install.packages('BiocManager', repos='https://cloud.r-project.org/')
-if (!requireNamespace('MAST', quietly=TRUE)) BiocManager::install('MAST', ask=FALSE, update=FALSE)
-if (!requireNamespace('DWLS', quietly=TRUE)) {
-  tryCatch(
-    install.packages('DWLS', repos='https://cloud.r-project.org/'),
-    error = function(e) {
-      if (!requireNamespace('remotes', quietly=TRUE)) install.packages('remotes', repos='https://cloud.r-project.org/')
-      remotes::install_github('dtsoucas/DWLS', upgrade='never')
-    }
-  )
-}
-cat('DWLS version:', as.character(packageVersion('DWLS')), '\n')
-cat('MAST version:', as.character(packageVersion('MAST')), '\n')
-" 2>&1
-
-# Run DWLS
+# DWLS/MAST install handled by the R script itself (idempotent).
 Rscript scripts/run_dwls_benchmark.R 2>&1
 
 echo ""

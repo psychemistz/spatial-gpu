@@ -9,61 +9,36 @@ Usage: python scripts/compare_spacet_music.py
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import matplotlib
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from scipy.stats import pearsonr, spearmanr
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from _t8_common import SCENARIOS, compute_method_r, remap_and_collapse  # noqa: E402
+from scipy.stats import pearsonr  # noqa: E402
 
 OUTPUTS_DIR = "docs/outputs"
 FIGURES_DIR = "docs/figures"
 
-# Wu et al. -> collapsed category mapping
-WU_TO_SPACET = {
-    "Cancer Epithelial": "Malignant",
-    "CAFs": "CAF",
-    "Endothelial": "Endothelial",
-    "T-cells": "T_cells",
-    "B-cells": "B cell",
-    "Plasmablasts": "Plasma",
-    "Myeloid": "Myeloid",
-    "PVL": "PVL",
-    "Normal Epithelial": "Normal_Epithelial",
-}
-
-SCENARIOS = [
-    ("uniform", "Uniform (alpha=1.0)"),
-    ("sparse", "Sparse (alpha=0.3)"),
-    ("tumor_purity", "Tumor Purity (60-90%)"),
-    ("titration", "Titration (0-90%)"),
-]
-
 
 def load_gt(scenario):
     gt = pd.read_csv(os.path.join(OUTPUTS_DIR, f"t8_real_gt_{scenario}.csv"), index_col=0)
-    gt_renamed = gt.rename(columns=WU_TO_SPACET).T.groupby(level=0).sum().T
-    return gt_renamed
+    return remap_and_collapse(gt)
 
 
 def eval_method(est_df, gt_df):
+    metrics = compute_method_r(est_df, gt_df)
     common = sorted(set(est_df.columns) & set(gt_df.columns))
-    if not common:
-        return {"r": np.nan, "rho": np.nan, "rmse": np.nan, "per_type": {}}
-    gt_aligned = gt_df.reindex(est_df.index)[common]
-    est = est_df[common].values.ravel()
-    gt = gt_aligned.values.ravel()
-    r, _ = pearsonr(est, gt)
-    rho, _ = spearmanr(est, gt)
-    rmse = np.sqrt(np.mean((est - gt) ** 2))
+    gt_aligned = gt_df.reindex(est_df.index)[common] if common else None
     per_type = {}
     for ct in common:
         ct_r, _ = pearsonr(est_df[ct].values, gt_aligned[ct].values)
         per_type[ct] = ct_r
-    return {"r": r, "rho": rho, "rmse": rmse, "per_type": per_type}
+    metrics["per_type"] = per_type
+    return metrics
 
 
 def main():

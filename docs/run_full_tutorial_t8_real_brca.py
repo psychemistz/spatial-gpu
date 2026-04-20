@@ -18,7 +18,9 @@ import sys
 import warnings
 
 warnings.filterwarnings("ignore")
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
 
 import matplotlib  # noqa: E402
 
@@ -27,6 +29,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import scanpy as sc  # noqa: E402
+from _t8_common import remap_and_collapse  # noqa: E402
 from scipy import sparse  # noqa: E402
 from scipy.stats import pearsonr, spearmanr  # noqa: E402
 
@@ -49,19 +52,6 @@ def write_output(name, text):
         f.write(text)
     print(f"  Output saved: {path}")
 
-
-# Wu et al. -> collapsed category mapping for evaluation
-WU_TO_EVAL = {
-    "Cancer Epithelial": "Malignant",
-    "CAFs": "CAF",
-    "Endothelial": "Endothelial",
-    "T-cells": "T_cells",
-    "B-cells": "B cell",
-    "Plasmablasts": "Plasma",
-    "Myeloid": "Myeloid",
-    "PVL": "PVL",
-    "Normal Epithelial": "Normal_Epithelial",
-}
 
 # SpaCET fine types that collapse to Wu broad categories
 SPACET_TO_EVAL = {
@@ -406,8 +396,7 @@ def main():
                 sc_n_cell_each_lineage=200,
             )
             pm = bulk_copy.uns["spacet"]["deconvolution"]["propMat"]
-            est = pm.T.rename(columns=WU_TO_EVAL)
-            est = est.T.groupby(level=0).sum().T
+            est = remap_and_collapse(pm.T)
             spacet_results[label] = est
         except Exception as e:
             print(f"   ERROR in {label}: {e}")
@@ -432,8 +421,7 @@ def main():
                 subject_col="subject_id",
             )
             pm = bulk_copy.uns["spacet"]["deconvolution"]["propMat"]
-            est = pm.T.rename(columns=WU_TO_EVAL)
-            est = est.T.groupby(level=0).sum().T
+            est = remap_and_collapse(pm.T)
             spacet_weighted_results[label] = est
         except Exception as e:
             print(f"   ERROR in {label}: {e}")
@@ -446,7 +434,7 @@ def main():
         est = spacet_results.get(label)
         if est is None:
             continue
-        gt_eval = gt.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
+        gt_eval = remap_and_collapse(gt)
         r, rho, rmse = evaluate(est, gt_eval, f"spacet_{label}")
         spacet_metrics[label] = {"r": r, "rho": rho, "rmse": rmse}
 
@@ -456,7 +444,7 @@ def main():
         est = spacet_weighted_results.get(label)
         if est is None:
             continue
-        gt_eval = gt.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
+        gt_eval = remap_and_collapse(gt)
         r, rho, rmse = evaluate(est, gt_eval, f"spacet_weighted_{label}")
         spacet_w_metrics[label] = {"r": r, "rho": rho, "rmse": rmse}
 
@@ -467,7 +455,7 @@ def main():
         est = spacet_results.get(label)
         if est is None:
             continue
-        gt_eval = gt.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
+        gt_eval = remap_and_collapse(gt)
         common = sorted(set(est.columns) & set(gt_eval.columns))
 
         fig, ax = plt.subplots(figsize=(6, 6))
@@ -490,81 +478,42 @@ def main():
         )
         save(fig, f"benchmark_real_brca_scatter_{label}.png")
 
+    def eval_method_csvs(method_name, file_prefix):
+        """Read {file_prefix}_{scenario}.csv per scenario, compute r/rho/rmse
+        against collapsed ground truth. Returns {scenario: {r, rho, rmse}}.
+        """
+        metrics = {}
+        for label, (_, gt, _desc) in scenarios.items():
+            path = os.path.join(OUTPUTS_DIR, f"{file_prefix}_{label}.csv")
+            if not os.path.exists(path):
+                continue
+            props = pd.read_csv(path, index_col=0)
+            gt_eval = remap_and_collapse(gt)
+            pred_eval = remap_and_collapse(props)
+            common = sorted(set(pred_eval.columns) & set(gt_eval.columns))
+            if not common:
+                continue
+            est = pred_eval[common].values.ravel()
+            truth = gt_eval.reindex(pred_eval.index)[common].values.ravel()
+            r, _ = pearsonr(est, truth)
+            rho, _ = spearmanr(est, truth)
+            rmse = np.sqrt(np.mean((est - truth) ** 2))
+            metrics[label] = {"r": r, "rho": rho, "rmse": rmse}
+            print(f"   {method_name} {label}: r={r:.4f}")
+        return metrics
+
     # ---- Step 8: Check MuSiC results ----
     print("\n8. Checking MuSiC results...")
-    music_metrics = {}
-    has_music = False
-    for label, (_, gt, _desc) in scenarios.items():
-        music_file = os.path.join(OUTPUTS_DIR, f"t8_music_{label}.csv")
-        if not os.path.exists(music_file):
-            continue
-        has_music = True
-        music_props = pd.read_csv(music_file, index_col=0)
-        # MuSiC uses Wu cell type names directly
-        gt_eval = gt.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
-        music_eval = music_props.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
-        common = sorted(set(music_eval.columns) & set(gt_eval.columns))
-        if common:
-            r, _ = pearsonr(
-                music_eval[common].values.ravel(),
-                gt_eval.reindex(music_eval.index)[common].values.ravel(),
-            )
-            rho, _ = spearmanr(
-                music_eval[common].values.ravel(),
-                gt_eval.reindex(music_eval.index)[common].values.ravel(),
-            )
-            rmse = np.sqrt(
-                np.mean(
-                    (
-                        music_eval[common].values.ravel()
-                        - gt_eval.reindex(music_eval.index)[common].values.ravel()
-                    )
-                    ** 2
-                )
-            )
-            music_metrics[label] = {"r": r, "rho": rho, "rmse": rmse}
-            print(f"   MuSiC {label}: r={r:.4f}")
-
-    if not has_music:
+    music_metrics = eval_method_csvs("MuSiC", "t8_music")
+    if not music_metrics:
         print(
             "   MuSiC results not found. Run: sbatch scripts/slurm_music_benchmark.sh"
         )
 
     # ---- Step 8b: Check DWLS results ----
     print("\n8b. Checking DWLS results...")
-    dwls_metrics = {}
-    has_dwls = False
-    for label, (_, gt, _desc) in scenarios.items():
-        dwls_file = os.path.join(OUTPUTS_DIR, f"t8_dwls_{label}.csv")
-        if not os.path.exists(dwls_file):
-            continue
-        has_dwls = True
-        dwls_props = pd.read_csv(dwls_file, index_col=0)
-        gt_eval = gt.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
-        dwls_eval = dwls_props.rename(columns=WU_TO_EVAL).T.groupby(level=0).sum().T
-        common = sorted(set(dwls_eval.columns) & set(gt_eval.columns))
-        if common:
-            r, _ = pearsonr(
-                dwls_eval[common].values.ravel(),
-                gt_eval.reindex(dwls_eval.index)[common].values.ravel(),
-            )
-            rho, _ = spearmanr(
-                dwls_eval[common].values.ravel(),
-                gt_eval.reindex(dwls_eval.index)[common].values.ravel(),
-            )
-            rmse = np.sqrt(
-                np.mean(
-                    (
-                        dwls_eval[common].values.ravel()
-                        - gt_eval.reindex(dwls_eval.index)[common].values.ravel()
-                    )
-                    ** 2
-                )
-            )
-            dwls_metrics[label] = {"r": r, "rho": rho, "rmse": rmse}
-            print(f"   DWLS {label}: r={r:.4f}")
-
-    if not has_dwls:
+    dwls_metrics = eval_method_csvs("DWLS", "t8_dwls")
+    if not dwls_metrics:
         print(
             "   DWLS results not found. Run: sbatch scripts/slurm_dwls_benchmark.sh"
         )
@@ -577,10 +526,10 @@ def main():
             ("SpaCET", spacet_metrics, "#3b82f6"),
             ("SpaCET + weighting", spacet_w_metrics, "#10b981"),
         ]
-        if has_music:
+        if music_metrics:
             common_labels = sorted(set(common_labels) & set(music_metrics))
             methods.append(("MuSiC", music_metrics, "#f97316"))
-        if has_dwls:
+        if dwls_metrics:
             common_labels = sorted(set(common_labels) & set(dwls_metrics))
             methods.append(("DWLS", dwls_metrics, "#a855f7"))
 
