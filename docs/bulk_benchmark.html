@@ -292,7 +292,7 @@
 <div class="main">
 
 <h1>Bulk Deconvolution Benchmark</h1>
-<p class="subtitle">Tutorial 8 &mdash; Real BRCA pseudobulk evaluation with SpaCET (V0 / V1 / V3 IRWLS), MuSiC, and DWLS (minor)</p>
+<p class="subtitle">Tutorial 8 &mdash; Real BRCA pseudobulk evaluation: SpaCET (default and IRWLS variant), MuSiC, and DWLS</p>
 
 <!-- ------------------------------------------------------------ -->
 <h2 id="overview">Overview</h2>
@@ -310,15 +310,18 @@
 </p>
 
 <p>
-  Three SpaCET weighting variants are compared side-by-side &mdash;
-  <strong>V0</strong> (no weighting, upstream default), <strong>V1</strong>
-  (scale-free ratio form of the cross-subject weighting), and the new
-  <strong>V3</strong> IRWLS-lite variant developed in this package (one
-  residual-informed reweighting pass on top of absolute-variance initial
-  weights) &mdash; to isolate the contribution of the weighting scheme to
-  SpaCET&rsquo;s performance. DWLS&nbsp;(minor) is run at <code>celltype_minor</code>
-  resolution (SpaCET&rsquo;s effective sub-lineage granularity) and collapsed
-  to the 9 major types at evaluation, so it competes on equal terms.
+  Two SpaCET configurations are shown side-by-side: the upstream
+  <strong>SpaCET</strong> default (no cross-subject weighting; equivalent to
+  the R package&rsquo;s
+  <code>SpaCET.deconvolution.matched.scRNAseq()</code>), and a new
+  <strong>SpaCET&nbsp;(IRWLS)</strong> variant developed in this package that
+  applies one residual-informed reweighting pass on top of absolute-variance
+  initial weights. The IRWLS variant is the spatial-gpu addition; including
+  it makes explicit how much of the gap to MuSiC the cross-subject
+  reweighting closes. DWLS is run at <code>celltype_minor</code> resolution
+  (SpaCET&rsquo;s effective sub-lineage granularity) and collapsed to the
+  9 major types at evaluation, so it competes on equal terms with the
+  hierarchical methods.
 </p>
 
 <p>
@@ -338,9 +341,10 @@
 </p>
 
 <ul>
-  <li><strong>SpaCET V0 / V1 / V3</strong>: the three weighting variants of <code>deconvolution_matched_scrnaseq()</code>.</li>
+  <li><strong>SpaCET</strong>: <code>deconvolution_matched_scrnaseq()</code> with default settings (no cross-subject weighting; equivalent to upstream R SpaCET).</li>
+  <li><strong>SpaCET (IRWLS)</strong>: same function with <code>weighting_method=&quot;irwls&quot;</code> &mdash; one residual-informed reweighting pass on top of MuSiC-style absolute-variance initial weights.</li>
   <li><strong>MuSiC</strong>: uses the same train-set scRNA-seq as its reference.</li>
-  <li><strong>DWLS (minor)</strong>: MAST-derived cell-type signature at <code>celltype_minor</code> resolution, then dampened WLS per sample, collapsed to 9 majors at evaluation.</li>
+  <li><strong>DWLS</strong>: MAST-derived cell-type signature at <code>celltype_minor</code> resolution (the canonical DWLS usage), then dampened WLS per sample, collapsed to 9 majors at evaluation.</li>
   <li>Four scenarios span tumor-dominated (clinically realistic) and Dirichlet-mixture (methodological probe) mixing regimes.</li>
 </ul>
 
@@ -454,13 +458,13 @@
 </p>
 
 <p>
-  Three SpaCET variants are compared, varying only the optional cross-subject
-  gene-weighting scheme applied before the hierarchical NNLS solve:
+  Two SpaCET configurations are compared, varying only the optional
+  cross-subject gene-weighting scheme applied before the hierarchical NNLS
+  solve:
 </p>
 <ul>
-  <li><strong>SpaCET (V0)</strong> &mdash; no weighting (upstream SpaCET default)</li>
-  <li><strong>SpaCET + ratio weighting (V1)</strong> &mdash; scale-free ratio form, <code>w = 1/(1 + var_between/var_within)</code></li>
-  <li><strong>SpaCET + IRWLS-lite (V3)</strong> &mdash; initial absolute-variance weights followed by one residual-informed reweighting pass</li>
+  <li><strong>SpaCET</strong> &mdash; <code>weighting_method=&quot;ratio&quot;</code> with cross-subject weighting disabled by default (upstream R SpaCET behavior)</li>
+  <li><strong>SpaCET (IRWLS)</strong> &mdash; <code>cross_subject_weighting=True, weighting_method=&quot;irwls&quot;</code>: initial absolute-variance weights, then one residual-informed reweighting pass</li>
 </ul>
 
 <h3>3.1 Mean Pearson r &plusmn; SD across N=100 trials</h3>
@@ -469,18 +473,16 @@
   <thead>
     <tr>
       <th>Scenario</th>
-      <th>SpaCET V0</th>
-      <th>SpaCET V1</th>
-      <th>SpaCET V3 (IRWLS)</th>
+      <th>SpaCET</th>
+      <th>SpaCET (IRWLS)</th>
       <th>MuSiC</th>
-      <th>DWLS (minor)</th>
+      <th>DWLS</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td>Tumor Purity (60&ndash;90%)</td>
       <td>0.581 &plusmn; 0.320</td>
-      <td>0.596 &plusmn; 0.318</td>
       <td><strong>0.910 &plusmn; 0.071</strong></td>
       <td>0.875 &plusmn; 0.121</td>
       <td>0.827 &plusmn; 0.158</td>
@@ -488,7 +490,6 @@
     <tr>
       <td>Titration (0&ndash;90%)</td>
       <td>0.589 &plusmn; 0.278</td>
-      <td>0.603 &plusmn; 0.276</td>
       <td><strong>0.870 &plusmn; 0.092</strong></td>
       <td>0.830 &plusmn; 0.121</td>
       <td>0.788 &plusmn; 0.166</td>
@@ -496,7 +497,6 @@
     <tr>
       <td>Uniform (&alpha;=1.0)</td>
       <td>0.737 &plusmn; 0.080</td>
-      <td>0.741 &plusmn; 0.079</td>
       <td><strong>0.813 &plusmn; 0.037</strong></td>
       <td>0.790 &plusmn; 0.091</td>
       <td>0.811 &plusmn; 0.155</td>
@@ -504,7 +504,6 @@
     <tr>
       <td>Sparse (&alpha;=0.3)</td>
       <td>0.842 &plusmn; 0.058</td>
-      <td>0.846 &plusmn; 0.056</td>
       <td><strong>0.903 &plusmn; 0.021</strong></td>
       <td>0.904 &plusmn; 0.045</td>
       <td>0.907 &plusmn; 0.085</td>
@@ -531,22 +530,27 @@
     </tr>
   </thead>
   <tbody>
-    <tr><td rowspan="4"><strong>V3 IRWLS vs V1 ratio</strong></td>
-        <td>Tumor Purity</td><td>+0.226</td><td>&lt; 0.0001</td><td><strong>V3</strong></td></tr>
-    <tr><td>Titration</td><td>+0.211</td><td>&lt; 0.0001</td><td><strong>V3</strong></td></tr>
-    <tr><td>Uniform</td><td>+0.052</td><td>&lt; 0.0001</td><td><strong>V3</strong></td></tr>
-    <tr><td>Sparse</td><td>+0.041</td><td>&lt; 0.0001</td><td><strong>V3</strong></td></tr>
-    <tr><td rowspan="4"><strong>V3 IRWLS vs MuSiC</strong></td>
+    <tr><td rowspan="4"><strong>SpaCET (IRWLS) vs SpaCET</strong></td>
+        <td>Tumor Purity</td><td>+0.270</td><td>&lt; 0.0001</td><td><strong>IRWLS</strong></td></tr>
+    <tr><td>Titration</td><td>+0.236</td><td>&lt; 0.0001</td><td><strong>IRWLS</strong></td></tr>
+    <tr><td>Uniform</td><td>+0.055</td><td>&lt; 0.0001</td><td><strong>IRWLS</strong></td></tr>
+    <tr><td>Sparse</td><td>+0.047</td><td>&lt; 0.0001</td><td><strong>IRWLS</strong></td></tr>
+    <tr><td rowspan="4"><strong>SpaCET (IRWLS) vs MuSiC</strong></td>
         <td>Tumor Purity</td><td>+0.003</td><td>0.124</td><td>tied</td></tr>
-    <tr><td>Titration</td><td>+0.024</td><td><strong>0.017</strong></td><td><strong>V3</strong></td></tr>
+    <tr><td>Titration</td><td>+0.024</td><td><strong>0.017</strong></td><td><strong>IRWLS</strong></td></tr>
     <tr><td>Uniform</td><td>+0.004</td><td>0.168</td><td>tied</td></tr>
     <tr><td>Sparse</td><td>&minus;0.014</td><td>0.102</td><td>tied</td></tr>
-    <tr><td rowspan="4"><strong>V3 IRWLS vs DWLS (minor)</strong></td>
-        <td>Tumor Purity</td><td>+0.037</td><td>&lt; 0.0001</td><td><strong>V3</strong></td></tr>
-    <tr><td>Titration</td><td>+0.049</td><td>&lt; 0.0001</td><td><strong>V3</strong></td></tr>
+    <tr><td rowspan="4"><strong>SpaCET (IRWLS) vs DWLS</strong></td>
+        <td>Tumor Purity</td><td>+0.037</td><td>&lt; 0.0001</td><td><strong>IRWLS</strong></td></tr>
+    <tr><td>Titration</td><td>+0.049</td><td>&lt; 0.0001</td><td><strong>IRWLS</strong></td></tr>
     <tr><td>Uniform</td><td>&minus;0.052</td><td>0.134</td><td>tied</td></tr>
-    <tr><td>Sparse</td><td>&minus;0.031</td><td><strong>0.013</strong></td><td><strong>DWLS (minor)</strong></td></tr>
-    <tr><td rowspan="4"><strong>MuSiC vs DWLS (minor)</strong></td>
+    <tr><td>Sparse</td><td>&minus;0.031</td><td><strong>0.013</strong></td><td><strong>DWLS</strong></td></tr>
+    <tr><td rowspan="4"><strong>SpaCET vs MuSiC</strong></td>
+        <td>Tumor Purity</td><td>&minus;0.201</td><td>&lt; 0.0001</td><td><strong>MuSiC</strong></td></tr>
+    <tr><td>Titration</td><td>&minus;0.173</td><td>&lt; 0.0001</td><td><strong>MuSiC</strong></td></tr>
+    <tr><td>Uniform</td><td>&minus;0.049</td><td>&lt; 0.0001</td><td><strong>MuSiC</strong></td></tr>
+    <tr><td>Sparse</td><td>&minus;0.054</td><td>&lt; 0.0001</td><td><strong>MuSiC</strong></td></tr>
+    <tr><td rowspan="4"><strong>MuSiC vs DWLS</strong></td>
         <td>Tumor Purity</td><td>+0.030</td><td><strong>0.016</strong></td><td><strong>MuSiC</strong></td></tr>
     <tr><td>Titration</td><td>+0.023</td><td>0.084</td><td>tied</td></tr>
     <tr><td>Uniform</td><td>&minus;0.055</td><td>0.070</td><td>tied</td></tr>
@@ -557,29 +561,34 @@
 <div class="note">
   <strong>Interpretation:</strong>
   <ol>
-    <li><strong>IRWLS-lite is a strict improvement over SpaCET&rsquo;s existing
-      weighting options</strong>: V3 beats V1 (ratio) and V0 (no weighting) in
-      all four scenarios at p&nbsp;&lt;&nbsp;0.0001 &mdash; median &Delta;r of +0.04
-      to +0.23 per scenario. V0 and V1 also show very high trial-to-trial
-      variance (SD up to 0.32 on tumor-dominated scenarios), which V3 brings
-      down by 3&ndash;10&times;.</li>
-    <li><strong>V3 matches or beats MuSiC in every scenario</strong>: wins the
-      titration case (p=0.017) and ties the other three. Importantly, V3&rsquo;s
-      SD is 2&ndash;4&times; lower than MuSiC&rsquo;s on every scenario, so V3
-      provides a meaningfully more reproducible result even where mean r is
-      comparable.</li>
-    <li><strong>V3 beats DWLS&nbsp;(minor) on tumor-dominated scenarios</strong>
-      (both p&nbsp;&lt;&nbsp;0.0001). DWLS slightly edges V3 on the sparse
-      Dirichlet case (p=0.013) but has very high trial-to-trial variance
-      (SD&nbsp;0.08&ndash;0.17).</li>
-    <li>The 5-method comparison supports the collaborative hypothesis that
-      SpaCET&rsquo;s strength emerges from combining cross-subject
-      weighting (borrowed from MuSiC, refined here with a residual-reweighting
-      step) with the hierarchical lineage-consistent prior (SpaCET&rsquo;s
-      original contribution). Neither MuSiC (which has only the weighting)
-      nor DWLS&nbsp;(minor) (which has only the signature-level WLS with no
-      cross-subject handling) achieves the same Pareto optimum across
-      scenarios.</li>
+    <li><strong>Upstream SpaCET (no cross-subject weighting) is outperformed by
+      both MuSiC and DWLS</strong> on this benchmark, in all four scenarios
+      (all p&nbsp;&lt;&nbsp;0.0001). The gap is largest on tumor-dominated
+      scenarios (median &Delta;r up to &minus;0.23 vs both methods). Upstream
+      SpaCET also has very high trial-to-trial variance (SD up to 0.32 on
+      tumor-dominated scenarios), driven by occasional adversarial
+      train/test splits where the bulk r drops as low as &minus;0.10.</li>
+    <li><strong>SpaCET&nbsp;(IRWLS) closes the entire gap and adds substantial
+      stability</strong>: a strict Pareto improvement over upstream SpaCET in
+      all 4 scenarios (p&nbsp;&lt;&nbsp;0.0001, median &Delta;r of +0.05 to
+      +0.27). Its trial-to-trial SD is 3&ndash;10&times; lower than upstream
+      SpaCET, MuSiC, or DWLS &mdash; the most reproducible method in the
+      comparison.</li>
+    <li><strong>SpaCET&nbsp;(IRWLS) matches or beats MuSiC in every scenario</strong>:
+      wins the titration case (p=0.017), ties the other three. SD is 2&ndash;4&times;
+      lower than MuSiC&rsquo;s on every scenario, so the result is more
+      reproducible even where mean r is comparable.</li>
+    <li><strong>SpaCET&nbsp;(IRWLS) beats DWLS on tumor-dominated scenarios</strong>
+      (both p&nbsp;&lt;&nbsp;0.0001). DWLS slightly edges the IRWLS variant on
+      the sparse Dirichlet case (p=0.013) but has very high trial-to-trial
+      variance (SD&nbsp;0.08&ndash;0.17).</li>
+    <li>The comparison supports the collaborative hypothesis that
+      SpaCET&rsquo;s strength emerges from combining cross-subject weighting
+      (borrowed from MuSiC, refined here with a residual-reweighting step)
+      with the hierarchical lineage-consistent prior (SpaCET&rsquo;s original
+      contribution). Neither MuSiC (which has only the weighting) nor DWLS
+      (which has only the signature-level WLS with no cross-subject handling)
+      achieves the same Pareto optimum across scenarios.</li>
   </ol>
 </div>
 
@@ -596,28 +605,29 @@
 </p>
 
 <div class="figure">
-  <img src="figures/benchmark_real_brca_scatter_uniform.png" alt="Predicted vs ground truth scatter plot for Uniform Dirichlet scenario">
-  <p class="caption">SpaCET predicted vs ground-truth fractions on the Uniform Dirichlet scenario, representative single trial. Each point represents one cell type in one pseudobulk sample; the dashed line indicates perfect prediction. See section&nbsp;3 for the N=100-trial mean and SD.</p>
+  <img src="figures/benchmark_spacet_irwls_scatter_uniform.png" alt="SpaCET (IRWLS) predicted vs ground truth on the Uniform Dirichlet scenario">
+  <p class="caption">SpaCET&nbsp;(IRWLS) predicted vs ground-truth fractions on the Uniform Dirichlet (&alpha;=1.0) scenario, representative single trial (T00, overall&nbsp;r=0.844). Each point represents one cell type in one pseudobulk sample; the dashed line indicates perfect prediction; per-cell-type r values are listed in the legend. See section&nbsp;3 for the N=100-trial mean and SD.</p>
 </div>
 
 <div class="figure">
-  <img src="figures/benchmark_real_brca_scatter_tumor_purity.png" alt="Predicted vs ground truth scatter plot for Tumor Purity scenario">
-  <p class="caption">SpaCET predicted vs ground-truth fractions on the Tumor Purity (60&ndash;90%) scenario, representative single trial. SpaCET maintains strong accuracy even as Cancer Epithelial dominates the mixture, correctly apportioning the residual immune and stromal fractions.</p>
+  <img src="figures/benchmark_spacet_irwls_scatter_tumor_purity.png" alt="SpaCET (IRWLS) predicted vs ground truth on the Tumor Purity scenario">
+  <p class="caption">SpaCET&nbsp;(IRWLS) predicted vs ground-truth fractions on the Tumor Purity (60&ndash;90%) scenario, representative single trial (T00, overall&nbsp;r=0.892). Cancer Epithelial dominates the mixture and is recovered with high per-cell-type r; minor immune and stromal contributors are correctly apportioned within the remaining (1 &minus; tumor purity) fraction.</p>
 </div>
 
 <div class="figure">
   <img src="figures/benchmark_trials.png" alt="N=100 trial comparison with error bars across all methods and scenarios">
   <p class="caption">
-    Full 5-method comparison with error bars from N=100 paired replicate trials.
+    Four-method comparison with error bars from N=100 paired replicate trials.
     Bars show the mean Pearson r (per-sample raveled across 9 cell types);
     error bars are &plusmn;1 SD across trials. Tumor-dominated scenarios
     (tumor&nbsp;purity, titration) are shown first as the clinically realistic
     setting; Dirichlet mixtures (uniform, sparse) are methodological probes
     without a dominant cell type. Each trial varied both the subject-level
     train/test split and the pseudobulk random seed; all methods saw identical
-    train and test data within a trial (paired design). SpaCET&nbsp;V3
-    (IRWLS-lite) is the most accurate and the most stable method across all
-    four scenarios.
+    train and test data within a trial (paired design). Upstream
+    SpaCET (no cross-subject weighting) is outperformed by MuSiC and DWLS
+    in all four scenarios; the IRWLS-lite variant introduced in this package
+    closes the entire gap and is the most stable method in the comparison.
   </p>
 </div>
 

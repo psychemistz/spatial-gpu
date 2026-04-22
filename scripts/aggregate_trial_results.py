@@ -36,20 +36,20 @@ FIGURES_DIR = os.path.join(_REPO_ROOT, "docs", "figures")
 os.makedirs(FIGURES_DIR, exist_ok=True)
 
 METHODS = [
-    ("spacet_v0_none", "SpaCET (no weighting)", "#6b7280"),
-    ("spacet_v1_ratio", "SpaCET + ratio (V1)", "#3b82f6"),
-    ("spacet_v3_irwls", "SpaCET + IRWLS (V3)", "#f59e0b"),
+    ("spacet_v0_none", "SpaCET", "#6b7280"),
+    ("spacet_v3_irwls", "SpaCET (IRWLS)", "#3b82f6"),
     ("music", "MuSiC", "#f97316"),
-    ("dwls_minor", "DWLS (minor)", "#ec4899"),
+    ("dwls_minor", "DWLS", "#ec4899"),
 ]
 
 # Method pairs to test for paired-difference significance
 PAIRS_TO_TEST = [
-    ("spacet_v3_irwls", "spacet_v1_ratio"),  # IRWLS vs ratio (within SpaCET)
-    ("spacet_v3_irwls", "spacet_v0_none"),   # IRWLS vs no weighting
-    ("spacet_v3_irwls", "music"),             # SpaCET-best vs MuSiC
-    ("spacet_v3_irwls", "dwls_minor"),        # SpaCET-best vs DWLS
-    ("music", "dwls_minor"),                  # MuSiC vs DWLS
+    ("spacet_v3_irwls", "spacet_v0_none"),  # IRWLS vs upstream SpaCET (the improvement)
+    ("spacet_v3_irwls", "music"),            # SpaCET-IRWLS vs MuSiC
+    ("spacet_v3_irwls", "dwls_minor"),       # SpaCET-IRWLS vs DWLS
+    ("spacet_v0_none", "music"),             # upstream SpaCET vs MuSiC
+    ("spacet_v0_none", "dwls_minor"),        # upstream SpaCET vs DWLS
+    ("music", "dwls_minor"),                 # MuSiC vs DWLS
 ]
 
 

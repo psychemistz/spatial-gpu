@@ -39,7 +39,7 @@ VARIANTS = [
 # the canonical fair-resolution comparison.
 EXTRA_METHODS = [
     ("music", "MuSiC", "#f97316"),
-    ("dwls_minor", "DWLS (minor)", "#ec4899"),
+    ("dwls_minor", "DWLS", "#ec4899"),
 ]
 
 
