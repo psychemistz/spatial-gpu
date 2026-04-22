@@ -73,6 +73,10 @@ deconvolve_scenarios <- function(Signature, to_original, scenarios, output_dir,
       cat(sprintf("\n   Skipping %s — missing: %s\n", scenario, bulk_file))
       next
     }
+    if (file.exists(out_file)) {
+      cat(sprintf("\n   Skipping %s — already done: %s\n", scenario, out_file))
+      next
+    }
     cat(sprintf("\n3. %s — %s\n", label, scenario))
 
     bulk_mtx <- as.matrix(read.csv(bulk_file, row.names = 1, check.names = FALSE))

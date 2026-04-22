@@ -39,6 +39,7 @@ from spatialgpu.deconvolution._keys import (
 )
 from spatialgpu.deconvolution.core import (
     _get_counts_genes_by_spots,
+    _intersect_and_normalize,
     _spatial_deconv,
 )
 from spatialgpu.deconvolution.reference import ensure_human_genes
@@ -143,6 +144,7 @@ def deconvolution_matched_scrnaseq(
     sc_n_cell_each_lineage: int = 100,
     cross_subject_weighting: bool = False,
     subject_col: str | None = None,
+    weighting_method: str = "ratio",
     n_jobs: int = 1,
 ) -> ad.AnnData:
     """Deconvolve ST data with matched scRNA-seq reference.
@@ -177,6 +179,21 @@ def deconvolution_matched_scrnaseq(
     subject_col : str or None
         Column name in ``sc_annotation`` containing subject/donor IDs.
         Required when ``cross_subject_weighting=True``.
+    weighting_method : str
+        Active when ``cross_subject_weighting=True``. One of:
+
+        - ``"ratio"`` (default): SpaCET's scale-free form,
+          ``w = 1 / (1 + var_between/var_within)``.
+        - ``"irwls"``: One residual-informed reweighting pass on top of
+          absolute-variance initial weights ``w_0 = 1 / (var_between +
+          var_within)``: solve, compute per-gene residual variance from
+          the first solve, update ``w_1 = 1 / (var_between + var_within +
+          residual_var)``, then re-solve. Strict Pareto improvement over
+          ``"ratio"`` on the T8 BRCA benchmark. (Multi-iteration IRWLS was
+          tested and dropped — additional passes hurt tumor-dominated
+          scenarios because the malignant under-prediction is a
+          hierarchical-constraint artifact that residual reweighting
+          cannot fix.)
     n_jobs : int
         Number of parallel jobs.
 
@@ -225,10 +242,26 @@ def deconvolution_matched_scrnaseq(
                 f"subject_col='{subject_col}' not found in sc_annotation. "
                 f"Available columns: {list(sc_annotation.columns)}"
             )
-        logger.info("   Computing cross-subject gene weights...")
-        gene_weights = _compute_cross_subject_weights(
-            sc_counts, sc_annotation, subject_col
-        )
+        valid_methods = {"ratio", "irwls"}
+        if weighting_method not in valid_methods:
+            raise ValueError(
+                f"weighting_method must be one of {sorted(valid_methods)}, "
+                f"got {weighting_method!r}."
+            )
+        logger.info(f"   Computing cross-subject gene weights ({weighting_method})...")
+        if weighting_method == "ratio":
+            gene_weights = _compute_cross_subject_weights(
+                sc_counts, sc_annotation, subject_col
+            )
+        else:  # "irwls"
+            gene_weights = _compute_cross_subject_weights_absolute(
+                sc_counts, sc_annotation, subject_col
+            )
+            # Stash variance components for the residual-reweighting passes.
+            vc_genes, vc = _subject_variance_components(
+                sc_counts, sc_annotation, subject_col
+            )
+            ref["_irwls_variance"] = (vc_genes, vc)
         logger.info(
             "   Gene weights: %d genes, median=%.4f, mean=%.4f",
             len(gene_weights),
@@ -236,6 +269,7 @@ def deconvolution_matched_scrnaseq(
             np.mean(gene_weights.values),
         )
         ref["gene_weights"] = gene_weights
+        ref["weighting_method"] = weighting_method
 
     # --- Get ST counts ---
     logger.info("2. Hierarchically deconvolve the Spatial Transcriptomics dataset.")
@@ -246,37 +280,33 @@ def deconvolution_matched_scrnaseq(
     # Filter zero-sum genes
     counts, gene_names = filter_zero_genes(counts, gene_names)
 
-    if sc_include_malignant:
-        # No malignant inference needed — all cell types are in the reference
-        mal_prop = pd.Series(0.0, index=spot_names)
-
-        prop_mat = _spatial_deconv(
-            ST=counts,
-            gene_names=gene_names,
-            spot_names=spot_names,
-            ref=ref,
-            mal_prop=mal_prop,
-            mal_ref=None,
-            mode="deconvWithSC",
-            unidentifiable=True,
-            macrophage_other=False,
-            n_jobs=n_jobs,
-        )
-    else:
+    def _run_deconv(ref_arg):
+        if sc_include_malignant:
+            mal_prop = pd.Series(0.0, index=spot_names)
+            return _spatial_deconv(
+                ST=counts,
+                gene_names=gene_names,
+                spot_names=spot_names,
+                ref=ref_arg,
+                mal_prop=mal_prop,
+                mal_ref=None,
+                mode="deconvWithSC",
+                unidentifiable=True,
+                macrophage_other=False,
+                n_jobs=n_jobs,
+            )
         if cancer_type is None:
             raise ValueError("cancer_type is required when sc_include_malignant=False.")
-
         logger.info("Stage 1. Infer malignant cell fraction.")
         mal_res = _infer_mal_cor(
             counts, gene_names, spot_names, cancer_type, signature_type=None
         )
-
         logger.info("Stage 2. Deconvolve non-malignant cell fraction.")
-        prop_mat = _spatial_deconv(
+        return _spatial_deconv(
             ST=counts,
             gene_names=gene_names,
             spot_names=spot_names,
-            ref=ref,
+            ref=ref_arg,
             mal_prop=mal_res[KEY_MALPROP],
             mal_ref=mal_res[KEY_MALREF],
             mode="deconvWithSC_alt",
@@ -284,6 +314,19 @@ def deconvolution_matched_scrnaseq(
             macrophage_other=False,
             n_jobs=n_jobs,
         )
+
+    prop_mat = _run_deconv(ref)
+
+    # IRWLS-lite: one residual-informed reweighting pass.
+    if cross_subject_weighting and weighting_method == "irwls":
+        updated = _irwls_lite_updated_weights(ref, counts, gene_names, prop_mat)
+        ref["gene_weights"] = updated
+        logger.info(
+            "IRWLS-lite: updated weights (median=%.4f mean=%.4f)",
+            float(np.median(updated.values)),
+            float(np.mean(updated.values)),
+        )
+        prop_mat = _run_deconv(ref)
 
     # Store results
     adata.uns[UNS_SPACET] = {
@@ -912,85 +955,46 @@ def _merge_and_store_results(
 # ---------------------------------------------------------------------------
 
 
-def _compute_cross_subject_weights(
+def _subject_variance_components(
     sc_counts: pd.DataFrame,
     sc_annotation: pd.DataFrame,
     subject_col: str,
-) -> pd.Series:
-    """Compute per-gene weights from cross-subject variance.
+):
+    """Shared core: compute per-(gene, cell-type) between/within-subject variances.
 
-    Implements the MuSiC weighting scheme (Wang et al. 2019, Nature Comms):
-    for each gene and cell type, decompose variance into within-subject
-    (biological) and between-subject (technical/batch) components. Genes
-    with low between-subject variance relative to within-subject variance
-    are more informative for deconvolution.
-
-    Weight_g = 1 / (1 + var_between_g / (var_within_g + eps))
-
-    Averaged across cell types. Returns values in (0, 1].
-
-    Parameters
-    ----------
-    sc_counts : pd.DataFrame
-        scRNA-seq count matrix (genes x cells).
-    sc_annotation : pd.DataFrame
-        Must have 'cellID', 'cellType', and ``subject_col`` columns.
-    subject_col : str
-        Column name for subject/donor ID.
-
-    Returns
-    -------
-    pd.Series
-        Per-gene weights indexed by gene name.
+    Returns a dict mapping cell_type -> (var_between, var_within) arrays.
+    Cell types with <2 subjects of data are skipped.
     """
     gene_names = np.array(sc_counts.index)
-    n_genes = len(gene_names)
-
-    # CPM normalize
     counts_dense = to_dense_float64(sc_counts.values)
     col_sums = counts_dense.sum(axis=0)
     col_sums[col_sums == 0] = 1.0
     expr = counts_dense / col_sums[np.newaxis, :] * 1e5
 
-    # Map cell IDs to annotation
     ann = sc_annotation.set_index("cellID")
     cell_ids = np.array(sc_counts.columns)
     cell_types = ann.loc[cell_ids, COL_CELLTYPE].values.astype(str)
     subjects = ann.loc[cell_ids, subject_col].values.astype(str)
 
-    unique_types = np.unique(cell_types)
-    eps = 1e-10
-
-    # Accumulate weights across cell types
-    weight_sum = np.zeros(n_genes, dtype=np.float64)
-    n_contributing = np.zeros(n_genes, dtype=np.float64)
-
-    for ct in unique_types:
+    out = {}
+    for ct in np.unique(cell_types):
         ct_mask = cell_types == ct
-        ct_expr = expr[:, ct_mask]  # (n_genes, n_cells_of_type)
+        ct_expr = expr[:, ct_mask]
         ct_subjects = subjects[ct_mask]
         unique_subjects = np.unique(ct_subjects)
-
         if len(unique_subjects) < 2:
-            # Can't compute between-subject variance with 1 subject
             continue
 
-        # Per-subject means for this cell type
+        n_genes = len(gene_names)
         subject_means = np.zeros((n_genes, len(unique_subjects)), dtype=np.float64)
-        subject_counts = np.zeros(len(unique_subjects), dtype=np.float64)
-
         for s_idx, subj in enumerate(unique_subjects):
             s_mask = ct_subjects == subj
-            n_cells_s = s_mask.sum()
-            if n_cells_s == 0:
+            if s_mask.sum() == 0:
                 continue
             subject_means[:, s_idx] = ct_expr[:, s_mask].mean(axis=1)
-            subject_counts[s_idx] = n_cells_s
 
-        # Between-subject variance: variance of subject means
         var_between = np.var(subject_means, axis=1, ddof=1)
 
-        # Within-subject variance: mean of per-subject variances
         var_within = np.zeros(n_genes, dtype=np.float64)
         n_subj_with_data = 0
         for subj in unique_subjects:
@@ -999,26 +1003,131 @@ def _compute_cross_subject_weights(
                 continue
             var_within += np.var(ct_expr[:, s_mask], axis=1, ddof=1)
             n_subj_with_data += 1
-
         if n_subj_with_data > 0:
             var_within /= n_subj_with_data
 
-        # Weight: high when between-subject variance is low relative to within
-        w = 1.0 / (1.0 + var_between / (var_within + eps))
+        out[ct] = (var_between, var_within)
+    return gene_names, out
 
-        weight_sum += w
-        n_contributing += 1.0
 
-    # Average across cell types
-    n_contributing = np.maximum(n_contributing, 1.0)
-    gene_weights = weight_sum / n_contributing
+def _compute_cross_subject_weights(
+    sc_counts: pd.DataFrame,
+    sc_annotation: pd.DataFrame,
+    subject_col: str,
+) -> pd.Series:
+    """Cross-subject gene weights — V1 (ratio form, SpaCET default).
 
-    # Normalize to [0, 1] range
-    max_w = gene_weights.max()
-    if max_w > 0:
-        gene_weights = gene_weights / max_w
+    Weight_g = 1 / (1 + var_between_g / (var_within_g + eps))
 
-    return pd.Series(gene_weights, index=gene_names)
+    Averaged across cell types. Scale-free per gene — two genes with the same
+    between/within ratio get the same weight regardless of absolute variance.
+    """
+    gene_names, vc = _subject_variance_components(sc_counts, sc_annotation, subject_col)
+    n_genes = len(gene_names)
+    eps = 1e-10
+    weight_sum = np.zeros(n_genes, dtype=np.float64)
+    n_contrib = 0
+    for var_between, var_within in vc.values():
+        weight_sum += 1.0 / (1.0 + var_between / (var_within + eps))
+        n_contrib += 1
+    gw = weight_sum / max(n_contrib, 1)
+    if gw.max() > 0:
+        gw = gw / gw.max()
+    return pd.Series(gw, index=gene_names)
+
+
+def _compute_cross_subject_weights_absolute(
+    sc_counts: pd.DataFrame,
+    sc_annotation: pd.DataFrame,
+    subject_col: str,
+) -> pd.Series:
+    """Cross-subject gene weights — V2 (MuSiC absolute-variance inverse).
+
+    Weight_g = 1 / (var_between_g + var_within_g + eps)
+
+    Downweights high-absolute-variance genes hard. Matches the published MuSiC
+    formula (Wang et al. 2019) and tends to help in mixed scenarios (Dirichlet
+    mixtures) where no cell type dominates the bulk.
+    """
+    gene_names, vc = _subject_variance_components(sc_counts, sc_annotation, subject_col)
+    n_genes = len(gene_names)
+    eps = 1e-10
+    weight_sum = np.zeros(n_genes, dtype=np.float64)
+    n_contrib = 0
+    for var_between, var_within in vc.values():
+        weight_sum += 1.0 / (var_between + var_within + eps)
+        n_contrib += 1
+    gw = weight_sum / max(n_contrib, 1)
+    if gw.max() > 0:
+        gw = gw / gw.max()
+    return pd.Series(gw, index=gene_names)
+
+
+def _irwls_lite_updated_weights(
+    ref: dict,
+    counts,
+    gene_names: np.ndarray,
+    prop_mat: pd.DataFrame,
+) -> pd.Series:
+    """Compute IRWLS-lite updated weights from first-pass residuals.
+
+    w_new = 1 / (var_between + var_within + residual_var + eps)
+
+    Residuals are computed in CPM space: pred_cpm = ref_cpm @ prop_mat,
+    residual = bulk_cpm - pred_cpm, per-gene variance across samples.
+    """
+    reference = ref["refProfiles"]
+    vc_genes, vc = ref["_irwls_variance"]
+
+    ST_cpm, ref_cpm, olp_genes, _ = _intersect_and_normalize(
+        counts, gene_names, reference.copy()
+    )
+
+    # Align prop_mat rows with reference columns; sub-lineages not in
+    # `reference.columns` are skipped (they shouldn't appear at the output
+    # level, but guard anyway).
+    ref_cols = list(reference.columns)
+    present = [t for t in prop_mat.index if t in ref_cols]
+    if not present:
+        logger.warning("IRWLS-lite: no overlapping cell types; skipping update.")
+        return ref["gene_weights"]
+
+    col_idx = [ref_cols.index(t) for t in present]
+    ref_used = ref_cpm[:, col_idx]                       # (n_genes, n_types)
+    prop_used = prop_mat.loc[present].values             # (n_types, n_samples)
+    pred_cpm = ref_used @ prop_used                      # (n_genes, n_samples)
+
+    residuals = ST_cpm - pred_cpm
+    # Drop samples with NaNs (carried through from _remove_nan_spots usage)
+    valid = ~np.isnan(residuals).any(axis=0)
+    if valid.sum() < 2:
+        logger.warning("IRWLS-lite: too few valid samples; skipping update.")
+        return ref["gene_weights"]
+    residuals = residuals[:, valid]
+    resid_var = residuals.var(axis=1, ddof=1)            # (n_genes,)
+
+    # Average var_between + var_within per gene across all cell types
+    vc_idx = {g: i for i, g in enumerate(vc_genes)}
+    inv_w_per_gene = np.zeros(len(olp_genes), dtype=np.float64)
+    for i, g in enumerate(olp_genes):
+        if g not in vc_idx:
+            inv_w_per_gene[i] = np.nan
+            continue
+        gi = vc_idx[g]
+        s, n = 0.0, 0
+        for vb, vw in vc.values():
+            s += vb[gi] + vw[gi]
+            n += 1
+        inv_w_per_gene[i] = s / n if n > 0 else np.nan
+
+    eps = 1e-10
+    new_w = 1.0 / (np.nan_to_num(inv_w_per_gene, nan=1e10) + resid_var + eps)
+    if new_w.max() > 0:
+        new_w = new_w / new_w.max()
+
+    updated = ref["gene_weights"].copy()
+    updated.loc[olp_genes] = new_w
+    return updated
 
 
 # ---------------------------------------------------------------------------

@@ -26,10 +26,12 @@ WU_TO_EVAL = {
 }
 
 SCENARIOS = [
-    ("uniform", "Uniform (alpha=1.0)"),
-    ("sparse", "Sparse (alpha=0.3)"),
+    # Tumor-dominated (clinically realistic for TCGA-style bulk) — primary axis.
     ("tumor_purity", "Tumor Purity (60-90%)"),
     ("titration", "Titration (0-90%)"),
+    # Dirichlet mixtures (methodological probe; no dominant cell type).
+    ("uniform", "Uniform (alpha=1.0)"),
+    ("sparse", "Sparse (alpha=0.3)"),
 ]
 
 
