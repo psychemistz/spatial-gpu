@@ -1093,9 +1093,9 @@ def _irwls_lite_updated_weights(
         return ref["gene_weights"]
 
     col_idx = [ref_cols.index(t) for t in present]
-    ref_used = ref_cpm[:, col_idx]                       # (n_genes, n_types)
-    prop_used = prop_mat.loc[present].values             # (n_types, n_samples)
-    pred_cpm = ref_used @ prop_used                      # (n_genes, n_samples)
+    ref_used = ref_cpm[:, col_idx]  # (n_genes, n_types)
+    prop_used = prop_mat.loc[present].values  # (n_types, n_samples)
+    pred_cpm = ref_used @ prop_used  # (n_genes, n_samples)
 
     residuals = ST_cpm - pred_cpm
     # Drop samples with NaNs (carried through from _remove_nan_spots usage)
@@ -1104,7 +1104,7 @@ def _irwls_lite_updated_weights(
         logger.warning("IRWLS-lite: too few valid samples; skipping update.")
         return ref["gene_weights"]
     residuals = residuals[:, valid]
-    resid_var = residuals.var(axis=1, ddof=1)            # (n_genes,)
+    resid_var = residuals.var(axis=1, ddof=1)  # (n_genes,)
 
     # Average var_between + var_within per gene across all cell types
     vc_idx = {g: i for i, g in enumerate(vc_genes)}
