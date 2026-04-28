@@ -97,10 +97,23 @@ ENV LC_ALL=en_US.UTF-8
 # =============================================================================
 
 ARG INSTALL_R
+# Install R 4.4+ from CRAN's apt repo (Ubuntu 22.04's default r-base is 4.1.2,
+# which is ABI-incompatible with Posit Package Manager's "latest" binaries —
+# they get rejected and rebuilt from source, which is slow and breaks on
+# modern Bioconductor deps). Adding the CRAN signing key + cran/c2d4u repo
+# pulls R 4.4.x and lets RSPM binaries install cleanly.
 RUN if [ "$INSTALL_R" = "true" ]; then \
         echo "========================================" && \
-        echo "Installing R from Ubuntu repos..." && \
+        echo "Installing R 4.4+ from CRAN apt repo..." && \
         echo "========================================" && \
+        apt-get update && \
+        apt-get install -y --no-install-recommends \
+            dirmngr gnupg ca-certificates && \
+        gpg --keyserver keyserver.ubuntu.com --recv-key '95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7' && \
+        gpg --armor --export '95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7' \
+            > /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc && \
+        echo "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" \
+            > /etc/apt/sources.list.d/cran.list && \
         apt-get update && \
         apt-get install -y --no-install-recommends \
             r-base \
@@ -111,46 +124,52 @@ RUN if [ "$INSTALL_R" = "true" ]; then \
         echo "Skipping R installation"; \
     fi
 
-# Use Posit Package Manager for pre-compiled R binaries (much faster)
+# Use Posit Package Manager for pre-compiled R binaries (much faster).
+# Requires R >= 4.2 to match RSPM's binary ABI (handled by the CRAN apt repo
+# step above).
 ENV RSPM="https://packagemanager.posit.co/cran/__linux__/jammy/latest"
 
-# Install CRAN dependencies for SpaCET
+# Bootstrap BiocManager + install Bioconductor packages FIRST.
+# Seurat / NMF and SpaCET pull Bioc-only transitive deps (Biobase, BPCells,
+# DESeq2, DelayedArray, GenomicRanges, GenomeInfoDb, glmGamPoi, harmony,
+# IRanges, limma, monocle, presto, rtracklayer, multtest, etc.). If we install
+# them in the CRAN step before BiocManager is on the repo list, Seurat
+# installs with broken deps and the final SpaCET step exits 1.
+ARG INSTALL_R
+RUN if [ "$INSTALL_R" = "true" ]; then \
+        echo "========================================" && \
+        echo "Installing BiocManager + Bioconductor packages..." && \
+        echo "========================================" && \
+        R -e "options(repos = c(CRAN = Sys.getenv('RSPM', 'https://cloud.r-project.org/'))); \
+              install.packages('BiocManager', Ncpus = parallel::detectCores())" && \
+        R -e "BiocManager::install(ask = FALSE, update = FALSE)" && \
+        R -e "BiocManager::install(c( \
+                  'rhdf5', \
+                  'BiocGenerics', 'S4Vectors', 'IRanges', 'BiocParallel', \
+                  'Biobase', 'SingleCellExperiment', 'SummarizedExperiment', \
+                  'DelayedArray', 'GenomeInfoDb', 'GenomicRanges', \
+                  'limma', 'DESeq2', 'glmGamPoi', 'rtracklayer', 'multtest', \
+                  'MAST' \
+              ), ask = FALSE, update = FALSE, Ncpus = parallel::detectCores())"; \
+    fi
+
+# CRAN dependencies, with BiocManager::repositories() prepended so any
+# remaining Bioc deps (e.g. transitively pulled by Seurat extras) resolve.
 ARG INSTALL_R
 RUN if [ "$INSTALL_R" = "true" ]; then \
         echo "========================================" && \
         echo "Installing CRAN packages (binary)..." && \
         echo "========================================" && \
-        R -e "options(repos = c(CRAN = Sys.getenv('RSPM', 'https://cloud.r-project.org/'))); \
+        R -e "options(repos = c(CRAN = Sys.getenv('RSPM', 'https://cloud.r-project.org/'), \
+                                BiocManager::repositories())); \
               install.packages(c( \
-                  'remotes', 'BiocManager', 'devtools', \
+                  'remotes', 'devtools', \
                   'Matrix', 'Rcpp', 'RcppArmadillo', \
                   'ggplot2', 'sctransform', \
                   'testthat', 'data.table', \
                   'Seurat', 'hdf5r', \
                   'NMF', 'psych', 'pheatmap' \
               ), dependencies = TRUE, Ncpus = parallel::detectCores())"; \
-    fi
-
-# Install Bioconductor packages
-# rhdf5: HDF5 I/O cross-validation
-# BiocParallel/SingleCellExperiment/SummarizedExperiment/S4Vectors/BiocGenerics:
-#   transitive deps of SpaCET (data2intelligence/SpaCET).
-# MAST: required by DWLS::buildSignatureMatrixMAST in the T8 benchmark path.
-ARG INSTALL_R
-RUN if [ "$INSTALL_R" = "true" ]; then \
-        echo "========================================" && \
-        echo "Installing Bioconductor packages..." && \
-        echo "========================================" && \
-        R -e "BiocManager::install(ask = FALSE, update = FALSE)" && \
-        R -e "BiocManager::install(c( \
-                  'rhdf5', \
-                  'BiocGenerics', \
-                  'S4Vectors', \
-                  'BiocParallel', \
-                  'SingleCellExperiment', \
-                  'SummarizedExperiment', \
-                  'MAST' \
-              ), ask = FALSE, update = FALSE, Ncpus = parallel::detectCores())"; \
     fi
 
 # Install SpaCET from GitHub.
