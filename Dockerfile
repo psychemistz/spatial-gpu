@@ -131,7 +131,11 @@ RUN if [ "$INSTALL_R" = "true" ]; then \
               ), dependencies = TRUE, Ncpus = parallel::detectCores())"; \
     fi
 
-# Install Bioconductor packages (rhdf5 for HDF5 I/O cross-validation)
+# Install Bioconductor packages
+# rhdf5: HDF5 I/O cross-validation
+# BiocParallel/SingleCellExperiment/SummarizedExperiment/S4Vectors/BiocGenerics:
+#   transitive deps of SpaCET (data2intelligence/SpaCET).
+# MAST: required by DWLS::buildSignatureMatrixMAST in the T8 benchmark path.
 ARG INSTALL_R
 RUN if [ "$INSTALL_R" = "true" ]; then \
         echo "========================================" && \
@@ -139,21 +143,35 @@ RUN if [ "$INSTALL_R" = "true" ]; then \
         echo "========================================" && \
         R -e "BiocManager::install(ask = FALSE, update = FALSE)" && \
         R -e "BiocManager::install(c( \
-                  'rhdf5' \
+                  'rhdf5', \
+                  'BiocGenerics', \
+                  'S4Vectors', \
+                  'BiocParallel', \
+                  'SingleCellExperiment', \
+                  'SummarizedExperiment', \
+                  'MAST' \
               ), ask = FALSE, update = FALSE, Ncpus = parallel::detectCores())"; \
     fi
 
-# Install SpaCET from GitHub
+# Install SpaCET from GitHub.
+# Set repos = BiocManager::repositories() so remotes::install_github with
+# dependencies = TRUE searches Bioconductor in addition to CRAN. Without
+# this, Bioc-only deps fail to resolve and the install silently no-ops,
+# making library(SpaCET) below throw and aborting the build.
 ARG INSTALL_R
 RUN if [ "$INSTALL_R" = "true" ]; then \
         echo "========================================" && \
         echo "Installing SpaCET from GitHub..." && \
         echo "========================================" && \
-        R -e "options(timeout = 600); \
+        R -e "options(timeout = 600, \
+                      repos = BiocManager::repositories()); \
               remotes::install_github('data2intelligence/SpaCET', \
                   dependencies = TRUE, \
                   upgrade = 'never', \
-                  force = TRUE); \
+                  force = TRUE, \
+                  Ncpus = parallel::detectCores()); \
+              if (!requireNamespace('SpaCET', quietly = TRUE)) \
+                  stop('SpaCET install failed'); \
               library(SpaCET); \
               cat('SpaCET version:', as.character(packageVersion('SpaCET')), '\n')"; \
     fi
