@@ -100,18 +100,19 @@ ARG INSTALL_R
 # Install R 4.4+ from CRAN's apt repo (Ubuntu 22.04's default r-base is 4.1.2,
 # which is ABI-incompatible with Posit Package Manager's "latest" binaries —
 # they get rejected and rebuilt from source, which is slow and breaks on
-# modern Bioconductor deps). Adding the CRAN signing key + cran/c2d4u repo
-# pulls R 4.4.x and lets RSPM binaries install cleanly.
+# modern Bioconductor deps). The CRAN signing key (51716619E084DAB9, full
+# fingerprint E298A3A825C0D65DFD57CBB651716619E084DAB9) is fetched directly
+# from CRAN's published key file rather than a GPG keyserver — keyservers
+# are flaky inside CI runners and the key fingerprint has rotated over
+# time, so pulling from CRAN's authoritative URL is the durable approach.
 RUN if [ "$INSTALL_R" = "true" ]; then \
         echo "========================================" && \
         echo "Installing R 4.4+ from CRAN apt repo..." && \
         echo "========================================" && \
         apt-get update && \
-        apt-get install -y --no-install-recommends \
-            dirmngr gnupg ca-certificates && \
-        gpg --keyserver keyserver.ubuntu.com --recv-key '95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7' && \
-        gpg --armor --export '95C0FAF38DB3CCAD0C080A7BDC78B2DDEABC47B7' \
-            > /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc && \
+        apt-get install -y --no-install-recommends ca-certificates wget && \
+        wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc \
+            | tee /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc > /dev/null && \
         echo "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" \
             > /etc/apt/sources.list.d/cran.list && \
         apt-get update && \
