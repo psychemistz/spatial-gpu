@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # Force Node 24 for any v3/v4/v5 actions still shipping Node 20
+  # (setup-python@v5, cache@v4, codecov-action@v4 as of 2026-04).
+  # Drop this once those actions publish majors with Node 24 baked in.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
