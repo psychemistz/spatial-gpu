@@ -145,6 +145,43 @@ CLAUDE.md
 # Validation data (large R outputs for numerical equivalence testing)
 /validation/
 /data/
+/validation_results/
 
 # Local instruction files
 INSTRUCTION.md
+
+# T8 benchmark outputs (regenerable via scripts/bench_spacet_*.py)
+/docs/outputs/t8_real_bulk_*.csv
+/docs/outputs/t8_spacet_v*.csv
+/docs/outputs/t8_spacet_v*.txt
+/docs/outputs/t8_export_music/
+/docs/outputs/t8_export_cibersortx/
+/docs/outputs/trials/
+
+# Legacy R-parity scripts (kept locally for ad-hoc parity tests, not shipped)
+/scripts/r_save_intermediates.R
+/scripts/r_save_mudan_intermediates.R
+/scripts/r_save_stage1.R
+/scripts/r_save_sublineage_intermediates.R
+/scripts/export_rda_to_python.R
+/scripts/extract_spacet_data.R
+/scripts/extract_cosmx_data.R
+/scripts/convert_to_h5ad.py
+/scripts/compare_intermediates.py
+/scripts/compare_r_vs_python.py
+/scripts/compare_visualizations.py
+/scripts/validate_3vst.R
+/scripts/validate_mudan.py
+/scripts/validate_mudan_detail.py
+/scripts/validate_r_equivalence.py
+/scripts/validate_r_vs_python_native.py
+/scripts/validate_stage1_steps.py
+/scripts/validate_sublineage_concordance.py
+/scripts/test_gpu_vs_cpu.py
+/scripts/slurm_extract_cosmx.sh
+/scripts/slurm_extract_rdata.sh
+/scripts/slurm_validate_spacet.sh
+/scripts/slurm_sublineage_validation.sh
+/scripts/slurm_test_bulk.sh
+/scripts/slurm_test_gpu.sh
+/scripts/slurm_test_spearmanr.sh
