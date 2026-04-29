@@ -74,6 +74,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     libcairo2-dev \
     libxt-dev \
+    # Required by R `fs` package (transitively pulled by SpaCET deps
+    # scatterpie/shiny/plotly/DT/factoextra). Without libuv-dev, `fs`
+    # fails to compile and the SpaCET source install aborts.
+    libuv1-dev \
+    # Required by R `igraph` (used by SpaCET's lineage tree code).
+    libglpk-dev \
+    libgmp-dev \
     # Linear algebra (required for scipy, sklearn, SpaCET)
     liblapack-dev \
     libblas-dev \
