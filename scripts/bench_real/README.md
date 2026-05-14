@@ -28,8 +28,10 @@ mixing ratios) — the cleanest available ground truth.
    [authentication]
    authtoken=<your-PAT>
    ```
-4. Install the bench extra into your spatial-gpu conda env:
+4. Install the bench extra into the `secactpy` conda env (the working env
+   for this repo — verified to have `spatialgpu` installed editably):
    ```bash
+   source ~/bin/myconda && conda activate secactpy
    pip install -e '.[bench]'
    ```
 

@@ -13,7 +13,7 @@
 
 set -euo pipefail
 source ~/bin/myconda
-conda activate spatialgpu
+conda activate secactpy
 
 cd /vf/users/parks34/projects/0sigdiscov/pkg_dev/spatial-gpu
 

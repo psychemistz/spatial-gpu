@@ -13,7 +13,7 @@ set -euo pipefail
 # Requires synapseclient in the conda env (pip install synapseclient).
 
 source ~/bin/myconda
-conda activate spatialgpu  # or whatever your active env is — see scripts/bench_real/README.md
+conda activate secactpy
 
 cd /vf/users/parks34/projects/0sigdiscov/pkg_dev/spatial-gpu
 
