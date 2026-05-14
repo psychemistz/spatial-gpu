@@ -150,6 +150,9 @@ CLAUDE.md
 # Local instruction files
 INSTRUCTION.md
 
+# Reference PDFs dropped into repo root (papers, not project artifacts)
+/*.pdf
+
 # T8 benchmark outputs (regenerable via scripts/bench_spacet_*.py)
 /docs/outputs/t8_real_bulk_*.csv
 /docs/outputs/t8_spacet_v*.csv

@@ -55,8 +55,8 @@ cuda = [
 ]
 cuda11 = [
     "cupy-cuda11x>=11.0",
-    "cuml-cu11>=24.0",
-    "cugraph-cu11>=24.0",
+    "cuml-cu11>=23.12,<24.0",
+    "cugraph-cu11>=23.12,<24.0",
 ]
 visualization = [
     "napari>=0.4.17",
@@ -94,9 +94,10 @@ docs = [
 ]
 
 [project.urls]
-Documentation = "https://spatial-gpu.readthedocs.io"
-Repository = "https://github.com/spatial-gpu/spatial-gpu"
-Issues = "https://github.com/spatial-gpu/spatial-gpu/issues"
+Homepage = "https://psychemistz.github.io/spatial-gpu/"
+Documentation = "https://psychemistz.github.io/spatial-gpu/"
+Repository = "https://github.com/psychemistz/spatial-gpu"
+Issues = "https://github.com/psychemistz/spatial-gpu/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["spatialgpu"]
