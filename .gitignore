@@ -153,6 +153,10 @@ INSTRUCTION.md
 # Reference PDFs dropped into repo root (papers, not project artifacts)
 /*.pdf
 
+# Real-bulk benchmark outputs (regenerable; see scripts/bench_real/README.md)
+/bench_outputs/
+/scripts/bench_real/__pycache__/
+
 # T8 benchmark outputs (regenerable via scripts/bench_spacet_*.py)
 /docs/outputs/t8_real_bulk_*.csv
 /docs/outputs/t8_spacet_v*.csv

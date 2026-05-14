@@ -73,6 +73,12 @@ segmentation = [
 secact = [
     "secactpy>=0.2.3",
 ]
+bench = [
+    "synapseclient>=4.0",
+    "matplotlib>=3.5",
+    "seaborn>=0.12",
+    "pyarrow>=10.0",
+]
 all = [
     "spatial-gpu[cuda,visualization,segmentation,secact]",
 ]
